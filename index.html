@@ -1,0 +1,114 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenMower Map Editor</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="panel">
+        <h1>OpenMower Map Editor</h1>
+
+        <label class="file-input">
+          <span>Open map JSON</span>
+          <input id="jsonFile" type="file" accept=".json,application/json" />
+        </label>
+
+        <div class="geo-box">
+          <h2>Real-world projection</h2>
+          <p class="hint">
+            Use the coordinates from your OpenMower config. You can read them with
+            <code>openmower config ros</code>; use <code>datum_lat</code> and
+            <code>datum_long</code>.
+          </p>
+          <label>
+            Origin latitude
+            <input id="originLat" type="number" step="0.000001" value="52.52" />
+          </label>
+          <label>
+            Origin longitude
+            <input id="originLng" type="number" step="0.000001" value="13.405" />
+          </label>
+          <button id="applyProjection" type="button">Apply projection</button>
+        </div>
+
+        <label>
+          Area
+          <select id="areaSelect"></select>
+        </label>
+
+        <div class="controls">
+          <p class="controls-hint">Hover for a tooltip.</p>
+          <button id="undoEdit" type="button" title="Undo last edit action">Undo</button>
+          <button id="redoEdit" type="button" title="Redo last undone action">Redo</button>
+          <button
+            id="toggleMultiSelect"
+            type="button"
+            title="Select multiple points and drag them together"
+          >
+            Multi-select: OFF
+          </button>
+          <button id="toggleAdd" type="button" title="Click map to add a new border point">
+            Add point: OFF
+          </button>
+          <button
+            id="toggleSnap"
+            type="button"
+            title="Click start and end points; points between become straight and equally spaced"
+          >
+            Snap line: OFF
+          </button>
+          <label>
+            Cleanup threshold (m)
+            <input
+              id="cleanupThreshold"
+              type="number"
+              value="0.08"
+              step="0.01"
+              min="0.01"
+              title="Points closer than this will be merged"
+            />
+          </label>
+          <button
+            id="cleanupPoints"
+            type="button"
+            title="Remove near-duplicate points based on cleanup threshold"
+          >
+            Cleanup close points
+          </button>
+          <button id="removePoint" type="button" title="Delete currently selected point">
+            Remove selected
+          </button>
+          <button id="downloadJson" type="button" title="Download current edited map JSON">
+            Download JSON
+          </button>
+        </div>
+
+        <p class="hint">
+          Click a point to select it. Drag the selected point marker to move it.
+          In add mode, click the map to insert a point after selection.
+          In snap mode, click two existing points; all points between them snap to a straight line and are equally spaced.
+        </p>
+
+        <div id="status" class="status">Load a map to begin.</div>
+      </aside>
+
+      <main id="map"></main>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
