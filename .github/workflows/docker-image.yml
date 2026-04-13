@@ -2,12 +2,19 @@ name: Build and push
 on:
   push:
     branches: [main]
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: macbre/push-to-ghcr@master
-        with:
-          image_name: ${{ github.repository }}
+    - uses: actions/checkout@v4
+    - uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - uses: docker/build-push-action@v6
+      with:
+        push: true
+        tags: ghcr.io/${{ github.repository }}:latest
