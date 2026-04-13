@@ -23,6 +23,8 @@ map.json
 *.local.json
 /data/
 *.bak.*
+params/
+ros/
 
 # Build/runtime
 dist/

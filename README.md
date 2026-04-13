@@ -1,6 +1,6 @@
 # OpenMower Map Editor
 
-Dark-mode, browser-based map editor for OpenMower JSON maps, packaged in Docker with an optional built-in save API for direct mower writes.
+Dark-mode, browser-based map editor for OpenMower JSON maps, deployed via Dockge on OpenMower.
 
 > **Vibecoded notice:** this project is **purely vibecoded**.
 
@@ -22,14 +22,15 @@ Dark-mode, browser-based map editor for OpenMower JSON maps, packaged in Docker 
 - Automatic timestamped backup before each direct save
 - Download updated JSON
 
-## Quick Start (Docker)
+## Deploy via Dockge (OpenMower)
 
 ```bash
 docker build -t openmower-map-editor .
 docker run --rm -p 8080:8090 openmower-map-editor
 ```
 
-Open [http://localhost:8080](http://localhost:8080)
+4. Click **Deploy**
+5. Open the editor at [http://openmower:5080](http://openmower:5080)
 
 ## Direct Save To A Mower
 
@@ -49,12 +50,13 @@ If no writable map directory is mounted, you can still use `Download JSON` as be
 
 ## Usage
 
-1. Load your map JSON with the file picker (or place `map.json` in this folder for auto-load).
-2. Set origin coordinates from OpenMower:
-   - run `openmower config ros`
-   - use `datum_lat` and `datum_long`
-3. Pick an area in the area selector.
-4. Edit points using:
+1. Open the app at [http://openmower:5080](http://openmower:5080).
+2. On startup, the editor tries to:
+   - load `/data/ros/map.json`
+   - read `/data/params/mower_params.yaml` and apply `datum_lat` / `datum_long`
+3. If no map is found, load one manually with the file picker.
+4. Pick an area in the area selector.
+5. Edit points using:
    - **Single edit:** click point, drag marker
    - **Add mode:** insert new points on click
    - **Snap line:** click start + end points

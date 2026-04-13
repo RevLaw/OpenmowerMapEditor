@@ -1,0 +1,14 @@
+﻿services:
+  openmower-map-editor:
+    image: ghcr.io/revlaw/openmowermapeditor:latest
+    container_name: openmower-map-editor
+    ports:
+      - "5080:80"
+    volumes:
+      - type: bind
+        source: /home/openmower/params
+        target: /data/params
+        read_only: true
+      - type: bind
+        source: /home/openmower/ros
+        target: /data/ros
