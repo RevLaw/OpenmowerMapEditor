@@ -1,6 +1,6 @@
 ﻿# OpenMower Map Editor
 
-Dark-mode, browser-based map editor for OpenMower JSON maps, packaged in Docker.
+Dark-mode, browser-based map editor for OpenMower JSON maps, deployed via Dockge on OpenMower.
 
 > **Vibecoded notice:** this project is **purely vibecoded**.
 
@@ -18,48 +18,53 @@ Dark-mode, browser-based map editor for OpenMower JSON maps, packaged in Docker.
 - Cleanup near-duplicate points with a meter threshold
 - Move the home station marker (`docking_stations[0].position`)
 - Undo/redo history for editing actions
-- Download updated JSON
+- Auto-load `/data/ros/map.json` (if present)
+- Auto-fill projection from `/data/params/mower_params.yaml` (`datum_lat`, `datum_long`)
+- Save directly to `/data/ros/map.json` with automatic timestamped backup
 
-## Quick Start (Docker)
+## Deploy via Dockge (OpenMower)
 
-```bash
-docker build -t openmower-map-editor .
-docker run --rm -p 8080:80 openmower-map-editor
+1. Open Dockge: [http://openmower:5001](http://openmower:5001)
+2. Click **+ Compose**
+3. Paste this into the `compose.yaml` field:
+
+```yaml
+services:
+  openmower-map-editor:
+    image: ghcr.io/revlaw/openmowermapeditor:latest
+    container_name: openmower-map-editor
+    ports:
+      - "5080:80"
+    volumes:
+      - type: bind
+        source: /home/openmower/params
+        target: /data/params
+        read_only: true
+      - type: bind
+        source: /home/openmower/ros
+        target: /data/ros
 ```
 
-Open [http://localhost:8080](http://localhost:8080)
-
-### Docker Compose with OpenMower mounts
-
-```bash
-docker compose up --build
-```
-
-The included `docker-compose.yml` mounts:
-
-- `/home/openmower/params` -> `/data/params` (read-only)
-- `/home/openmower/ros` -> `/data/ros` (read/write)
-
-Behavior in the web app:
-
-- If `/data/params/mower_params.yaml` exists, `datum_lat` and `datum_long` are auto-filled.
-- If `/data/ros/map.json` exists, it is auto-loaded on startup.
-- "Save map.json" writes to `/data/ros/map.json` and creates a timestamped backup first.
+4. Click **Deploy**
+5. Open the editor at [http://openmower:5080](http://openmower:5080)
 
 ## Usage
 
-1. Load your map JSON with the file picker (or place `map.json` in this folder for auto-load).
-2. Set origin coordinates from OpenMower:
-   - run `openmower config ros`
-   - use `datum_lat` and `datum_long`
-3. Pick an area in the area selector.
-4. Edit points using:
+1. Open the app at [http://openmower:5080](http://openmower:5080).
+2. On startup, the editor tries to:
+   - load `/data/ros/map.json`
+   - read `/data/params/mower_params.yaml` and apply `datum_lat` / `datum_long`
+3. If no map is found, load one manually with the file picker.
+4. Pick an area in the area selector.
+5. Edit points using:
    - **Single edit:** click point, drag marker
    - **Add mode:** insert new points on click
    - **Snap line:** click start + end points
    - **Multi-select:** click points or `Shift + drag` rectangle, then drag group handle
    - **Cleanup:** remove very close points with threshold
-5. Download the edited JSON.
+6. Click **Save map.json** to write back to `/data/ros/map.json`.
+   - A backup file is created automatically before overwrite (`map.json.bak-<timestamp>`).
+   - If direct save is unavailable, fallback is downloading the map as `openmower-map-edited.json`.
 
 ## Privacy / GitHub Safety
 
