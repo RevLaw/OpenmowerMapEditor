@@ -48,6 +48,7 @@ const ui = {
   cleanupThreshold: document.getElementById("cleanupThreshold"),
   cleanupPoints: document.getElementById("cleanupPoints"),
   removePoint: document.getElementById("removePoint"),
+  saveToMower: document.getElementById("saveToMower"),
   downloadJson: document.getElementById("downloadJson"),
   status: document.getElementById("status"),
   originLat: document.getElementById("originLat"),
@@ -485,6 +486,38 @@ function loadMapFromText(text) {
   );
 }
 
+async function saveMapToMower() {
+  if (!state.rawMap) {
+    updateStatus("Load a map first.");
+    return;
+  }
+
+  persistEditorMeta();
+  ui.saveToMower.disabled = true;
+  ui.saveToMower.textContent = "Saving...";
+
+  try {
+    const response = await fetch("/api/save", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(state.rawMap),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || `Save failed with HTTP ${response.status}`);
+    }
+    const backupHint = result.backup_path ? ` Backup: ${result.backup_path}` : "";
+    updateStatus(`Saved map to mower.${backupHint}`);
+  } catch (error) {
+    updateStatus(`Save failed: ${error.message}`);
+  } finally {
+    ui.saveToMower.disabled = false;
+    ui.saveToMower.textContent = "Save to mower";
+  }
+}
+
 ui.file.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -790,6 +823,10 @@ ui.cleanupPoints.addEventListener("click", () => {
   const removed = cleanupClosePoints(thresholdMeters);
   renderMap();
   updateStatus(`Cleanup finished. Removed ${removed} close point(s).`);
+});
+
+ui.saveToMower.addEventListener("click", () => {
+  saveMapToMower();
 });
 
 ui.downloadJson.addEventListener("click", () => {

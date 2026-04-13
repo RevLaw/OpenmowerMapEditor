@@ -1,6 +1,6 @@
-﻿# OpenMower Map Editor
+# OpenMower Map Editor
 
-Dark-mode, browser-based map editor for OpenMower JSON maps, packaged in Docker.
+Dark-mode, browser-based map editor for OpenMower JSON maps, packaged in Docker with an optional built-in save API for direct mower writes.
 
 > **Vibecoded notice:** this project is **purely vibecoded**.
 
@@ -18,16 +18,34 @@ Dark-mode, browser-based map editor for OpenMower JSON maps, packaged in Docker.
 - Cleanup near-duplicate points with a meter threshold
 - Move the home station marker (`docking_stations[0].position`)
 - Undo/redo history for editing actions
+- Save the edited map directly back to the mower via `Save to mower`
+- Automatic timestamped backup before each direct save
 - Download updated JSON
 
 ## Quick Start (Docker)
 
 ```bash
 docker build -t openmower-map-editor .
-docker run --rm -p 8080:80 openmower-map-editor
+docker run --rm -p 8080:8090 openmower-map-editor
 ```
 
 Open [http://localhost:8080](http://localhost:8080)
+
+## Direct Save To A Mower
+
+Mount your OpenMower ROS directory into the container to enable the `Save to mower` button:
+
+```bash
+docker run --rm -p 8080:8090 -v /home/openmower/ros:/data/ros openmower-map-editor
+```
+
+The app will:
+
+- read `/data/ros/map.json`
+- create a backup like `/data/ros/map.json.bak.YYYYMMDD-HHMMSS`
+- atomically replace `map.json` after a successful save
+
+If no writable map directory is mounted, you can still use `Download JSON` as before.
 
 ## Usage
 
@@ -42,13 +60,15 @@ Open [http://localhost:8080](http://localhost:8080)
    - **Snap line:** click start + end points
    - **Multi-select:** click points or `Shift + drag` rectangle, then drag group handle
    - **Cleanup:** remove very close points with threshold
-5. Download the edited JSON.
+5. Either save directly with **Save to mower** or export with **Download JSON**.
 
 ## Privacy / GitHub Safety
 
 The included `.gitignore` excludes local/private artifacts such as:
 
 - `map.json` and `*.local.json`
+- backup files such as `*.bak.*`
+- mounted runtime data in `/data/`
 - Cursor local folders (`.cursor/`, `terminals/`, `agent-transcripts/`, `mcps/`)
 - common IDE/log/temp files
 
@@ -56,3 +76,4 @@ The included `.gitignore` excludes local/private artifacts such as:
 
 - OpenMower uses local meter coordinates (`x`, `y`), so map projection is an approximation from your configured datum.
 - Always validate edited borders before deploying to a mower in production.
+- OpenMower services may need a restart after saving a changed `map.json`, depending on your setup.

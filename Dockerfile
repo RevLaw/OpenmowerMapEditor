@@ -1,8 +1,18 @@
-﻿FROM nginx:1.27-alpine
+FROM python:3.12-alpine
 
-WORKDIR /usr/share/nginx/html
+WORKDIR /app
 
-COPY . .
+COPY index.html /app/site/index.html
+COPY app.js /app/site/app.js
+COPY styles.css /app/site/styles.css
+COPY screenshot1.jpg /app/site/screenshot1.jpg
+COPY server.py /app/server.py
 
-EXPOSE 80
+ENV SITE_DIR=/app/site
+ENV MAP_PATH=/data/ros/map.json
+ENV HOST=0.0.0.0
+ENV PORT=8090
 
+EXPOSE 8090
+
+CMD ["python", "/app/server.py"]

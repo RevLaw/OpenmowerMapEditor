@@ -21,6 +21,8 @@ mcps/
 # Local map data (can include private property layout)
 map.json
 *.local.json
+/data/
+*.bak.*
 
 # Build/runtime
 dist/

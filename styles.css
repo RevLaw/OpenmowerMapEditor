@@ -63,6 +63,15 @@ button:hover {
   transform: translateY(-1px);
 }
 
+#saveToMower {
+  background: linear-gradient(180deg, #14532d, #166534);
+  border-color: #166534;
+}
+
+#saveToMower:hover {
+  border-color: #22c55e;
+}
+
 .controls {
   display: grid;
   gap: 8px;
