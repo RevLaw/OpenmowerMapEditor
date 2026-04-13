@@ -1,0 +1,14 @@
+﻿{
+  "name": "openmower-map-editor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenMower map editor with host file integration",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "js-yaml": "^4.1.0"
+  }
+}

@@ -29,6 +29,23 @@ docker run --rm -p 8080:80 openmower-map-editor
 
 Open [http://localhost:8080](http://localhost:8080)
 
+### Docker Compose with OpenMower mounts
+
+```bash
+docker compose up --build
+```
+
+The included `docker-compose.yml` mounts:
+
+- `/home/openmower/params` -> `/data/params` (read-only)
+- `/home/openmower/ros` -> `/data/ros` (read/write)
+
+Behavior in the web app:
+
+- If `/data/params/mower_params.yaml` exists, `datum_lat` and `datum_long` are auto-filled.
+- If `/data/ros/map.json` exists, it is auto-loaded on startup.
+- "Save map.json" writes to `/data/ros/map.json` and creates a timestamped backup first.
+
 ## Usage
 
 1. Load your map JSON with the file picker (or place `map.json` in this folder for auto-load).

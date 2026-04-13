@@ -48,7 +48,7 @@ const ui = {
   cleanupThreshold: document.getElementById("cleanupThreshold"),
   cleanupPoints: document.getElementById("cleanupPoints"),
   removePoint: document.getElementById("removePoint"),
-  downloadJson: document.getElementById("downloadJson"),
+  saveJson: document.getElementById("downloadJson"),
   status: document.getElementById("status"),
   originLat: document.getElementById("originLat"),
   originLng: document.getElementById("originLng"),
@@ -57,6 +57,18 @@ const ui = {
 
 function updateStatus(message) {
   ui.status.textContent = message;
+}
+
+function triggerJsonDownload() {
+  const blob = new Blob([JSON.stringify(state.rawMap, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "openmower-map-edited.json";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function setAddMode(enabled) {
@@ -792,20 +804,27 @@ ui.cleanupPoints.addEventListener("click", () => {
   updateStatus(`Cleanup finished. Removed ${removed} close point(s).`);
 });
 
-ui.downloadJson.addEventListener("click", () => {
+ui.saveJson.addEventListener("click", async () => {
   if (!state.rawMap) {
     updateStatus("Load a map first.");
     return;
   }
-  const blob = new Blob([JSON.stringify(state.rawMap, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "openmower-map-edited.json";
-  a.click();
-  URL.revokeObjectURL(url);
+  try {
+    const response = await fetch("./api/map", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(state.rawMap),
+    });
+    if (!response.ok) {
+      throw new Error("Server save failed");
+    }
+    updateStatus("Saved /data/ros/map.json (backup created).");
+  } catch (_error) {
+    triggerJsonDownload();
+    updateStatus("Server save unavailable. Downloaded JSON instead.");
+  }
 });
 
 ui.applyProjection.addEventListener("click", () => {
@@ -860,9 +879,24 @@ ui.redoEdit.addEventListener("click", () => {
 
 applyTileLayer();
 
-fetch("./map.json")
-  .then((res) => (res.ok ? res.text() : Promise.reject(new Error("No sample map found."))))
-  .then(loadMapFromText)
+fetch("./api/params")
+  .then((res) => (res.ok ? res.json() : Promise.reject(new Error("No params found."))))
+  .then((params) => {
+    if (Number.isFinite(params.datumLat) && Number.isFinite(params.datumLng)) {
+      state.originLat = params.datumLat;
+      state.originLng = params.datumLng;
+      ui.originLat.value = String(state.originLat);
+      ui.originLng.value = String(state.originLng);
+    }
+  })
+  .catch(() => {});
+
+fetch("./api/map")
+  .then((res) => (res.ok ? res.text() : Promise.reject(new Error("No map found."))))
+  .then((text) => {
+    loadMapFromText(text);
+    updateStatus("Loaded /data/ros/map.json.");
+  })
   .catch(() => {
     updateStatus("Load a map to begin.");
   });

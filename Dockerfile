@@ -1,8 +1,13 @@
-﻿FROM nginx:1.27-alpine
+﻿FROM node:20-alpine
 
-WORKDIR /usr/share/nginx/html
+WORKDIR /app
+
+COPY package.json ./
+RUN npm install --omit=dev
 
 COPY . .
 
 EXPOSE 80
+
+CMD ["npm", "start"]
 
