@@ -48,7 +48,8 @@ const ui = {
   cleanupThreshold: document.getElementById("cleanupThreshold"),
   cleanupPoints: document.getElementById("cleanupPoints"),
   removePoint: document.getElementById("removePoint"),
-  saveJson: document.getElementById("downloadJson"),
+  saveMapJson: document.getElementById("saveMapJson"),
+  saveMapJsonRestart: document.getElementById("saveMapJsonRestart"),
   status: document.getElementById("status"),
   originLat: document.getElementById("originLat"),
   originLng: document.getElementById("originLng"),
@@ -69,6 +70,21 @@ function triggerJsonDownload() {
   a.download = "openmower-map-edited.json";
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function saveMapToServer({ restart }) {
+  const url = restart ? "./api/map?restart=1" : "./api/map";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(state.rawMap),
+  });
+  if (!response.ok) {
+    throw new Error("Server save failed");
+  }
+  return response.json();
 }
 
 function setAddMode(enabled) {
@@ -804,23 +820,39 @@ ui.cleanupPoints.addEventListener("click", () => {
   updateStatus(`Cleanup finished. Removed ${removed} close point(s).`);
 });
 
-ui.saveJson.addEventListener("click", async () => {
+ui.saveMapJson.addEventListener("click", async () => {
   if (!state.rawMap) {
     updateStatus("Load a map first.");
     return;
   }
   try {
-    const response = await fetch("./api/map", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(state.rawMap),
-    });
-    if (!response.ok) {
-      throw new Error("Server save failed");
-    }
+    await saveMapToServer({ restart: false });
     updateStatus("Saved /data/ros/map.json (backup created).");
+  } catch (_error) {
+    triggerJsonDownload();
+    updateStatus("Server save unavailable. Downloaded JSON instead.");
+  }
+});
+
+ui.saveMapJsonRestart.addEventListener("click", async () => {
+  if (!state.rawMap) {
+    updateStatus("Load a map first.");
+    return;
+  }
+  try {
+    const saveResult = await saveMapToServer({ restart: true });
+    const containerName = saveResult?.restartContainer || "open_mower_ros";
+    if (saveResult?.restartResult?.restarted) {
+      updateStatus(
+        `Saved /data/ros/map.json, backup created, restarted '${containerName}'.`
+      );
+    } else if (saveResult?.restartResult?.reason) {
+      updateStatus(
+        `Saved /data/ros/map.json (backup created). Restart skipped: ${saveResult.restartResult.reason}.`
+      );
+    } else {
+      updateStatus("Saved /data/ros/map.json (backup created).");
+    }
   } catch (_error) {
     triggerJsonDownload();
     updateStatus("Server save unavailable. Downloaded JSON instead.");

@@ -63,6 +63,16 @@ button:hover {
   transform: translateY(-1px);
 }
 
+button.btn-warn {
+  border-color: rgba(251, 191, 36, 0.55);
+  background: linear-gradient(180deg, #7c2d12, #b45309);
+  color: #fff7ed;
+}
+
+button.btn-warn:hover {
+  border-color: rgba(253, 230, 138, 0.75);
+}
+
 .controls {
   display: grid;
   gap: 8px;

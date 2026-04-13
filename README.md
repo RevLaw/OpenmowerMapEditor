@@ -21,6 +21,7 @@ Dark-mode, browser-based map editor for OpenMower JSON maps, deployed via Dockge
 - Auto-load `/data/ros/map.json` (if present)
 - Auto-fill projection from `/data/params/mower_params.yaml` (`datum_lat`, `datum_long`)
 - Save directly to `/data/ros/map.json` with automatic timestamped backup
+- Optional: restart the container named in `OPENMOWER_CONTAINER_NAME` via mounted Docker socket (Save + restart)
 
 ## Deploy via Dockge (OpenMower)
 
@@ -43,6 +44,11 @@ services:
       - type: bind
         source: /home/openmower/ros
         target: /data/ros
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    environment:
+      OPENMOWER_CONTAINER_NAME: open_mower_ros
 ```
 
 4. Click **Deploy**
@@ -62,8 +68,9 @@ services:
    - **Snap line:** click start + end points
    - **Multi-select:** click points or `Shift + drag` rectangle, then drag group handle
    - **Cleanup:** remove very close points with threshold
-6. Click **Save map.json** to write back to `/data/ros/map.json`.
-   - A backup file is created automatically before overwrite (`map.json.bak-<timestamp>`).
+6. Save your edits:
+   - **Save map.json** writes to `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
+   - **Save + restart ROS** does the same, then restarts the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
    - If direct save is unavailable, fallback is downloading the map as `openmower-map-edited.json`.
 
 ## Privacy / GitHub Safety

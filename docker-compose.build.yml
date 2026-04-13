@@ -14,3 +14,8 @@
       - type: bind
         source: ./ros
         target: /data/ros
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    environment:
+      OPENMOWER_CONTAINER_NAME: open_mower_ros
