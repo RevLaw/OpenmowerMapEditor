@@ -5,6 +5,11 @@
   multiSelectMode: false,
   selectedPointIndices: [],
   addMode: false,
+  brushMode: false,
+  cleanupMode: false,
+  brushPainting: false,
+  brushStrokeMovedCount: 0,
+  brushCursorLatLng: null,
   snapMode: false,
   snapPointIndices: [],
   boxSelectActive: false,
@@ -28,6 +33,7 @@ const layers = {
   dockingMarker: null,
   snapGuideLine: null,
   boxSelectRect: null,
+  brushCursor: null,
 };
 
 const history = {
@@ -44,8 +50,16 @@ const ui = {
   redoEdit: document.getElementById("redoEdit"),
   toggleMultiSelect: document.getElementById("toggleMultiSelect"),
   toggleAdd: document.getElementById("toggleAdd"),
+  toggleBrush: document.getElementById("toggleBrush"),
   toggleSnap: document.getElementById("toggleSnap"),
+  brushRadius: document.getElementById("brushRadius"),
+  brushRadiusValue: document.getElementById("brushRadiusValue"),
+  brushStrength: document.getElementById("brushStrength"),
+  brushStrengthValue: document.getElementById("brushStrengthValue"),
+  brushControls: document.getElementById("brushControls"),
   cleanupThreshold: document.getElementById("cleanupThreshold"),
+  cleanupThresholdValue: document.getElementById("cleanupThresholdValue"),
+  cleanupControls: document.getElementById("cleanupControls"),
   cleanupPoints: document.getElementById("cleanupPoints"),
   removePoint: document.getElementById("removePoint"),
   saveMapJson: document.getElementById("saveMapJson"),
@@ -58,6 +72,41 @@ const ui = {
 
 function updateStatus(message) {
   ui.status.textContent = message;
+}
+
+function formatSliderValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "0";
+  return numeric.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function syncSliderLabels() {
+  ui.brushRadiusValue.textContent = formatSliderValue(ui.brushRadius.value);
+  ui.brushStrengthValue.textContent = formatSliderValue(ui.brushStrength.value);
+  ui.cleanupThresholdValue.textContent = formatSliderValue(ui.cleanupThreshold.value);
+}
+
+function readPositiveSliderValue(input, fallbackValue) {
+  const numeric = Number(input.value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallbackValue;
+}
+
+function refreshToolButtons() {
+  ui.toggleMultiSelect.classList.toggle("is-active", state.multiSelectMode);
+  ui.toggleAdd.classList.toggle("is-active", state.addMode);
+  ui.toggleBrush.classList.toggle("is-active", state.brushMode);
+  ui.toggleSnap.classList.toggle("is-active", state.snapMode);
+  ui.cleanupPoints.classList.toggle("is-active", state.cleanupMode);
+}
+
+function refreshToolPanels() {
+  ui.brushControls.classList.toggle("is-visible", state.brushMode);
+  ui.cleanupControls.classList.toggle("is-visible", state.cleanupMode);
+}
+
+function refreshToolUi() {
+  refreshToolButtons();
+  refreshToolPanels();
 }
 
 function triggerJsonDownload() {
@@ -89,15 +138,76 @@ async function saveMapToServer({ restart }) {
 
 function setAddMode(enabled) {
   state.addMode = enabled;
-  ui.toggleAdd.textContent = `Add point: ${enabled ? "ON" : "OFF"}`;
+  refreshToolUi();
+}
+
+function setBrushMode(enabled) {
+  state.brushMode = enabled;
+  refreshToolUi();
+  if (!enabled) {
+    state.brushPainting = false;
+    state.brushStrokeMovedCount = 0;
+    state.brushCursorLatLng = null;
+    if (layers.brushCursor) {
+      map.removeLayer(layers.brushCursor);
+      layers.brushCursor = null;
+    }
+    map.getContainer().style.cursor = "";
+    map.dragging.enable();
+  }
+}
+
+function updateBrushCursorPreview(latlng) {
+  state.brushCursorLatLng = latlng;
+  if (!state.brushMode) return;
+
+  const radius = Number(ui.brushRadius.value);
+  const radiusMeters = Number.isFinite(radius) && radius > 0 ? radius : 0.35;
+  if (layers.brushCursor) {
+    layers.brushCursor.setLatLng(latlng);
+    layers.brushCursor.setRadius(radiusMeters);
+    return;
+  }
+
+  layers.brushCursor = L.circle(latlng, {
+    radius: radiusMeters,
+    color: "#38bdf8",
+    weight: 1,
+    opacity: 0.9,
+    fillColor: "#38bdf8",
+    fillOpacity: 0.08,
+    interactive: false,
+  }).addTo(map);
 }
 
 function setMultiSelectMode(enabled) {
   state.multiSelectMode = enabled;
-  ui.toggleMultiSelect.textContent = `Multi-select: ${enabled ? "ON" : "OFF"}`;
   if (!enabled) {
     state.selectedPointIndices = [];
   }
+  refreshToolUi();
+}
+
+function setSnapMode(enabled) {
+  state.snapMode = enabled;
+  if (!enabled) {
+    state.snapPointIndices = [];
+  }
+  refreshToolUi();
+}
+
+function setCleanupMode(enabled) {
+  state.cleanupMode = enabled;
+  refreshToolUi();
+}
+
+function deactivateEditingModes(options = {}) {
+  const keep = options.keep || null;
+  if (keep !== "multi") setMultiSelectMode(false);
+  if (keep !== "add") setAddMode(false);
+  if (keep !== "brush") setBrushMode(false);
+  if (keep !== "snap") setSnapMode(false);
+  if (keep !== "cleanup") setCleanupMode(false);
 }
 
 function cloneMapData(mapData) {
@@ -128,11 +238,10 @@ function restoreSnapshot(snapshot) {
   ui.originLat.value = String(state.originLat);
   ui.originLng.value = String(state.originLng);
   state.addMode = false;
-  state.snapMode = false;
-  state.snapPointIndices = [];
+  setBrushMode(false);
+  setSnapMode(false);
+  setCleanupMode(false);
   setMultiSelectMode(false);
-  ui.toggleAdd.textContent = "Add point: OFF";
-  ui.toggleSnap.textContent = "Snap line: OFF";
   refreshAreaSelect();
   renderMap();
 }
@@ -433,6 +542,9 @@ function renderMap() {
   }
 
   renderDockingStation();
+  if (state.brushMode && state.brushCursorLatLng) {
+    updateBrushCursorPreview(state.brushCursorLatLng);
+  }
 }
 
 function renderDockingStation() {
@@ -501,6 +613,7 @@ function loadMapFromText(text) {
   state.pointIndex = null;
   state.snapPointIndices = [];
   state.selectedPointIndices = [];
+  setCleanupMode(false);
   history.undoStack = [];
   history.redoStack = [];
   applyTileLayer();
@@ -535,10 +648,7 @@ ui.areaSelect.addEventListener("change", () => {
 ui.toggleMultiSelect.addEventListener("click", () => {
   setMultiSelectMode(!state.multiSelectMode);
   if (state.multiSelectMode) {
-    setAddMode(false);
-    state.snapMode = false;
-    state.snapPointIndices = [];
-    ui.toggleSnap.textContent = "Snap line: OFF";
+    deactivateEditingModes({ keep: "multi" });
     updateStatus(
       "Multi-select ON: click points or use Shift+drag box select, then drag group handle."
     );
@@ -558,9 +668,7 @@ ui.toggleMultiSelect.addEventListener("click", () => {
 ui.toggleAdd.addEventListener("click", () => {
   setAddMode(!state.addMode);
   if (state.addMode) {
-    state.snapMode = false;
-    state.snapPointIndices = [];
-    ui.toggleSnap.textContent = "Snap line: OFF";
+    deactivateEditingModes({ keep: "add" });
   }
   updateStatus(
     state.addMode
@@ -569,14 +677,41 @@ ui.toggleAdd.addEventListener("click", () => {
   );
 });
 
-ui.toggleSnap.addEventListener("click", () => {
-  state.snapMode = !state.snapMode;
-  state.snapPointIndices = [];
-  if (state.snapMode) {
-    setAddMode(false);
-    setMultiSelectMode(false);
+ui.toggleBrush.addEventListener("click", () => {
+  setBrushMode(!state.brushMode);
+  if (state.brushMode) {
+    deactivateEditingModes({ keep: "brush" });
+    updateStatus("Push brush ON: click or hold and drag to push nearby points outward.");
+    map.getContainer().style.cursor = "crosshair";
+    if (state.brushCursorLatLng) {
+      updateBrushCursorPreview(state.brushCursorLatLng);
+    }
+  } else {
+    updateStatus("Push brush OFF.");
+    map.getContainer().style.cursor = "";
   }
-  ui.toggleSnap.textContent = `Snap line: ${state.snapMode ? "ON" : "OFF"}`;
+  renderMap();
+});
+
+ui.brushRadius.addEventListener("input", () => {
+  syncSliderLabels();
+  if (!state.brushMode || !state.brushCursorLatLng) return;
+  updateBrushCursorPreview(state.brushCursorLatLng);
+});
+
+ui.brushStrength.addEventListener("input", () => {
+  syncSliderLabels();
+});
+
+ui.cleanupThreshold.addEventListener("input", () => {
+  syncSliderLabels();
+});
+
+ui.toggleSnap.addEventListener("click", () => {
+  setSnapMode(!state.snapMode);
+  if (state.snapMode) {
+    deactivateEditingModes({ keep: "snap" });
+  }
   renderMap();
   updateStatus(
     state.snapMode
@@ -676,6 +811,50 @@ function cleanupClosePoints(thresholdMeters) {
   return removed;
 }
 
+function applyPushBrush(clickLatLng, { pushHistory = true } = {}) {
+  const outline = getCurrentOutline();
+  if (!outline) return 0;
+  ensureClosedLoop(outline);
+
+  const radiusMeters = readPositiveSliderValue(ui.brushRadius, 0.35);
+  const maxPushMeters = readPositiveSliderValue(ui.brushStrength, 0.16);
+  const editableCount = getEditablePointCount(outline);
+  const clickPointMeters = latLngToMeters(clickLatLng);
+  const updates = [];
+
+  for (let idx = 0; idx < editableCount; idx += 1) {
+    const point = outline[idx];
+    const dx = point.x - clickPointMeters.x;
+    const dy = point.y - clickPointMeters.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance <= 0.000001 || distance > radiusMeters) continue;
+
+    const influence = 1 - distance / radiusMeters;
+    const pushDistance = maxPushMeters * influence;
+    const nx = dx / distance;
+    const ny = dy / distance;
+
+    updates.push({
+      idx,
+      point: {
+        x: point.x + nx * pushDistance,
+        y: point.y + ny * pushDistance,
+      },
+    });
+  }
+
+  if (updates.length === 0) return 0;
+  if (pushHistory) {
+    pushHistorySnapshot();
+  }
+  for (let i = 0; i < updates.length; i += 1) {
+    setEditablePoint(outline, updates[i].idx, updates[i].point);
+  }
+  ensureClosedLoop(outline);
+  renderMap();
+  return updates.length;
+}
+
 function handleSnapPointSelection(idx) {
   if (state.snapPointIndices.length === 0) {
     state.snapPointIndices = [idx];
@@ -695,9 +874,7 @@ function handleSnapPointSelection(idx) {
     state.snapPointIndices[0],
     state.snapPointIndices[1]
   );
-  state.snapMode = false;
-  state.snapPointIndices = [];
-  ui.toggleSnap.textContent = "Snap line: OFF";
+  setSnapMode(false);
   renderMap();
   updateStatus(`Snapped ${changed} points onto a straight, equally spaced line.`);
 }
@@ -752,6 +929,25 @@ map.on("click", (event) => {
 });
 
 map.on("mousedown", (event) => {
+  if (state.brushMode) {
+    if (event.originalEvent?.button != null && event.originalEvent.button !== 0) {
+      return;
+    }
+    if (!state.rawMap) {
+      updateStatus("Load a map first.");
+      return;
+    }
+    updateBrushCursorPreview(event.latlng);
+    state.brushPainting = true;
+    state.brushStrokeMovedCount = 0;
+    pushHistorySnapshot();
+    map.dragging.disable();
+
+    const moved = applyPushBrush(event.latlng, { pushHistory: false });
+    state.brushStrokeMovedCount += moved;
+    return;
+  }
+
   if (!state.multiSelectMode) return;
   if (!event.originalEvent?.shiftKey) return;
   state.boxSelectActive = true;
@@ -772,14 +968,44 @@ map.on("mousedown", (event) => {
 });
 
 map.on("mousemove", (event) => {
+  if (state.brushMode) {
+    updateBrushCursorPreview(event.latlng);
+    if (state.brushPainting) {
+      const moved = applyPushBrush(event.latlng, { pushHistory: false });
+      state.brushStrokeMovedCount += moved;
+    }
+    return;
+  }
+
   if (!state.boxSelectActive || !state.boxSelectStartLatLng) return;
   if (!layers.boxSelectRect) return;
   layers.boxSelectRect.setBounds(L.latLngBounds(state.boxSelectStartLatLng, event.latlng));
 });
 
 map.on("mouseup", (event) => {
+  if (state.brushMode && state.brushPainting) {
+    state.brushPainting = false;
+    map.dragging.enable();
+    suppressNextMapClick = true;
+    ignoreMapClicksUntil = Date.now() + 200;
+    updateStatus(
+      state.brushStrokeMovedCount > 0
+        ? `Push brush moved ${state.brushStrokeMovedCount} point changes.`
+        : "Push brush hit no points. Try larger radius."
+    );
+    return;
+  }
+
   if (!state.boxSelectActive) return;
   finishBoxSelection(event.latlng);
+});
+
+map.on("mouseout", () => {
+  if (!state.brushMode) return;
+  if (state.brushPainting) {
+    state.brushPainting = false;
+    map.dragging.enable();
+  }
 });
 
 ui.removePoint.addEventListener("click", () => {
@@ -807,9 +1033,14 @@ ui.removePoint.addEventListener("click", () => {
 });
 
 ui.cleanupPoints.addEventListener("click", () => {
-  const threshold = Number(ui.cleanupThreshold.value);
-  const thresholdMeters =
-    Number.isFinite(threshold) && threshold > 0 ? threshold : 0.08;
+  if (!state.cleanupMode) {
+    setCleanupMode(true);
+    deactivateEditingModes({ keep: "cleanup" });
+    updateStatus("Cleanup tool ON: adjust slider and click 🧹 again to apply.");
+    return;
+  }
+
+  const thresholdMeters = readPositiveSliderValue(ui.cleanupThreshold, 0.08);
   if (!state.rawMap) {
     updateStatus("Load a map first.");
     return;
@@ -909,6 +1140,8 @@ ui.redoEdit.addEventListener("click", () => {
   updateStatus("Redo applied.");
 });
 
+syncSliderLabels();
+refreshToolUi();
 applyTileLayer();
 
 fetch("./api/params")

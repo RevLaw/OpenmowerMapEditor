@@ -47,46 +47,116 @@
 
         <div class="controls">
           <p class="controls-hint">Hover for a tooltip.</p>
-          <button id="undoEdit" type="button" title="Undo last edit action">Undo</button>
-          <button id="redoEdit" type="button" title="Redo last undone action">Redo</button>
-          <button
-            id="toggleMultiSelect"
-            type="button"
-            title="Select multiple points and drag them together"
-          >
-            Multi-select: OFF
-          </button>
-          <button id="toggleAdd" type="button" title="Click map to add a new border point">
-            Add point: OFF
-          </button>
-          <button
-            id="toggleSnap"
-            type="button"
-            title="Click start and end points; points between become straight and equally spaced"
-          >
-            Snap line: OFF
-          </button>
-          <label>
-            Cleanup threshold (m)
+          <div class="undo-redo-row">
+            <button id="undoEdit" class="tool-btn" type="button" title="Undo last edit action">
+              ↶
+            </button>
+            <button id="redoEdit" class="tool-btn" type="button" title="Redo last undone action">
+              ↷
+            </button>
+          </div>
+          <div class="tool-row">
+            <button
+              id="toggleMultiSelect"
+              class="tool-btn"
+              type="button"
+              title="Multi-select tool"
+              aria-label="Multi-select tool"
+            >
+              ◫
+            </button>
+            <button
+              id="toggleAdd"
+              class="tool-btn"
+              type="button"
+              title="Add point tool"
+              aria-label="Add point tool"
+            >
+              ＋
+            </button>
+            <button
+              id="toggleBrush"
+              class="tool-btn"
+              type="button"
+              title="Push brush tool"
+              aria-label="Push brush tool"
+            >
+              ◯
+            </button>
+            <button
+              id="toggleSnap"
+              class="tool-btn"
+              type="button"
+              title="Snap line tool"
+              aria-label="Snap line tool"
+            >
+              ╱
+            </button>
+            <button
+              id="cleanupPoints"
+              class="tool-btn"
+              type="button"
+              title="Cleanup tool"
+              aria-label="Cleanup close points"
+            >
+              🧹
+            </button>
+            <button
+              id="removePoint"
+              class="tool-btn tool-btn-danger"
+              type="button"
+              title="Remove selected point"
+              aria-label="Remove selected point"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div id="brushControls" class="tool-settings">
+            <label class="slider-field" for="brushRadius">
+              <span>Brush radius (m)</span>
+              <span id="brushRadiusValue">0.35</span>
+            </label>
+            <input
+              id="brushRadius"
+              type="range"
+              value="0.35"
+              step="0.05"
+              min="0.05"
+              max="2.00"
+              title="Points inside this radius are pushed"
+            />
+
+            <label class="slider-field" for="brushStrength">
+              <span>Brush strength (m)</span>
+              <span id="brushStrengthValue">0.16</span>
+            </label>
+            <input
+              id="brushStrength"
+              type="range"
+              value="0.16"
+              step="0.01"
+              min="0.01"
+              max="1.00"
+              title="Maximum push distance at brush center"
+            />
+          </div>
+
+          <div id="cleanupControls" class="tool-settings">
+            <label class="slider-field" for="cleanupThreshold">
+              <span>Cleanup threshold (m)</span>
+              <span id="cleanupThresholdValue">0.08</span>
+            </label>
             <input
               id="cleanupThreshold"
-              type="number"
+              type="range"
               value="0.08"
               step="0.01"
               min="0.01"
+              max="0.50"
               title="Points closer than this will be merged"
             />
-          </label>
-          <button
-            id="cleanupPoints"
-            type="button"
-            title="Remove near-duplicate points based on cleanup threshold"
-          >
-            Cleanup close points
-          </button>
-          <button id="removePoint" type="button" title="Delete currently selected point">
-            Remove selected
-          </button>
+          </div>
           <button
             id="saveMapJson"
             type="button"

@@ -11,13 +11,14 @@ Dark-mode, browser-based map editor for OpenMower JSON maps, deployed via Dockge
 - Edit OpenMower `areas[].outline[]` points directly on a satellite map
 - Drag single points to reposition borders precisely
 - Add and remove points
+- Push nearby points outward with a brush click/drag tool and live radius preview
 - Lock closed-loop endpoints (first/last point stay synchronized)
 - Snap a selected index range to a straight, equally spaced line
 - Multi-select points and move them together
 - Box select in multi-select mode (`Shift + drag`)
 - Cleanup near-duplicate points with a meter threshold
 - Move the home station marker (`docking_stations[0].position`)
-- Undo/redo history for editing actions
+- Undo/redo history for editing actions (arrow buttons)
 - Auto-load `/data/ros/map.json` (if present)
 - Auto-fill projection from `/data/params/mower_params.yaml` (`datum_lat`, `datum_long`)
 - Save directly to `/data/ros/map.json` with automatic timestamped backup
@@ -62,16 +63,27 @@ services:
    - read `/data/params/mower_params.yaml` and apply `datum_lat` / `datum_long`
 3. If no map is found, load one manually with the file picker.
 4. Pick an area in the area selector.
-5. Edit points using:
-   - **Single edit:** click point, drag marker
-   - **Add mode:** insert new points on click
-   - **Snap line:** click start + end points
-   - **Multi-select:** click points or `Shift + drag` rectangle, then drag group handle
-   - **Cleanup:** remove very close points with threshold
+5. Use the tool buttons below the area selector to edit your map.
 6. Save your edits:
    - **Save map.json** writes to `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
    - **Save + restart ROS** does the same, then restarts the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
    - If direct save is unavailable, fallback is downloading the map as `openmower-map-edited.json`.
+
+## Tool Legend
+
+- `↶` Undo the last edit.
+- `↷` Redo the last undone edit.
+- `◫` Multi-select tool (click points or `Shift + drag` rectangle, then drag group handle).
+- `＋` Add point tool (click map to insert a point).
+- `◯` Push brush tool (click or hold-and-drag to push nearby points away).
+- `╱` Snap line tool (pick start and end point to snap range to a straight line).
+- `🧹` Cleanup tool (first click enables cleanup mode and shows slider, second click applies cleanup).
+- `✕` Remove selected point.
+
+Tool sliders are contextual:
+
+- Brush sliders appear only while brush mode is active.
+- Cleanup slider appears only while cleanup mode is active.
 
 ## Privacy / GitHub Safety
 
