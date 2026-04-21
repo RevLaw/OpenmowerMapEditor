@@ -1,10 +1,10 @@
-# OpenMower Map Editor
+﻿# OpenMower Map Editor
 
 Dark-mode, browser-based map editor for OpenMower JSON maps, deployed via Dockge on OpenMower.
 
 > **Vibecoded notice:** this project is **purely vibecoded**.
 
-OpenMower Map Editor Screenshot
+![OpenMower Map Editor Screenshot](./screenshot1.jpg)
 
 ## Features
 
