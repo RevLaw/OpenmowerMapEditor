@@ -1,10 +1,10 @@
-﻿# OpenMower Map Editor
+# OpenMower Map Editor
 
 Dark-mode, browser-based map editor for OpenMower JSON maps, deployed via Dockge on OpenMower.
 
 > **Vibecoded notice:** this project is **purely vibecoded**.
 
-![OpenMower Map Editor Screenshot](./screenshot1.jpg)
+OpenMower Map Editor Screenshot
 
 ## Features
 
@@ -52,22 +52,26 @@ services:
       OPENMOWER_CONTAINER_NAME: open_mower_ros
 ```
 
-4. Click **Deploy**
-5. Open the editor at [http://openmower:5080](http://openmower:5080)
+1. Click **Deploy**
+2. Open the editor at [http://openmower:5080](http://openmower:5080)
 
 ## Usage
 
 1. Open the app at [http://openmower:5080](http://openmower:5080).
 2. On startup, the editor tries to:
-   - load `/data/ros/map.json`
-   - read `/data/params/mower_params.yaml` and apply `datum_lat` / `datum_long`
+  - load `/data/ros/map.json`
+  - read `/data/params/mower_params.yaml` and apply `datum_lat` / `datum_long`
 3. If no map is found, load one manually with the file picker.
 4. Pick an area in the area selector.
 5. Use the tool buttons below the area selector to edit your map.
 6. Save your edits:
-   - **Save map.json** writes to `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
-   - **Save + restart ROS** does the same, then restarts the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
-   - If direct save is unavailable, fallback is downloading the map as `openmower-map-edited.json`.
+  - **Save map.json** writes to `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
+  - **Save + restart ROS** does the same, then restarts the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
+  - If direct save is unavailable, fallback is downloading the map as `openmower-map-edited.json`.
+7. Roll back from backup (if needed):
+  - Use the **Load map/backup** dropdown (under file upload) to pick either `map.json` (running) or a `map.json.bak-`* file from `/data/ros`.
+  - The selected entry is loaded immediately.
+  - Click **Save map.json** (or **Save + restart ROS**) to make a loaded backup your active `map.json`.
 
 ## Tool Legend
 
@@ -79,6 +83,7 @@ services:
 - `╱` Snap line tool (pick start and end point to snap range to a straight line).
 - `🧹` Cleanup tool (first click enables cleanup mode and shows slider, second click applies cleanup).
 - `✕` Remove selected point.
+- `Load map/backup` dropdown Load `map.json` or a backup file directly on selection.
 
 Tool sliders are contextual:
 

@@ -17,19 +17,22 @@ body {
 
 .panel {
   border-right: 1px solid #1e293b;
-  padding: 16px;
+  padding: 18px 16px;
   overflow-y: auto;
-  background: linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
+  background: linear-gradient(180deg, #070d19 0%, #0f172a 100%);
 }
 
 .panel h1 {
-  font-size: 20px;
+  font-size: 22px;
   margin-top: 0;
+  margin-bottom: 4px;
 }
 
 .panel h2 {
-  font-size: 16px;
-  margin: 0 0 8px;
+  font-size: 14px;
+  margin: 0 0 10px;
+  letter-spacing: 0.02em;
+  color: #cbd5e1;
 }
 
 label,
@@ -73,14 +76,26 @@ button.btn-warn:hover {
   border-color: rgba(253, 230, 138, 0.75);
 }
 
-.controls {
+.panel-subtitle {
+  margin: 0 0 14px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.panel-card {
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid #223047;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.65));
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.04);
+}
+
+.controls,
+.save-actions {
   display: grid;
   gap: 8px;
-  margin: 12px 0;
-  padding: 10px;
-  border: 1px solid #1e293b;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.75);
+  margin: 0 0 12px;
 }
 
 .controls label {
@@ -137,6 +152,7 @@ button.btn-warn:hover {
 .tool-settings {
   display: none;
   gap: 6px;
+  margin-top: 2px;
 }
 
 .tool-settings.is-visible {
@@ -150,11 +166,7 @@ button.btn-warn:hover {
 }
 
 .geo-box {
-  border: 1px solid #334155;
-  background: rgba(15, 23, 42, 0.8);
-  border-radius: 12px;
-  padding: 10px;
-  margin-bottom: 12px;
+  border-color: #334155;
 }
 
 .hint {
@@ -163,8 +175,12 @@ button.btn-warn:hover {
   line-height: 1.4;
 }
 
+.panel-tip {
+  margin: 0 0 10px;
+}
+
 .status {
-  margin-top: 14px;
+  margin-top: 6px;
   font-size: 13px;
   color: #dbeafe;
   background: rgba(15, 23, 42, 0.9);

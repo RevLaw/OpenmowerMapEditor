@@ -64,6 +64,7 @@ const ui = {
   removePoint: document.getElementById("removePoint"),
   saveMapJson: document.getElementById("saveMapJson"),
   saveMapJsonRestart: document.getElementById("saveMapJsonRestart"),
+  backupSelect: document.getElementById("backupSelect"),
   status: document.getElementById("status"),
   originLat: document.getElementById("originLat"),
   originLng: document.getElementById("originLng"),
@@ -134,6 +135,47 @@ async function saveMapToServer({ restart }) {
     throw new Error("Server save failed");
   }
   return response.json();
+}
+
+async function refreshBackupList() {
+  const response = await fetch("./api/map/backups");
+  if (!response.ok) {
+    throw new Error("Failed to list backups");
+  }
+  const payload = await response.json();
+  const backups = Array.isArray(payload.backups) ? payload.backups : [];
+  ui.backupSelect.innerHTML = "";
+  if (backups.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No map files found";
+    ui.backupSelect.appendChild(option);
+    return;
+  }
+  backups.forEach((backupName) => {
+    const option = document.createElement("option");
+    option.value = backupName;
+    option.textContent = backupName === "map.json" ? "map.json (running)" : backupName;
+    ui.backupSelect.appendChild(option);
+  });
+}
+
+async function loadSelectedBackup() {
+  const backupName = ui.backupSelect.value;
+  if (!backupName) return;
+  const response = await fetch(`./api/map/backups/${encodeURIComponent(backupName)}`);
+  if (!response.ok) {
+    throw new Error("Map file load failed");
+  }
+  const text = await response.text();
+  loadMapFromText(text);
+  await refreshBackupList().catch(() => {});
+  ui.backupSelect.value = backupName;
+  updateStatus(
+    backupName === "map.json"
+      ? "Loaded running map.json."
+      : `Loaded backup '${backupName}'. Save to apply it as map.json.`
+  );
 }
 
 function setAddMode(enabled) {
@@ -1058,6 +1100,7 @@ ui.saveMapJson.addEventListener("click", async () => {
   }
   try {
     await saveMapToServer({ restart: false });
+    refreshBackupList().catch(() => {});
     updateStatus("Saved /data/ros/map.json (backup created).");
   } catch (_error) {
     triggerJsonDownload();
@@ -1072,6 +1115,7 @@ ui.saveMapJsonRestart.addEventListener("click", async () => {
   }
   try {
     const saveResult = await saveMapToServer({ restart: true });
+    refreshBackupList().catch(() => {});
     const containerName = saveResult?.restartContainer || "open_mower_ros";
     if (saveResult?.restartResult?.restarted) {
       updateStatus(
@@ -1087,6 +1131,14 @@ ui.saveMapJsonRestart.addEventListener("click", async () => {
   } catch (_error) {
     triggerJsonDownload();
     updateStatus("Server save unavailable. Downloaded JSON instead.");
+  }
+});
+
+ui.backupSelect.addEventListener("change", async () => {
+  try {
+    await loadSelectedBackup();
+  } catch (_error) {
+    updateStatus("Failed to load selected map file.");
   }
 });
 
@@ -1161,7 +1213,9 @@ fetch("./api/map")
   .then((text) => {
     loadMapFromText(text);
     updateStatus("Loaded /data/ros/map.json.");
+    return refreshBackupList().catch(() => {});
   })
   .catch(() => {
+    refreshBackupList().catch(() => {});
     updateStatus("Load a map to begin.");
   });

@@ -16,18 +16,31 @@
     <div class="layout">
       <aside class="panel">
         <h1>OpenMower Map Editor</h1>
+        <p class="panel-subtitle">Fast map edits with tool-based controls.</p>
 
-        <label class="file-input">
-          <span>Open map JSON</span>
-          <input id="jsonFile" type="file" accept=".json,application/json" />
-        </label>
+        <section class="panel-card">
+          <h2>Map Source</h2>
+          <label class="file-input">
+            <span>Open local map JSON</span>
+            <input id="jsonFile" type="file" accept=".json,application/json" />
+          </label>
+          <label>
+            Load running map or backup
+            <select id="backupSelect">
+              <option value="">No map files found</option>
+            </select>
+          </label>
+          <label>
+            Active area
+            <select id="areaSelect"></select>
+          </label>
+        </section>
 
-        <div class="geo-box">
-          <h2>Real-world projection</h2>
+        <section class="panel-card geo-box">
+          <h2>Projection</h2>
           <p class="hint">
-            Use the coordinates from your OpenMower config. You can read them with
-            <code>openmower config ros</code>; use <code>datum_lat</code> and
-            <code>datum_long</code>.
+            Use coordinates from <code>openmower config ros</code>:
+            <code>datum_lat</code> and <code>datum_long</code>.
           </p>
           <label>
             Origin latitude
@@ -38,15 +51,11 @@
             <input id="originLng" type="number" step="0.000001" value="13.405" />
           </label>
           <button id="applyProjection" type="button">Apply projection</button>
-        </div>
+        </section>
 
-        <label>
-          Area
-          <select id="areaSelect"></select>
-        </label>
-
-        <div class="controls">
-          <p class="controls-hint">Hover for a tooltip.</p>
+        <section class="panel-card controls">
+          <h2>Edit Tools</h2>
+          <p class="controls-hint">Hover a tool for details.</p>
           <div class="undo-redo-row">
             <button id="undoEdit" class="tool-btn" type="button" title="Undo last edit action">
               ↶
@@ -157,6 +166,9 @@
               title="Points closer than this will be merged"
             />
           </div>
+        </section>
+
+        <section class="panel-card save-actions">
           <button
             id="saveMapJson"
             type="button"
@@ -172,12 +184,10 @@
           >
             Save + restart ROS
           </button>
-        </div>
+        </section>
 
-        <p class="hint">
-          Click a point to select it. Drag the selected point marker to move it.
-          In add mode, click the map to insert a point after selection.
-          In snap mode, click two existing points; all points between them snap to a straight line and are equally spaced.
+        <p class="hint panel-tip">
+          Tip: Select a tool, then click/drag directly on the map.
         </p>
 
         <div id="status" class="status">Load a map to begin.</div>
