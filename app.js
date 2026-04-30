@@ -27,8 +27,8 @@ let baseLayer = null;
 
 const layers = {
   areaLine: null,
+  exclusionLines: [],
   pointMarkers: [],
-  selectedMarker: null,
   multiDragMarker: null,
   dockingMarker: null,
   snapGuideLine: null,
@@ -44,8 +44,12 @@ let suppressNextMapClick = false;
 let ignoreMapClicksUntil = 0;
 
 const ui = {
+  themeToggle: document.getElementById("themeToggle"),
   file: document.getElementById("jsonFile"),
   areaSelect: document.getElementById("areaSelect"),
+  zoneTypeSelect: document.getElementById("zoneTypeSelect"),
+  addZone: document.getElementById("addZone"),
+  removeZone: document.getElementById("removeZone"),
   undoEdit: document.getElementById("undoEdit"),
   redoEdit: document.getElementById("redoEdit"),
   toggleMultiSelect: document.getElementById("toggleMultiSelect"),
@@ -71,8 +75,34 @@ const ui = {
   applyProjection: document.getElementById("applyProjection"),
 };
 
+const THEME_STORAGE_KEY = "openmower-map-editor-theme";
+
 function updateStatus(message) {
   ui.status.textContent = message;
+}
+
+function getCssVar(name, fallback) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function setTheme(theme) {
+  const normalized = theme === "light" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", normalized);
+  if (ui.themeToggle) {
+    ui.themeToggle.textContent = normalized === "light" ? "🌙" : "☀️";
+    ui.themeToggle.title =
+      normalized === "light" ? "Switch to dark mode" : "Switch to light mode";
+  }
+}
+
+function initializeTheme() {
+  const saved = localStorage.getItem(THEME_STORAGE_KEY);
+  if (saved === "light" || saved === "dark") {
+    setTheme(saved);
+    return;
+  }
+  setTheme("dark");
 }
 
 function formatSliderValue(value) {
@@ -323,6 +353,108 @@ function getCurrentOutline() {
   return state.rawMap.areas[state.areaIndex].outline;
 }
 
+function getCurrentArea() {
+  if (!state.rawMap?.areas?.length) return null;
+  return state.rawMap.areas[state.areaIndex];
+}
+
+function getAreaType(area) {
+  return area?.properties?.type || "area";
+}
+
+function generateZoneId() {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createDefaultZoneOutlineMeters() {
+  const center = latLngToMeters(map.getCenter());
+  const halfSizeMeters = 0.8;
+  return [
+    { x: center.x - halfSizeMeters, y: center.y - halfSizeMeters },
+    { x: center.x + halfSizeMeters, y: center.y - halfSizeMeters },
+    { x: center.x + halfSizeMeters, y: center.y + halfSizeMeters },
+    { x: center.x - halfSizeMeters, y: center.y + halfSizeMeters },
+    { x: center.x - halfSizeMeters, y: center.y - halfSizeMeters },
+  ];
+}
+
+function getAreaCentroidMeters(area) {
+  const outline = area?.outline;
+  if (!outline?.length) return null;
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < outline.length; i += 1) {
+    x += outline[i].x;
+    y += outline[i].y;
+  }
+  return { x: x / outline.length, y: y / outline.length };
+}
+
+function isPointInsidePolygon(point, polygon) {
+  if (!point || !polygon || polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+
+    const intersects =
+      yi > point.y !== yj > point.y &&
+      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi + Number.EPSILON) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function getPolygonArea(polygon) {
+  if (!polygon || polygon.length < 3) return Number.POSITIVE_INFINITY;
+  let areaTwice = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const j = (i + 1) % polygon.length;
+    areaTwice += polygon[i].x * polygon[j].y - polygon[j].x * polygon[i].y;
+  }
+  return Math.abs(areaTwice) / 2;
+}
+
+function getBestContainingMowAreaIndexForPoint(point) {
+  if (!state.rawMap?.areas?.length || !point) return null;
+  let bestIndex = null;
+  let bestAreaSize = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < state.rawMap.areas.length; i += 1) {
+    const area = state.rawMap.areas[i];
+    if (getAreaType(area) !== "mow" || !area.outline?.length) continue;
+    if (!isPointInsidePolygon(point, area.outline)) continue;
+    const areaSize = getPolygonArea(area.outline);
+    if (areaSize < bestAreaSize) {
+      bestAreaSize = areaSize;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}
+
+function getLinkedExclusionAreasForMowArea(mowArea) {
+  if (!state.rawMap?.areas?.length || !mowArea?.outline?.length) return [];
+  return state.rawMap.areas.filter((area) => {
+    if (getAreaType(area) !== "obstacle") return false;
+    const centroid = getAreaCentroidMeters(area);
+    return isPointInsidePolygon(centroid, mowArea.outline);
+  });
+}
+
+function getLinkedMowAreaIndexForObstacle(obstacleArea) {
+  if (!state.rawMap?.areas?.length || !obstacleArea?.outline?.length) return null;
+  const centroid = getAreaCentroidMeters(obstacleArea);
+  return getBestContainingMowAreaIndexForPoint(centroid);
+}
+
+function getLinkedMowAreaForObstacle(obstacleArea) {
+  const linkedIndex = getLinkedMowAreaIndexForObstacle(obstacleArea);
+  if (linkedIndex == null) return null;
+  return state.rawMap?.areas?.[linkedIndex] || null;
+}
+
 function isClosedLoop(outline) {
   if (!outline || outline.length < 2) return false;
   const first = outline[0];
@@ -373,12 +505,10 @@ function clearMapLayers() {
     map.removeLayer(layers.areaLine);
     layers.areaLine = null;
   }
+  layers.exclusionLines.forEach((line) => map.removeLayer(line));
+  layers.exclusionLines = [];
   layers.pointMarkers.forEach((m) => map.removeLayer(m));
   layers.pointMarkers = [];
-  if (layers.selectedMarker) {
-    map.removeLayer(layers.selectedMarker);
-    layers.selectedMarker = null;
-  }
   if (layers.multiDragMarker) {
     map.removeLayer(layers.multiDragMarker);
     layers.multiDragMarker = null;
@@ -409,8 +539,14 @@ function fitCurrentArea() {
 
 function renderMap() {
   clearMapLayers();
-  const outline = getCurrentOutline();
+  const currentArea = getCurrentArea();
+  const outline = currentArea?.outline;
   if (!outline) return;
+  const currentAreaType = getAreaType(currentArea);
+  const mowLineColor = getCssVar("--map-line-mow", "#ffffff");
+  const obstacleLineColor = getCssVar("--map-line-obstacle", "#ef4444");
+  const navLineColor = getCssVar("--map-line-nav", "#0284c7");
+  const overlayMowLineColor = getCssVar("--map-line-overlay-mow", mowLineColor);
   ensureClosedLoop(outline);
   state.pointIndex = toEditableIndex(state.pointIndex, outline);
 
@@ -423,10 +559,79 @@ function renderMap() {
   state.currentEditableLatLngs = latlngs;
   const closedLatLngs = latlngs.length > 1 ? [...latlngs, latlngs[0]] : latlngs;
   layers.areaLine = L.polyline(closedLatLngs, {
-    color: "#ffffff",
-    weight: 0.2,
-    opacity: 0.9,
+    color:
+      currentAreaType === "obstacle"
+        ? obstacleLineColor
+        : currentAreaType === "nav"
+          ? navLineColor
+          : mowLineColor,
+    weight: currentAreaType === "mow" ? 0.2 : 1.2,
+    opacity: 0.95,
+    dashArray: currentAreaType === "mow" ? undefined : "4,4",
   }).addTo(map);
+
+  if (currentAreaType === "mow") {
+    const overlayAreas = (state.rawMap?.areas || []).filter((area) => {
+      const type = getAreaType(area);
+      return type === "obstacle" || type === "nav";
+    });
+    for (let i = 0; i < overlayAreas.length; i += 1) {
+      const overlayArea = overlayAreas[i];
+      const exclusionOutline = overlayArea.outline || [];
+      if (exclusionOutline.length < 2) continue;
+      const exclusionLatLngs = exclusionOutline.map(metersToLatLng);
+      const exclusionClosed =
+        exclusionLatLngs.length > 1 ? [...exclusionLatLngs, exclusionLatLngs[0]] : exclusionLatLngs;
+      const type = getAreaType(overlayArea);
+      const exclusionLine = L.polyline(exclusionClosed, {
+        color: type === "nav" ? navLineColor : obstacleLineColor,
+        weight: 1.2,
+        opacity: 0.95,
+        dashArray: "4,4",
+      }).addTo(map);
+      layers.exclusionLines.push(exclusionLine);
+    }
+  } else if (currentAreaType === "obstacle") {
+    const overlayAreas = (state.rawMap?.areas || []).filter((area) => {
+      const type = getAreaType(area);
+      return type === "mow" || type === "nav";
+    });
+    for (let i = 0; i < overlayAreas.length; i += 1) {
+      const overlayArea = overlayAreas[i];
+      const overlayOutline = overlayArea.outline || [];
+      if (overlayOutline.length < 2) continue;
+      const overlayLatLngs = overlayOutline.map(metersToLatLng);
+      const overlayClosed = overlayLatLngs.length > 1 ? [...overlayLatLngs, overlayLatLngs[0]] : overlayLatLngs;
+      const type = getAreaType(overlayArea);
+      const overlayLine = L.polyline(overlayClosed, {
+        color: type === "nav" ? navLineColor : overlayMowLineColor,
+        weight: 1.2,
+        opacity: 0.95,
+        dashArray: "4,4",
+      }).addTo(map);
+      layers.exclusionLines.push(overlayLine);
+    }
+  } else if (currentAreaType === "nav") {
+    const overlayAreas = (state.rawMap?.areas || []).filter((area) => {
+      const type = getAreaType(area);
+      return type === "mow" || type === "obstacle";
+    });
+    for (let i = 0; i < overlayAreas.length; i += 1) {
+      const overlayArea = overlayAreas[i];
+      const overlayOutline = overlayArea.outline || [];
+      if (overlayOutline.length < 2) continue;
+      const overlayLatLngs = overlayOutline.map(metersToLatLng);
+      const overlayClosed = overlayLatLngs.length > 1 ? [...overlayLatLngs, overlayLatLngs[0]] : overlayLatLngs;
+      const type = getAreaType(overlayArea);
+      const overlayLine = L.polyline(overlayClosed, {
+        color: type === "obstacle" ? obstacleLineColor : overlayMowLineColor,
+        weight: 1.2,
+        opacity: 0.95,
+        dashArray: "4,4",
+      }).addTo(map);
+      layers.exclusionLines.push(overlayLine);
+    }
+  }
 
   latlngs.forEach((latlng, idx) => {
     const isSelected = idx === state.pointIndex;
@@ -434,24 +639,24 @@ function renderMap() {
     const isMultiSelected = state.selectedPointIndices.includes(idx);
     const isFirstPoint = idx === 0;
     const baseColor = isFirstPoint ? "#22c55e" : "#f59e0b";
-    const marker = L.circleMarker(latlng, {
-      radius: isSelected ? 5 : 3.5,
-      color: isSnapEndpoint
-        ? "#a855f7"
-        : isMultiSelected
-          ? "#22d3ee"
-          : isSelected
-            ? "#ef4444"
-            : baseColor,
-      fillColor: isSnapEndpoint
-        ? "#a855f7"
-        : isMultiSelected
-          ? "#22d3ee"
-          : isSelected
-            ? "#ef4444"
-            : baseColor,
-      fillOpacity: 1,
-      weight: isSelected ? 1.2 : 0.9,
+    const pointColor = isSnapEndpoint
+      ? "#a855f7"
+      : isMultiSelected
+        ? "#22d3ee"
+        : isSelected
+          ? "#ef4444"
+          : baseColor;
+    const markerSize = isSelected ? 11 : 9;
+    const markerBorderWidth = isSelected ? 2 : 1;
+    const marker = L.marker(latlng, {
+      draggable: !state.multiSelectMode && !state.snapMode && !state.addMode,
+      icon: L.divIcon({
+        className: "",
+        html: `<span style="display:block;width:${markerSize}px;height:${markerSize}px;border-radius:50%;background:${pointColor};border:${markerBorderWidth}px solid rgba(15,23,42,0.9);box-shadow:0 0 0 1px rgba(255,255,255,0.35);"></span>`,
+        iconSize: [markerSize, markerSize],
+        iconAnchor: [markerSize / 2, markerSize / 2],
+      }),
+      title: "Drag point directly",
     }).addTo(map);
     marker.on("click", (e) => {
       L.DomEvent.stopPropagation(e);
@@ -478,35 +683,26 @@ function renderMap() {
       renderMap();
       updateStatus(`Selected point ${idx + 1}/${editableCount}.`);
     });
-    layers.pointMarkers.push(marker);
-  });
-
-  if (state.pointIndex != null && editablePoints[state.pointIndex]) {
-    const selectedLatLng = metersToLatLng(editablePoints[state.pointIndex]);
-    layers.selectedMarker = L.marker(selectedLatLng, {
-      draggable: true,
-      title: "Drag to move selected point",
-    }).addTo(map);
-    layers.selectedMarker.on("click", (e) => {
-      L.DomEvent.stopPropagation(e);
-    });
-    layers.selectedMarker.on("dragstart", () => {
+    marker.on("dragstart", () => {
+      state.pointIndex = idx;
       if (state.addMode) {
         setAddMode(false);
       }
       suppressNextMapClick = true;
       ignoreMapClicksUntil = Date.now() + 700;
-    });
-    layers.selectedMarker.on("dragend", (e) => {
-      ignoreMapClicksUntil = Date.now() + 700;
       pushHistorySnapshot();
-      const meters = latLngToMeters(e.target.getLatLng());
-      setEditablePoint(outline, state.pointIndex, meters);
-      ensureClosedLoop(outline);
-      renderMap();
-      updateStatus(`Moved point ${state.pointIndex + 1}.`);
     });
-  }
+    marker.on("dragend", (e) => {
+      ignoreMapClicksUntil = Date.now() + 700;
+      const meters = latLngToMeters(e.target.getLatLng());
+      setEditablePoint(outline, idx, meters);
+      ensureClosedLoop(outline);
+      state.pointIndex = idx;
+      renderMap();
+      updateStatus(`Moved point ${idx + 1}.`);
+    });
+    layers.pointMarkers.push(marker);
+  });
 
   if (state.selectedPointIndices.length > 1) {
     const selectedLatLngs = state.selectedPointIndices.map((idx) =>
@@ -624,10 +820,22 @@ function renderDockingStation() {
 function refreshAreaSelect() {
   ui.areaSelect.innerHTML = "";
   const areas = state.rawMap?.areas || [];
+  if (areas.length === 0) {
+    state.areaIndex = 0;
+    return;
+  }
+  state.areaIndex = Math.max(0, Math.min(state.areaIndex, areas.length - 1));
   areas.forEach((area, i) => {
     const option = document.createElement("option");
     option.value = String(i);
-    option.textContent = `${i + 1}: ${area.properties?.type || "area"} (${area.id})`;
+    const areaType = getAreaType(area);
+    if (areaType === "mow") {
+      option.textContent = `${i + 1}: mow (${area.id})`;
+    } else if (areaType === "obstacle") {
+      option.textContent = `${i + 1}: obstacle (${area.id})`;
+    } else {
+      option.textContent = `${i + 1}: ${areaType} (${area.id})`;
+    }
     ui.areaSelect.appendChild(option);
   });
   ui.areaSelect.value = String(state.areaIndex);
@@ -679,12 +887,68 @@ ui.file.addEventListener("change", async (event) => {
   }
 });
 
+ui.themeToggle.addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme") || "dark";
+  const next = current === "light" ? "dark" : "light";
+  setTheme(next);
+  localStorage.setItem(THEME_STORAGE_KEY, next);
+  if (state.rawMap) {
+    renderMap();
+  }
+});
+
 ui.areaSelect.addEventListener("change", () => {
-  state.areaIndex = Number(ui.areaSelect.value);
+  const nextIndex = Number(ui.areaSelect.value);
+  if (!Number.isFinite(nextIndex)) return;
+  state.areaIndex = nextIndex;
   state.pointIndex = null;
   state.selectedPointIndices = [];
   renderMap();
   fitCurrentArea();
+});
+
+ui.addZone.addEventListener("click", () => {
+  if (!state.rawMap) {
+    updateStatus("Load a map first.");
+    return;
+  }
+  if (!Array.isArray(state.rawMap.areas)) {
+    state.rawMap.areas = [];
+  }
+  const zoneType = ui.zoneTypeSelect.value || "mow";
+  pushHistorySnapshot();
+  state.rawMap.areas.push({
+    id: generateZoneId(),
+    properties: {
+      type: zoneType,
+    },
+    outline: createDefaultZoneOutlineMeters(),
+  });
+  state.areaIndex = state.rawMap.areas.length - 1;
+  state.pointIndex = 0;
+  state.selectedPointIndices = [];
+  refreshAreaSelect();
+  renderMap();
+  fitCurrentArea();
+  updateStatus(`Added new ${zoneType} zone.`);
+});
+
+ui.removeZone.addEventListener("click", () => {
+  if (!state.rawMap?.areas?.length) {
+    updateStatus("No zone to remove.");
+    return;
+  }
+  const areaToRemove = getCurrentArea();
+  const removedType = getAreaType(areaToRemove);
+  pushHistorySnapshot();
+  state.rawMap.areas.splice(state.areaIndex, 1);
+  state.areaIndex = Math.max(0, Math.min(state.areaIndex, state.rawMap.areas.length - 1));
+  state.pointIndex = null;
+  state.selectedPointIndices = [];
+  refreshAreaSelect();
+  renderMap();
+  fitCurrentArea();
+  updateStatus(`Removed ${removedType} zone.`);
 });
 
 ui.toggleMultiSelect.addEventListener("click", () => {
@@ -944,6 +1208,41 @@ function finishBoxSelection(endLatLng) {
   updateStatus(`Box selected ${selected.length} point(s).`);
 }
 
+function startBrushStroke(latlng) {
+  if (!state.rawMap) {
+    updateStatus("Load a map first.");
+    return false;
+  }
+  updateBrushCursorPreview(latlng);
+  state.brushPainting = true;
+  state.brushStrokeMovedCount = 0;
+  pushHistorySnapshot();
+  map.dragging.disable();
+  const moved = applyPushBrush(latlng, { pushHistory: false });
+  state.brushStrokeMovedCount += moved;
+  return true;
+}
+
+function continueBrushStroke(latlng) {
+  updateBrushCursorPreview(latlng);
+  if (!state.brushPainting) return;
+  const moved = applyPushBrush(latlng, { pushHistory: false });
+  state.brushStrokeMovedCount += moved;
+}
+
+function endBrushStroke() {
+  if (!state.brushPainting) return;
+  state.brushPainting = false;
+  map.dragging.enable();
+  suppressNextMapClick = true;
+  ignoreMapClicksUntil = Date.now() + 200;
+  updateStatus(
+    state.brushStrokeMovedCount > 0
+      ? `Push brush moved ${state.brushStrokeMovedCount} point changes.`
+      : "Push brush hit no points. Try larger radius."
+  );
+}
+
 map.on("click", (event) => {
   if (Date.now() < ignoreMapClicksUntil) {
     return;
@@ -975,18 +1274,7 @@ map.on("mousedown", (event) => {
     if (event.originalEvent?.button != null && event.originalEvent.button !== 0) {
       return;
     }
-    if (!state.rawMap) {
-      updateStatus("Load a map first.");
-      return;
-    }
-    updateBrushCursorPreview(event.latlng);
-    state.brushPainting = true;
-    state.brushStrokeMovedCount = 0;
-    pushHistorySnapshot();
-    map.dragging.disable();
-
-    const moved = applyPushBrush(event.latlng, { pushHistory: false });
-    state.brushStrokeMovedCount += moved;
+    startBrushStroke(event.latlng);
     return;
   }
 
@@ -1011,11 +1299,7 @@ map.on("mousedown", (event) => {
 
 map.on("mousemove", (event) => {
   if (state.brushMode) {
-    updateBrushCursorPreview(event.latlng);
-    if (state.brushPainting) {
-      const moved = applyPushBrush(event.latlng, { pushHistory: false });
-      state.brushStrokeMovedCount += moved;
-    }
+    continueBrushStroke(event.latlng);
     return;
   }
 
@@ -1026,15 +1310,7 @@ map.on("mousemove", (event) => {
 
 map.on("mouseup", (event) => {
   if (state.brushMode && state.brushPainting) {
-    state.brushPainting = false;
-    map.dragging.enable();
-    suppressNextMapClick = true;
-    ignoreMapClicksUntil = Date.now() + 200;
-    updateStatus(
-      state.brushStrokeMovedCount > 0
-        ? `Push brush moved ${state.brushStrokeMovedCount} point changes.`
-        : "Push brush hit no points. Try larger radius."
-    );
+    endBrushStroke();
     return;
   }
 
@@ -1045,9 +1321,23 @@ map.on("mouseup", (event) => {
 map.on("mouseout", () => {
   if (!state.brushMode) return;
   if (state.brushPainting) {
-    state.brushPainting = false;
-    map.dragging.enable();
+    endBrushStroke();
   }
+});
+
+map.on("touchstart", (event) => {
+  if (!state.brushMode) return;
+  startBrushStroke(event.latlng);
+});
+
+map.on("touchmove", (event) => {
+  if (!state.brushMode) return;
+  continueBrushStroke(event.latlng);
+});
+
+map.on("touchend", () => {
+  if (!state.brushMode || !state.brushPainting) return;
+  endBrushStroke();
 });
 
 ui.removePoint.addEventListener("click", () => {
@@ -1158,10 +1448,10 @@ ui.applyProjection.addEventListener("click", () => {
   updateStatus("Projection updated.");
 });
 
-ui.undoEdit.addEventListener("click", () => {
+function applyUndo() {
   if (history.undoStack.length === 0 || !state.rawMap) {
     updateStatus("Nothing to undo.");
-    return;
+    return false;
   }
   history.redoStack.push({
     rawMap: cloneMapData(state.rawMap),
@@ -1173,12 +1463,13 @@ ui.undoEdit.addEventListener("click", () => {
   const previous = history.undoStack.pop();
   restoreSnapshot(previous);
   updateStatus("Undo applied.");
-});
+  return true;
+}
 
-ui.redoEdit.addEventListener("click", () => {
+function applyRedo() {
   if (history.redoStack.length === 0 || !state.rawMap) {
     updateStatus("Nothing to redo.");
-    return;
+    return false;
   }
   history.undoStack.push({
     rawMap: cloneMapData(state.rawMap),
@@ -1190,10 +1481,45 @@ ui.redoEdit.addEventListener("click", () => {
   const next = history.redoStack.pop();
   restoreSnapshot(next);
   updateStatus("Redo applied.");
+  return true;
+}
+
+function isTypingTarget(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+}
+
+ui.undoEdit.addEventListener("click", () => {
+  applyUndo();
+});
+
+ui.redoEdit.addEventListener("click", () => {
+  applyRedo();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (isTypingTarget(event.target)) return;
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+  if (event.key.toLowerCase() !== "z" && event.key.toLowerCase() !== "y") return;
+
+  if (event.key.toLowerCase() === "z" && !event.shiftKey) {
+    if (applyUndo()) {
+      event.preventDefault();
+    }
+    return;
+  }
+
+  if ((event.key.toLowerCase() === "z" && event.shiftKey) || event.key.toLowerCase() === "y") {
+    if (applyRedo()) {
+      event.preventDefault();
+    }
+  }
 });
 
 syncSliderLabels();
 refreshToolUi();
+initializeTheme();
 applyTileLayer();
 
 fetch("./api/params")

@@ -15,7 +15,12 @@
   <body>
     <div class="layout">
       <aside class="panel">
-        <h1>OpenMower Map Editor</h1>
+        <div class="panel-header">
+          <h1>OpenMower Map Editor</h1>
+          <button id="themeToggle" class="theme-toggle" type="button" title="Toggle light/dark mode">
+            ☀️
+          </button>
+        </div>
         <p class="panel-subtitle">Fast map edits with tool-based controls.</p>
 
         <section class="panel-card">
@@ -31,9 +36,21 @@
             </select>
           </label>
           <label>
-            Active area
+            Area type / area
             <select id="areaSelect"></select>
           </label>
+          <label>
+            New zone type
+            <select id="zoneTypeSelect">
+              <option value="mow">mow</option>
+              <option value="obstacle">obstacle</option>
+              <option value="nav">nav</option>
+            </select>
+          </label>
+          <div class="undo-redo-row">
+            <button id="addZone" type="button" title="Add new zone">Add zone</button>
+            <button id="removeZone" type="button" title="Remove selected zone">Remove zone</button>
+          </div>
         </section>
 
         <section class="panel-card geo-box">
