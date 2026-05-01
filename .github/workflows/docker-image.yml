@@ -7,7 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    # Unlisted scopes default to "none"; checkout needs contents:read.
     permissions:
+      contents: read
       packages: write
     steps:
     - uses: actions/checkout@v5
@@ -26,7 +28,7 @@ jobs:
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+        password: ${{ github.token }}
 
     - uses: docker/setup-qemu-action@v3
 
@@ -40,11 +42,27 @@ jobs:
           ${{ env.IMAGE_NAME }}
           ${{ env.IMAGE_SHA }}
 
-    # Official action: REST API for containers (no extra PAT). Uses GITHUB_TOKEN.
-    # If this fails with 403, set the package's "Manage Actions access" to Admin for this repo.
-    # Deletes at most 100 untagged versions per run (re-run workflow if needed).
+    # Untagged versions: max 100 deletions per step; repeat to drain large backlogs.
+    # 403: Package settings → Manage Actions access → set this repo to Admin.
     - uses: actions/delete-package-versions@v5
       with:
+        owner: ${{ github.repository_owner }}
+        package-name: ${{ env.PACKAGE_NAME }}
+        package-type: container
+        delete-only-untagged-versions: "true"
+        min-versions-to-keep: 0
+        token: ${{ github.token }}
+    - uses: actions/delete-package-versions@v5
+      with:
+        owner: ${{ github.repository_owner }}
+        package-name: ${{ env.PACKAGE_NAME }}
+        package-type: container
+        delete-only-untagged-versions: "true"
+        min-versions-to-keep: 0
+        token: ${{ github.token }}
+    - uses: actions/delete-package-versions@v5
+      with:
+        owner: ${{ github.repository_owner }}
         package-name: ${{ env.PACKAGE_NAME }}
         package-type: container
         delete-only-untagged-versions: "true"
