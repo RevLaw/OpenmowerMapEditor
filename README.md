@@ -25,6 +25,7 @@ Browser-based map editor for OpenMower JSON maps, deployed via Dockge on OpenMow
   - editing `obstacle`: shows `mow` (white dashed) and `nav` (blue dashed)
   - editing `nav`: shows `mow` (white dashed) and `obstacle` (red dashed)
 - Stable map readability: map colors stay fixed; light/dark toggle changes sidebar UI only
+- Optional **live robot** overlay: **Live robot** toolbar button polls `GET /api/robot_pose`, which runs **`tf2_echo` / `tf_echo`** in the ROS container (Docker socket) and parses output with stdlib-only Python (tries `map`/`odom` → `base_link`/`base_footprint`). Marker style reflects **navigation**, **docking**, **charging at dock**, **dock full**, **emergency**, and **error** states (from sampled ROS topics when available). Polling pauses while the browser tab is hidden.
 - Auto-load `/data/ros/map.json` (if present)
 - Auto-fill projection from `/data/params/mower_params.yaml` (`datum_lat`, `datum_long`)
 - Save directly to `/data/ros/map.json` with automatic timestamped backup
@@ -56,6 +57,14 @@ services:
         target: /var/run/docker.sock
     environment:
       OPENMOWER_CONTAINER_NAME: open_mower_ros
+      # Optional tuning (see Environment variables below):
+      # OPENMOWER_POSE_CONTAINER: open_mower_ros
+      # OPENMOWER_POSE_CACHE_MS: "2200"
+      # OPENMOWER_POSE_DISABLE: "0"
+      # OPENMOWER_TF_ECHO_TIMEOUT_SEC: "4"
+      # OPENMOWER_ROS_TOPIC_TIMEOUT_SEC: "4"
+      # OPENMOWER_ROS_TOPIC_FALLBACK_SEC: "10"
+      # OPENMOWER_VERBOSE_LOGS: "0"
 ```
 
 1. Click **Deploy**
@@ -71,26 +80,29 @@ services:
 4. Pick an area in the area selector.
 5. To manage full zones, choose a type in **New zone type** and use **Add zone** / **Remove zone**.
 6. Use the tool buttons below the area selector to edit your map geometry.
-7. Save your edits:
+7. Optional: turn on **Live robot** to poll pose from the running ROS container (requires the Docker socket mount). Position matches the map when TF uses the `map` frame; if only `odom` is available, the marker may drift relative to `map.json` until localization aligns. Status and mode lines update from ROS when topics respond in time.
+8. Save your edits:
   - **Save map.json** writes to `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
   - **Save + restart ROS** does the same, then restarts the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
   - If direct save is unavailable, fallback is downloading the map as `openmower-map-edited.json`.
-8. Roll back from backup (if needed):
+9. Roll back from backup (if needed):
   - Use the **Load map/backup** dropdown (under file upload) to pick either `map.json` (running) or a `map.json.bak-`* file from `/data/ros`.
   - The selected entry is loaded immediately.
   - Click **Save map.json** (or **Save + restart ROS**) to make a loaded backup your active `map.json`.
 
 ## Tool Legend
 
-- `↶` Undo the last edit.
-- `↷` Redo the last undone edit.
-- `◫` Multi-select tool (click points or `Shift + drag` rectangle, then drag group handle).
-- `＋` Add point tool (click map to insert a point).
-- `◯` Push brush tool (click or hold-and-drag to push nearby points away).
-- `╱` Snap line tool (pick start and end point to snap range to a straight line).
-- `🧹` Cleanup tool (first click enables cleanup mode and shows slider, second click applies cleanup).
-- `✕` Remove selected point.
+Toolbar uses [Material Symbols Outlined](https://fonts.google.com/icons) (loaded from Google Fonts).
+
+- **undo** / **redo** — history.
+- **select_all** — multi-select (click points or `Shift + drag` rectangle, then drag group handle).
+- **add** — add point (click map to insert).
+- **blur_circular** — push brush (click or hold-and-drag).
+- **horizontal_rule** — snap line (pick start and end point).
+- **cleaning_services** — cleanup (first click enables slider, second click applies).
+- **delete** — remove selected point.
 - `Add zone` / `Remove zone` create or delete the currently selected `mow` / `obstacle` / `nav` area.
+- **Live robot** (toolbar toggle) polls ROS TF via the mounted Docker socket and shows heading; marker color/icon follows **visual mode** (nav, docking, dock charging, dock full, emergency, error). Preference is stored in `localStorage`. The dock uses **ev_station** on the map.
 - `Load map/backup` dropdown loads `map.json` or a backup file directly on selection.
 
 Tool sliders are contextual:
@@ -100,6 +112,27 @@ Tool sliders are contextual:
 - On touch devices, brush also supports finger paint (`touchstart/move/end`).
 - Light/dark mode affects sidebar/tool styling only. Map line/point colors remain identical in both modes.
 
+## Environment variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OPENMOWER_CONTAINER_NAME` | `open_mower_ros` | Container restarted by **Save + restart ROS** |
+| `OPENMOWER_POSE_CONTAINER` | same as above | Container used for TF echo / ROS topic sampling |
+| `OPENMOWER_POSE_DISABLE` | `0` | Set `1` to disable live pose entirely |
+| `OPENMOWER_POSE_CACHE_MS` | `2200` | Server-side cache for pose probe (ms) |
+| `OPENMOWER_TF_ECHO_TIMEOUT_SEC` | `4` | Timeout for `tf_echo` / `tf2_echo` inside the container |
+| `OPENMOWER_ROS_TOPIC_TIMEOUT_SEC` | `4` | Timeout for `rostopic` / `ros2 topic echo` samples |
+| `OPENMOWER_ROS_TOPIC_FALLBACK_SEC` | `10` | Longer timeout when sampling `/mower_logic/current_state` fallback |
+| `OPENMOWER_VERBOSE_LOGS` | off | Set `1` to log every HTTP request, Docker API call, and routine file reads |
+| `DOCKER_SOCKET_PATH` | `/var/run/docker.sock` | Override if your host uses a non-default Docker socket |
+| `PORT` | `80` | HTTP listen port inside the container (compose maps `5080:80`) |
+
+Paths for map and params inside the container are fixed (`/data/ros`, `/data/params`); only the host bind mounts change.
+
+## Security
+
+Mounting **`/var/run/docker.sock`** gives the editor API the same ability to control Docker as root on the host. Only deploy on a **trusted network** (for example your home LAN), do not expose port `5080` to the public internet without an additional access layer, and treat saved map data as sensitive to your property layout.
+
 ## Privacy / GitHub Safety
 
 The included `.gitignore` excludes local/private artifacts such as:
@@ -108,7 +141,10 @@ The included `.gitignore` excludes local/private artifacts such as:
 - Cursor local folders (`.cursor/`, `terminals/`, `agent-transcripts/`, `mcps/`)
 - common IDE/log/temp files
 
+This repository should not contain real mower coordinates, passwords, or API keys.
+
 ## Notes
 
 - OpenMower uses local meter coordinates (`x`, `y`), so map projection is an approximation from your configured datum.
+- Live pose runs **`ros2 run tf2_ros tf2_echo`** or **`rosrun tf tf_echo`** inside the ROS container (after sourcing ROS setup scripts, including `/opt/open_mower_ros/devel/setup.bash` when present). Topic sampling prefers **`rostopic echo`** on ROS 1 before trying `ros2 topic echo`. Output is parsed with **stdlib-only `python3`**. If TF is not published yet, the HUD shows the probe error.
 - Always validate edited borders before deploying to a mower in production.

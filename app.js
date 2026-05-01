@@ -17,6 +17,7 @@
   currentEditableLatLngs: [],
   originLat: 52.52,
   originLng: 13.405,
+  robotLive: false,
 };
 const EDITOR_META_KEY = "__editor";
 const DEFAULT_TILE_URL =
@@ -34,7 +35,13 @@ const layers = {
   snapGuideLine: null,
   boxSelectRect: null,
   brushCursor: null,
+  robotMarker: null,
 };
+
+const ROBOT_POLL_MS = 1000;
+let robotPoseTimer = null;
+let robotPoseFailCount = 0;
+let robotPosePollInFlight = false;
 
 const history = {
   undoStack: [],
@@ -73,9 +80,55 @@ const ui = {
   originLat: document.getElementById("originLat"),
   originLng: document.getElementById("originLng"),
   applyProjection: document.getElementById("applyProjection"),
+  toggleRobotLive: document.getElementById("toggleRobotLive"),
+  robotLiveReadout: document.getElementById("robotLiveReadout"),
 };
 
 const THEME_STORAGE_KEY = "openmower-map-editor-theme";
+const ROBOT_LIVE_STORAGE_KEY = "openmower-map-editor-robot-live";
+
+const robotLiveGate = {
+  paramsAttemptDone: false,
+  mapAttemptDone: false,
+};
+
+function syncRobotLiveButtonUi() {
+  if (!ui.toggleRobotLive) return;
+  ui.toggleRobotLive.setAttribute("aria-pressed", state.robotLive ? "true" : "false");
+  ui.toggleRobotLive.classList.toggle("is-active", state.robotLive);
+}
+
+function persistRobotLivePreference() {
+  localStorage.setItem(ROBOT_LIVE_STORAGE_KEY, state.robotLive ? "1" : "0");
+}
+
+function applyRobotLiveFromStorage() {
+  if (!ui.toggleRobotLive) return;
+  state.robotLive = localStorage.getItem(ROBOT_LIVE_STORAGE_KEY) === "1";
+  syncRobotLiveButtonUi();
+}
+
+function tryRobotLiveAfterDeps() {
+  if (!robotLiveGate.paramsAttemptDone || !robotLiveGate.mapAttemptDone) return;
+  if (state.robotLive && !document.hidden) {
+    startRobotLivePolling();
+  }
+}
+
+function markParamsDepsDone() {
+  robotLiveGate.paramsAttemptDone = true;
+  tryRobotLiveAfterDeps();
+}
+
+function markMapDepsDone() {
+  robotLiveGate.mapAttemptDone = true;
+  tryRobotLiveAfterDeps();
+}
+
+function refreshRobotPoseIfLive() {
+  if (!state.robotLive || document.hidden) return;
+  pollRobotPoseOnce();
+}
 
 function updateStatus(message) {
   ui.status.textContent = message;
@@ -90,7 +143,8 @@ function setTheme(theme) {
   const normalized = theme === "light" ? "light" : "dark";
   document.documentElement.setAttribute("data-theme", normalized);
   if (ui.themeToggle) {
-    ui.themeToggle.textContent = normalized === "light" ? "🌙" : "☀️";
+    const iconName = normalized === "light" ? "dark_mode" : "light_mode";
+    ui.themeToggle.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true">${iconName}</span>`;
     ui.themeToggle.title =
       normalized === "light" ? "Switch to dark mode" : "Switch to light mode";
   }
@@ -527,6 +581,360 @@ function clearMapLayers() {
   }
 }
 
+/** Fallback if API predates server `visualMode`. */
+function deriveClientRobotVisualMode(health, telemetry) {
+  if (health === "emergency") {
+    return "emergency";
+  }
+  if (health === "error") {
+    return "error";
+  }
+  if (!telemetry || typeof telemetry !== "object") {
+    return "nav";
+  }
+  const stateRaw = String(telemetry.stateName ?? "");
+  const stateUp = stateRaw.toUpperCase().replace(/\s+/g, "_");
+  const docking =
+    /(GOING_TO_DOCK|RETURN_TO_DOCK|NAV_TO_DOCK|DOCKING|APPROACH_DOCK|DOCK_NAV|FIND_DOCK|SEARCH_DOCK|TO_DOCK)/i.test(
+      stateRaw
+    ) && !/UNDOCK/i.test(stateRaw);
+  if (docking) {
+    return "docking";
+  }
+  if (telemetry.isCharging === true) {
+    return "dock_charging";
+  }
+  const bat = telemetry.batteryPercent;
+  if (
+    telemetry.isCharging === false &&
+    Number.isFinite(bat) &&
+    bat >= 88 &&
+    /CHARGING_COMPLETE|DOCKED|AT_DOCK|FULL|STANDBY_DOCK|IDLE_DOCK|PARK_DOCK/i.test(stateUp)
+  ) {
+    return "dock_full";
+  }
+  return "nav";
+}
+
+function resolveRobotVisualMode(ros) {
+  if (!ros || typeof ros !== "object") {
+    return "nav";
+  }
+  if (ros.visualMode) {
+    return ros.visualMode;
+  }
+  return deriveClientRobotVisualMode(ros.health, ros.telemetry);
+}
+
+function robotVisualToMarkerStyle(visualMode) {
+  switch (visualMode) {
+    case "emergency":
+      return { modifier: "map-marker--robot--emergency", glyph: "emergency_home" };
+    case "error":
+      return { modifier: "map-marker--robot--error", glyph: "report" };
+    case "docking":
+      return { modifier: "map-marker--robot--docking", glyph: "ev_station" };
+    case "dock_charging":
+      return { modifier: "map-marker--robot--dock-charging", glyph: "battery_charging_full" };
+    case "dock_full":
+      return { modifier: "map-marker--robot--dock-full", glyph: "battery_full" };
+    case "nav":
+    default:
+      return { modifier: "map-marker--robot--nav", glyph: "navigation" };
+  }
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Multiline label: power/GPS, mode, extras (mow, temps, emergency flags). */
+function buildRobotHudLines(telemetry) {
+  if (!telemetry || typeof telemetry !== "object") {
+    return [];
+  }
+  const lines = [];
+  const power = [];
+  if (Number.isFinite(telemetry.batteryPercent)) {
+    power.push(`Batt ${Math.round(telemetry.batteryPercent)}%`);
+  }
+  if (Number.isFinite(telemetry.gpsQualityPercent)) {
+    power.push(`GPS ${Math.round(telemetry.gpsQualityPercent)}%`);
+  }
+  if (telemetry.isCharging === true) {
+    power.push("charging");
+  }
+  if (power.length) {
+    lines.push(power.join(" · "));
+  }
+
+  const mode = [];
+  if (typeof telemetry.stateName === "string" && telemetry.stateName.trim()) {
+    mode.push(telemetry.stateName.replace(/_/g, " "));
+  }
+  if (typeof telemetry.subStateName === "string" && telemetry.subStateName.trim()) {
+    mode.push(telemetry.subStateName.replace(/_/g, " "));
+  }
+  if (mode.length) {
+    lines.push(mode.join(" · "));
+  }
+
+  const extra = [];
+  if (telemetry.mowEnabled === true) {
+    extra.push("mow on");
+  } else if (telemetry.mowEnabled === false) {
+    extra.push("mow off");
+  }
+  if (telemetry.rainDetected === true) {
+    extra.push("rain");
+  }
+  if (Number.isFinite(telemetry.escTempC)) {
+    extra.push(`ESC ${Math.round(telemetry.escTempC)}°C`);
+  }
+  if (Number.isFinite(telemetry.mowerMotorRpm)) {
+    extra.push(`${Math.round(telemetry.mowerMotorRpm)} RPM`);
+  }
+  if (telemetry.emergency === true) {
+    extra.push("emergency");
+  }
+  if (telemetry.activeEmergency === true) {
+    extra.push("estop active");
+  }
+  if (telemetry.latchedEmergency === true) {
+    extra.push("latched");
+  }
+  if (typeof telemetry.emergencyReason === "string" && telemetry.emergencyReason.trim()) {
+    extra.push(telemetry.emergencyReason.trim().slice(0, 40));
+  }
+  if (extra.length) {
+    lines.push(extra.join(" · "));
+  }
+
+  return lines;
+}
+
+function buildRobotHudHtml(telemetry) {
+  const lines = buildRobotHudLines(telemetry);
+  if (!lines.length) {
+    return "";
+  }
+  return lines
+    .map((line) => `<div class="robot-marker-hud__line">${escapeHtml(line)}</div>`)
+    .join("");
+}
+
+function syncRobotLiveReadout(data) {
+  if (!ui.robotLiveReadout) {
+    return;
+  }
+  if (!state.robotLive || !data || !data.ok) {
+    ui.robotLiveReadout.hidden = true;
+    ui.robotLiveReadout.textContent = "";
+    return;
+  }
+  const hudLines = buildRobotHudLines(data.ros && data.ros.telemetry ? data.ros.telemetry : null);
+  if (hudLines.length) {
+    ui.robotLiveReadout.hidden = false;
+    ui.robotLiveReadout.textContent = hudLines.join("\n");
+    return;
+  }
+  if (data.ros && data.ros.summary) {
+    ui.robotLiveReadout.hidden = false;
+    ui.robotLiveReadout.textContent = data.ros.summary;
+    return;
+  }
+  ui.robotLiveReadout.hidden = false;
+  ui.robotLiveReadout.textContent =
+    "Map position only — ROS status not received (rostopic may need more time; check OPENMOWER_ROS_TOPIC_TIMEOUT_SEC).";
+}
+
+function makeRobotPoseIcon(yawRadians, visualMode, telemetry) {
+  const rotationDeg = 90 - (yawRadians * 180) / Math.PI;
+  const { modifier, glyph } = robotVisualToMarkerStyle(visualMode);
+  const extraClass = modifier ? ` ${modifier}` : "";
+  const yawFollowsHeading = visualMode === "nav";
+  const yawCss = yawFollowsHeading ? `transform: rotate(${rotationDeg}deg)` : "transform: none";
+  const hudInner = buildRobotHudHtml(telemetry);
+  if (!hudInner) {
+    return L.divIcon({
+      className: "map-marker-leaflet",
+      html: `<div class="map-marker--robot${extraClass}" style="${yawCss}"><span class="material-symbols-outlined" aria-hidden="true">${glyph}</span></div>`,
+      iconSize: [40, 40],
+      iconAnchor: [20, 20],
+    });
+  }
+  const stackW = 200;
+  const circleR = 20;
+  const lineCount = buildRobotHudLines(telemetry).length;
+  const hudBodyH = 6 + lineCount * 15;
+  const stackH = 40 + 4 + hudBodyH;
+  return L.divIcon({
+    className: "map-marker-leaflet robot-marker-stack-wrap",
+    html: `<div class="robot-marker-stack" style="width:${stackW}px">
+  <div class="robot-marker-stack__pin">
+    <div class="map-marker--robot${extraClass}" style="${yawCss}"><span class="material-symbols-outlined" aria-hidden="true">${glyph}</span></div>
+  </div><div class="robot-marker-stack__hud">${hudInner}</div>
+</div>`,
+    iconSize: [stackW, stackH],
+    iconAnchor: [stackW / 2, circleR],
+  });
+}
+
+/** Short hover text; full numbers live on the multiline map label + sidebar readout. */
+function appendRobotTelemetryTooltipBrief(lines, telemetry) {
+  if (!telemetry || typeof telemetry !== "object") {
+    return;
+  }
+  if (Number.isFinite(telemetry.batteryPercent)) {
+    lines.push(`Battery ${Math.round(telemetry.batteryPercent)}%`);
+  }
+  if (Number.isFinite(telemetry.gpsQualityPercent)) {
+    lines.push(`GPS ${Math.round(telemetry.gpsQualityPercent)}%`);
+  }
+  if (telemetry.isCharging === true) {
+    lines.push("Power: charging");
+  }
+  if (telemetry.stateName) {
+    lines.push(`Mode: ${telemetry.stateName}`);
+  }
+}
+
+function buildRobotPoseTooltip(data) {
+  const lines = [
+    `Robot (${data.frameParent}→${data.frameChild})  x=${data.x.toFixed(2)}m y=${data.y.toFixed(2)}m`,
+  ];
+  const c = data.container;
+  if (c && typeof c === "object") {
+    if (c.exists === false) {
+      lines.push("Container: not found");
+    } else if (c.exists == null) {
+      lines.push(`Container: unavailable (${c.status || "?"})`);
+    } else if (!c.running || (Number.isFinite(c.restartCount) && c.restartCount > 0)) {
+      lines.push(`Container: ${c.running ? "running" : "stopped"} (${c.status || "?"})`);
+      if (Number.isFinite(c.restartCount) && c.restartCount > 0) {
+        lines.push(`Restarts: ${c.restartCount}`);
+      }
+    }
+  }
+  if (data.ros && data.ros.telemetry) {
+    appendRobotTelemetryTooltipBrief(lines, data.ros.telemetry);
+  }
+  if (data.ros) {
+    if (data.ros.summary) {
+      lines.push(`Status: ${data.ros.summary}`);
+    }
+    if (data.ros.topic) {
+      lines.push(`ROS sample: ${data.ros.topic}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function disableLiveRobotUi(message) {
+  state.robotLive = false;
+  syncRobotLiveButtonUi();
+  persistRobotLivePreference();
+  robotPoseFailCount = 0;
+  stopRobotLivePolling();
+  removeRobotMarker();
+  syncRobotLiveReadout(null);
+  updateStatus(message);
+}
+
+function removeRobotMarker() {
+  if (layers.robotMarker) {
+    map.removeLayer(layers.robotMarker);
+    layers.robotMarker = null;
+  }
+}
+
+function stopRobotLivePolling() {
+  if (robotPoseTimer != null) {
+    clearInterval(robotPoseTimer);
+    robotPoseTimer = null;
+  }
+}
+
+async function pollRobotPoseOnce() {
+  if (!state.robotLive || document.hidden) {
+    return;
+  }
+  if (robotPosePollInFlight) {
+    return;
+  }
+  robotPosePollInFlight = true;
+  try {
+    const response = await fetch("./api/robot_pose");
+    const data = await response.json();
+    if (!data.ok) {
+      if (data.liveRobotFatal) {
+        disableLiveRobotUi(`Live robot: ${data.error || "unavailable"}`);
+        return;
+      }
+      robotPoseFailCount += 1;
+      if (robotPoseFailCount === 1 || robotPoseFailCount % 6 === 0) {
+        updateStatus(`Live robot: ${data.error || "unavailable"}`);
+      }
+      return;
+    }
+    robotPoseFailCount = 0;
+    const latlng = metersToLatLng({ x: data.x, y: data.y });
+    const visualMode = resolveRobotVisualMode(data.ros);
+    const title = buildRobotPoseTooltip(data);
+    if (!layers.robotMarker) {
+      layers.robotMarker = L.marker(latlng, {
+        icon: makeRobotPoseIcon(
+          data.yaw,
+          visualMode,
+          data.ros && data.ros.telemetry ? data.ros.telemetry : null
+        ),
+        zIndexOffset: 800,
+      })
+        .bindTooltip(title, {
+          sticky: true,
+          direction: "top",
+          opacity: 0.95,
+          className: "robot-tooltip",
+        })
+        .addTo(map);
+    } else {
+      layers.robotMarker.setLatLng(latlng);
+      layers.robotMarker.setIcon(
+        makeRobotPoseIcon(
+          data.yaw,
+          visualMode,
+          data.ros && data.ros.telemetry ? data.ros.telemetry : null
+        )
+      );
+      layers.robotMarker.setTooltipContent(title);
+    }
+    syncRobotLiveReadout(data);
+  } catch (_error) {
+    robotPoseFailCount += 1;
+    if (robotPoseFailCount === 1 || robotPoseFailCount % 6 === 0) {
+      updateStatus("Live robot: request failed (server or Docker exec).");
+    }
+  } finally {
+    robotPosePollInFlight = false;
+  }
+}
+
+function startRobotLivePolling() {
+  stopRobotLivePolling();
+  if (!state.robotLive || document.hidden) {
+    return;
+  }
+  if (!robotLiveGate.paramsAttemptDone || !robotLiveGate.mapAttemptDone) {
+    return;
+  }
+  pollRobotPoseOnce();
+  robotPoseTimer = setInterval(pollRobotPoseOnce, ROBOT_POLL_MS);
+}
+
 function fitCurrentArea() {
   const outline = getCurrentOutline();
   if (!outline || outline.length === 0) return;
@@ -714,10 +1122,10 @@ function renderMap() {
       selectedLatLngs.reduce((sum, item) => sum + item[1], 0) / selectedLatLngs.length;
 
     const groupIcon = L.divIcon({
-      className: "home-station-icon",
-      html: "&#x21f2;",
-      iconSize: [24, 24],
-      iconAnchor: [12, 12],
+      className: "map-marker-leaflet",
+      html: `<div class="map-marker--group"><span class="material-symbols-outlined" aria-hidden="true">open_with</span></div>`,
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
     });
 
     layers.multiDragMarker = L.marker([centerLat, centerLng], {
@@ -791,16 +1199,16 @@ function renderDockingStation() {
 
   const stationLatLng = metersToLatLng(station.position);
   const homeIcon = L.divIcon({
-    className: "home-station-icon",
-    html: "&#8962;",
-    iconSize: [26, 26],
-    iconAnchor: [13, 13],
+    className: "map-marker-leaflet",
+    html: `<div class="map-marker--dock"><span class="material-symbols-outlined" aria-hidden="true">ev_station</span></div>`,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
   });
 
   layers.dockingMarker = L.marker(stationLatLng, {
     draggable: true,
     icon: homeIcon,
-    title: "Home station (drag to move)",
+    title: "Dock / charging station (drag to move)",
   }).addTo(map);
   layers.dockingMarker.on("click", (e) => {
     L.DomEvent.stopPropagation(e);
@@ -813,7 +1221,7 @@ function renderDockingStation() {
     station.position.x = meters.x;
     station.position.y = meters.y;
     renderMap();
-    updateStatus("Home station moved.");
+    updateStatus("Dock / charging station moved.");
   });
 }
 
@@ -874,6 +1282,7 @@ function loadMapFromText(text) {
   updateStatus(
     `Loaded map with ${parsed.areas.length} area(s). Select a point to move/remove.`
   );
+  refreshRobotPoseIfLive();
 }
 
 ui.file.addEventListener("change", async (event) => {
@@ -1446,6 +1855,7 @@ ui.applyProjection.addEventListener("click", () => {
   renderMap();
   fitCurrentArea();
   updateStatus("Projection updated.");
+  refreshRobotPoseIfLive();
 });
 
 function applyUndo() {
@@ -1517,6 +1927,52 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+if (ui.toggleRobotLive) {
+  ui.toggleRobotLive.addEventListener("click", () => {
+    state.robotLive = !state.robotLive;
+    syncRobotLiveButtonUi();
+    persistRobotLivePreference();
+    robotPoseFailCount = 0;
+    if (state.robotLive) {
+      if (robotLiveGate.paramsAttemptDone && robotLiveGate.mapAttemptDone) {
+        startRobotLivePolling();
+        updateStatus("Live robot on (ROS TF via Docker).");
+      } else {
+        updateStatus("Live robot will start after map and projection finish loading.");
+      }
+    } else {
+      stopRobotLivePolling();
+      removeRobotMarker();
+      syncRobotLiveReadout(null);
+      updateStatus("Live robot overlay off.");
+    }
+  });
+  applyRobotLiveFromStorage();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    stopRobotLivePolling();
+    return;
+  }
+  if (state.robotLive && robotLiveGate.paramsAttemptDone && robotLiveGate.mapAttemptDone) {
+    startRobotLivePolling();
+  }
+});
+
+window.addEventListener("pagehide", () => {
+  stopRobotLivePolling();
+});
+
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted) {
+    return;
+  }
+  if (state.robotLive && !document.hidden && robotLiveGate.paramsAttemptDone && robotLiveGate.mapAttemptDone) {
+    startRobotLivePolling();
+  }
+});
+
 syncSliderLabels();
 refreshToolUi();
 initializeTheme();
@@ -1531,8 +1987,12 @@ fetch("./api/params")
       ui.originLat.value = String(state.originLat);
       ui.originLng.value = String(state.originLng);
     }
+    refreshRobotPoseIfLive();
   })
-  .catch(() => {});
+  .catch(() => {})
+  .finally(() => {
+    markParamsDepsDone();
+  });
 
 fetch("./api/map")
   .then((res) => (res.ok ? res.text() : Promise.reject(new Error("No map found."))))
@@ -1544,4 +2004,7 @@ fetch("./api/map")
   .catch(() => {
     refreshBackupList().catch(() => {});
     updateStatus("Load a map to begin.");
+  })
+  .finally(() => {
+    markMapDepsDone();
   });

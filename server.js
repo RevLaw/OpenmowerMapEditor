@@ -12,6 +12,27 @@ const mapPath = "/data/ros/map.json";
 const mapDirectory = path.dirname(mapPath);
 const dockerSocketPath = process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock";
 const restartContainerName = process.env.OPENMOWER_CONTAINER_NAME || "open_mower_ros";
+const poseContainerName = process.env.OPENMOWER_POSE_CONTAINER || restartContainerName;
+/** Keep ≥ client poll interval so one slow Docker exec can satisfy several polls (avoids ~15s gaps). */
+const poseCacheMs = Math.max(200, Number(process.env.OPENMOWER_POSE_CACHE_MS) || 2200);
+const poseDisabled = String(process.env.OPENMOWER_POSE_DISABLE || "").trim() === "1";
+/** Cap per-attempt TF echo wait (fail fast between frame pairs). */
+const tfEchoTimeoutSec = Math.max(
+  2,
+  Math.min(60, Math.floor(Number(process.env.OPENMOWER_TF_ECHO_TIMEOUT_SEC) || 4))
+);
+/** Per-topic `ros2 topic echo -n 1` / `rostopic echo` wait (ROS1 on Pi often needs several seconds). */
+const rosTopicSampleTimeoutSec = Math.max(
+  2,
+  Math.min(15, Math.floor(Number(process.env.OPENMOWER_ROS_TOPIC_TIMEOUT_SEC) || 4))
+);
+/** If fast topic loop yields nothing, one longer `rostopic echo` on current_state only (ROS1). */
+const rosTopicFallbackTimeoutSec = Math.max(
+  rosTopicSampleTimeoutSec,
+  Math.min(25, Math.floor(Number(process.env.OPENMOWER_ROS_TOPIC_FALLBACK_SEC) || 10))
+);
+/** Per-request HTTP + Docker API + routine file reads (default off to keep logs readable). */
+const verboseLogs = String(process.env.OPENMOWER_VERBOSE_LOGS || "").trim() === "1";
 
 function nowIso() {
   return new Date().toISOString();
@@ -32,6 +53,10 @@ function logError(message, meta = {}) {
 app.use(express.json({ limit: "20mb" }));
 app.use(express.static(__dirname));
 app.use((req, res, next) => {
+  if (!verboseLogs) {
+    next();
+    return;
+  }
   const startedAt = Date.now();
   res.on("finish", () => {
     logInfo("HTTP request finished", {
@@ -73,16 +98,40 @@ function isValidMapFileName(fileName) {
   );
 }
 
-function dockerApiRequest(method, requestPath) {
+function dockerApiRequest(method, requestPath, requestBody = null, options = {}) {
+  const binaryBody = Boolean(options.binaryBody);
   return new Promise((resolve, reject) => {
-    logInfo("Docker API request", { method, requestPath, socket: dockerSocketPath });
+    const payload =
+      requestBody == null ? null : Buffer.from(JSON.stringify(requestBody), "utf8");
+    const headers = {};
+    if (payload) {
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = String(payload.length);
+    }
+    if (verboseLogs) {
+      logInfo("Docker API request", {
+        method,
+        requestPath,
+        hasBody: Boolean(payload),
+        binaryBody,
+      });
+    }
     const req = http.request(
       {
         socketPath: dockerSocketPath,
         path: requestPath,
         method,
+        headers,
       },
       (res) => {
+        if (binaryBody) {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () => {
+            resolve({ statusCode: res.statusCode || 0, body: Buffer.concat(chunks) });
+          });
+          return;
+        }
         let body = "";
         res.setEncoding("utf8");
         res.on("data", (chunk) => {
@@ -94,8 +143,699 @@ function dockerApiRequest(method, requestPath) {
       }
     );
     req.on("error", reject);
+    if (payload) req.write(payload);
     req.end();
   });
+}
+
+/** Reads tf_echo / tf2_echo stdout on stdin; prints "x y yaw" for bash wrapper. No ROS Python deps. */
+const ROBOT_TF_PARSE_PY = `import math
+import re
+import sys
+
+text = sys.stdin.read()
+mt = re.search(r"Translation:\\s*\\[\\s*([-+\\d.eE]+)\\s*,\\s*([-+\\d.eE]+)", text)
+if not mt:
+    sys.exit(1)
+x, y = float(mt.group(1)), float(mt.group(2))
+mq = re.search(
+    r"Quaternion[^\\[]*\\[\\s*([-+\\d.eE]+)\\s*,\\s*([-+\\d.eE]+)\\s*,\\s*([-+\\d.eE]+)\\s*,\\s*([-+\\d.eE]+)\\s*\\]",
+    text,
+)
+yaw = 0.0
+if mq:
+    qx, qy, qz, qw = map(float, mq.groups())
+    siny_cosp = 2 * (qw * qz + qx * qy)
+    cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+print("{:.6f} {:.6f} {:.6f}".format(x, y, yaw))
+`;
+
+function buildRobotPoseProbeBash() {
+  const b64 = Buffer.from(ROBOT_TF_PARSE_PY, "utf8").toString("base64");
+  return [
+    "set +e",
+    `echo '${b64}' | base64 -d > /tmp/om_parse_tf.py`,
+    "for SETUP in /opt/ros/humble/setup.bash /opt/ros/jazzy/setup.bash /opt/ros/iron/setup.bash /opt/ros/noetic/setup.bash; do",
+    '  [ -f "$SETUP" ] || continue',
+    '  # shellcheck disable=SC1090',
+    '  . "$SETUP"',
+    "  break",
+    "done",
+    "for WS in /opt/open_mower_ros/devel/setup.bash /ros_ws/install/setup.bash /workspace/install/setup.bash /colcon_ws/install/setup.bash /catkin_ws/devel/setup.bash /open_mower/install/setup.bash; do",
+    '  [ -f "$WS" ] || continue',
+    '  # shellcheck disable=SC1090',
+    '  . "$WS"',
+    "  break",
+    "done",
+    "if command -v ros2 >/dev/null 2>&1; then",
+    `  run_tf() { timeout ${tfEchoTimeoutSec} ros2 run tf2_ros tf2_echo "$1" "$2" 2>/dev/null; }`,
+    "elif command -v rosrun >/dev/null 2>&1; then",
+    `  run_tf() { timeout ${tfEchoTimeoutSec} rosrun tf tf_echo "$1" "$2" 2>/dev/null; }`,
+    "else",
+    '  echo "ERR no ros2 or rosrun in PATH after sourcing /opt/ros"',
+    "  exit 1",
+    "fi",
+    "sample_extra() {",
+    "  local out t",
+    "  t=$1",
+    `  out=$(timeout ${rosTopicSampleTimeoutSec} ros2 topic echo -n 1 "$t" 2>/dev/null | head -n 48)`,
+    '  [ -z "$out" ] && return 1',
+    '  case "$t" in *emergency*)',
+    '    echo "$out" | grep -qi "active_emergency: false" && echo "$out" | grep -qi "latched_emergency: false" && return 1',
+    "    ;;",
+    "  esac",
+    "  echo EXTRA_BEGIN",
+    '  echo "topic:$t"',
+    '  echo "$out"',
+    "  echo EXTRA_END",
+    "  return 0",
+    "}",
+    "sample_extra_ros1() {",
+    "  local out t",
+    "  t=$1",
+    `  out=$(timeout ${rosTopicSampleTimeoutSec} rostopic echo -n 1 "$t" 2>/dev/null | head -n 48)`,
+    '  [ -z "$out" ] && return 1',
+    '  case "$t" in *emergency*)',
+    '    echo "$out" | grep -qi "active_emergency: false" && echo "$out" | grep -qi "latched_emergency: false" && return 1',
+    "    ;;",
+    "  esac",
+    "  echo EXTRA_BEGIN",
+    '  echo "topic:${t#/}"',
+    '  echo "$out"',
+    "  echo EXTRA_END",
+    "  return 0",
+    "}",
+    'for parent in map odom; do',
+    '  for child in base_link base_footprint; do',
+    "    parsed=$(run_tf \"$parent\" \"$child\" | head -n 45 | python3 /tmp/om_parse_tf.py) || continue",
+    '    echo "OK $parsed $parent $child"',
+    "    ros_extra_sampled=0",
+    "    if command -v rostopic >/dev/null 2>&1; then",
+    '      for t in /mower_logic/current_state /ll/emergency /ll/mower_status; do',
+    "        if sample_extra_ros1 \"$t\"; then ros_extra_sampled=1; break; fi",
+    "      done",
+    "    fi",
+    "    if [ \"$ros_extra_sampled\" != 1 ] && command -v rostopic >/dev/null 2>&1; then",
+    `      out=$(timeout ${rosTopicFallbackTimeoutSec} rostopic echo -n 1 /mower_logic/current_state 2>/dev/null | head -n 48)`,
+    '      if [ -n "$out" ]; then',
+    "        echo EXTRA_BEGIN",
+    '        echo "topic:mower_logic/current_state"',
+    '        echo "$out"',
+    "        echo EXTRA_END",
+    "        ros_extra_sampled=1",
+    "      fi",
+    "    fi",
+    "    if [ \"$ros_extra_sampled\" != 1 ] && command -v ros2 >/dev/null 2>&1; then",
+    '      for tt in mower_logic/current_state ll/emergency ll/mower_status; do',
+    '        t="${tt#/}"',
+    "        if sample_extra \"$t\"; then break; fi",
+    "      done",
+    "    fi",
+    "    exit 0",
+    "  done",
+    "done",
+    'echo "ERR no TF transform (tried map/odom -> base_link/base_footprint)"',
+    "exit 1",
+  ].join("\n");
+}
+
+let robotPoseCache = {
+  expiresAt: 0,
+  payload: null,
+};
+let robotPosePromise = null;
+
+/** Parse rostopic echo text (YAML-ish) for map HUD / tooltips. Percents normalized to 0–100. */
+function extractRosTelemetry(topic, raw) {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) {
+    return null;
+  }
+  const t = (topic || "").toLowerCase();
+  const pickNum = (key) => {
+    const m = trimmed.match(new RegExp(`^${key}:\\s*([-+0-9.eE]+)`, "im"));
+    if (!m) {
+      return null;
+    }
+    const n = Number(m[1]);
+    return Number.isFinite(n) ? n : null;
+  };
+  const pickBool = (key) => {
+    const m = trimmed.match(
+      new RegExp(`^${key}:\\s*(True|False|true|false|0|1)(?:\\s|$)`, "im")
+    );
+    if (!m) {
+      return null;
+    }
+    const v = m[1].toLowerCase();
+    return v === "true" || v === "1";
+  };
+  const pickQuoted = (key) => {
+    const m = trimmed.match(new RegExp(`^${key}:\\s*"([^"]*)"`, "im"));
+    return m ? m[1].trim() : null;
+  };
+
+  const out = {};
+
+  if (t.includes("mower_logic") || /state_name:/m.test(trimmed)) {
+    const sn = pickQuoted("state_name");
+    if (sn) {
+      out.stateName = sn;
+    }
+    const sub = pickQuoted("sub_state_name");
+    if (sub) {
+      out.subStateName = sub;
+    }
+    let bat = pickNum("battery_percent");
+    if (bat != null && bat >= 0 && bat <= 1.05) {
+      bat *= 100;
+    }
+    if (bat != null && bat >= 0 && bat <= 100) {
+      out.batteryPercent = bat;
+    }
+    let gps = pickNum("gps_quality_percent");
+    if (gps != null && gps >= 0 && gps <= 1.05) {
+      gps *= 100;
+    }
+    if (gps != null && gps >= 0 && gps <= 100) {
+      out.gpsQualityPercent = gps;
+    }
+    const ch = pickBool("is_charging");
+    if (ch != null) {
+      out.isCharging = ch;
+    }
+    const em = pickBool("emergency");
+    if (em != null) {
+      out.emergency = em;
+    }
+    const st = pickNum("state");
+    if (st != null) {
+      out.stateCode = st;
+    }
+  }
+
+  if (t.includes("emergency") || /active_emergency:/m.test(trimmed)) {
+    const ae = pickBool("active_emergency");
+    if (ae != null) {
+      out.activeEmergency = ae;
+    }
+    const le = pickBool("latched_emergency");
+    if (le != null) {
+      out.latchedEmergency = le;
+    }
+    const r =
+      trimmed.match(/^reason:\s*'([^']*)'/im) || trimmed.match(/^reason:\s*"([^"]*)"/im);
+    if (r && r[1].trim()) {
+      out.emergencyReason = r[1].trim();
+    }
+  }
+
+  if (t.includes("mower_status") || /mower_esc_temperature:/m.test(trimmed)) {
+    const ch = pickBool("is_charging");
+    if (ch != null) {
+      out.isCharging = ch;
+    }
+    const me = pickBool("mow_enabled");
+    if (me != null) {
+      out.mowEnabled = me;
+    }
+    const rd = pickBool("rain_detected");
+    if (rd != null) {
+      out.rainDetected = rd;
+    }
+    const escT = pickNum("mower_esc_temperature");
+    if (escT != null && escT >= -40 && escT < 120) {
+      out.escTempC = escT;
+    }
+    const rpm = pickNum("mower_motor_rpm");
+    if (rpm != null) {
+      out.mowerMotorRpm = rpm;
+    }
+  }
+
+  return Object.keys(out).length ? out : null;
+}
+
+/** Drives map icon: nav / docking / dock charging / dock full / emergency / error */
+function computeRosVisualMode(health, telemetry) {
+  if (health === "emergency") {
+    return "emergency";
+  }
+  if (health === "error") {
+    return "error";
+  }
+  const stateRaw = String(telemetry?.stateName ?? "");
+  const stateUp = stateRaw.toUpperCase().replace(/\s+/g, "_");
+
+  const docking =
+    /(GOING_TO_DOCK|RETURN_TO_DOCK|NAV_TO_DOCK|DOCKING|APPROACH_DOCK|DOCK_NAV|FIND_DOCK|SEARCH_DOCK|TO_DOCK)/i.test(
+      stateRaw
+    ) && !/UNDOCK/i.test(stateRaw);
+
+  if (docking) {
+    return "docking";
+  }
+
+  if (telemetry?.isCharging === true) {
+    return "dock_charging";
+  }
+
+  const bat = telemetry?.batteryPercent;
+  if (
+    telemetry?.isCharging === false &&
+    Number.isFinite(bat) &&
+    bat >= 88 &&
+    /CHARGING_COMPLETE|DOCKED|AT_DOCK|FULL|STANDBY_DOCK|IDLE_DOCK|PARK_DOCK/i.test(stateUp)
+  ) {
+    return "dock_full";
+  }
+
+  return "nav";
+}
+
+function summarizeRosSnippet(topic, raw) {
+  const trimmed = (raw || "").trim();
+  const firstLine = trimmed.split(/\r?\n/).find((l) => l.trim()) || "";
+  let health = "unknown";
+  let summary = topic ? `Topic: ${topic}` : "ROS status";
+  const blob = `${trimmed}\n${topic || ""}`.toLowerCase();
+  const telemetry = extractRosTelemetry(topic, trimmed);
+
+  const stateNameQuoted = trimmed.match(/state_name:\s*"([^"]*)"/);
+  const stateNameVal = (stateNameQuoted?.[1] ?? "").trim();
+  const reasonQuoted =
+    trimmed.match(/reason:\s*'([^']*)'/) || trimmed.match(/reason:\s*"([^"]*)"/);
+  const reasonVal = (reasonQuoted?.[1] ?? "").trim();
+
+  const activeEmerg = /active_emergency:\s*true/i.test(trimmed);
+  const latchedEmerg = /latched_emergency:\s*true/i.test(trimmed);
+  const highLevelEmerg = /\bemergency:\s*true\b/i.test(trimmed);
+
+  if (activeEmerg || latchedEmerg || highLevelEmerg) {
+    health = "emergency";
+    const parts = [];
+    if (activeEmerg && latchedEmerg) {
+      parts.push("Emergency (active + latched)");
+    } else if (activeEmerg) {
+      parts.push("Emergency (active)");
+    } else if (latchedEmerg) {
+      parts.push("Latched emergency");
+    } else {
+      parts.push("Emergency");
+    }
+    if (stateNameVal) {
+      parts.push(stateNameVal);
+    }
+    if (reasonVal) {
+      parts.push(`Reason: ${reasonVal}`);
+    }
+    summary = parts.join(" · ");
+    return {
+      topic: topic || null,
+      summary,
+      health,
+      telemetry,
+      visualMode: computeRosVisualMode(health, telemetry),
+      rawSample: trimmed.slice(0, 420),
+    };
+  }
+
+  if (/error|fault|stuck|fail/.test(blob)) {
+    health = "error";
+    summary = "Fault / error in status message";
+  } else if (/\bis_charging:\s*true\b/i.test(trimmed)) {
+    health = "charging";
+    summary = "Charging";
+  } else if (/mow|mowing|cut|coverage|idle|pause|driving|nav/.test(blob)) {
+    health = "ok";
+    summary = firstLine.slice(0, 100) || summary;
+  } else if (trimmed) {
+    summary = firstLine.slice(0, 100) || summary;
+  }
+
+  if (telemetry?.isCharging === true && health !== "emergency" && health !== "error") {
+    health = "charging";
+  }
+
+  return {
+    topic: topic || null,
+    summary,
+    health,
+    telemetry,
+    visualMode: computeRosVisualMode(health, telemetry),
+    rawSample: trimmed.slice(0, 420),
+  };
+}
+
+function parseRobotProbeOutput(text) {
+  const full = text.trim();
+  if (!full) {
+    return { ok: false, error: "Empty response from pose probe", liveRobotFatal: false, ros: null };
+  }
+  const lines = full.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  let ros = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i] === "EXTRA_BEGIN") {
+      const endIdx = lines.indexOf("EXTRA_END", i + 1);
+      if (endIdx > i) {
+        const chunkLines = lines.slice(i + 1, endIdx);
+        const topicLine = chunkLines.find((l) => l.startsWith("topic:"));
+        const topic = topicLine ? topicLine.slice(6).trim() : null;
+        const dataLines = chunkLines.filter((l) => !l.startsWith("topic:"));
+        const raw = dataLines.join("\n");
+        ros = summarizeRosSnippet(topic, raw);
+      }
+      break;
+    }
+  }
+
+  const okLine = [...lines].reverse().find((l) => l.startsWith("OK "));
+  const errLine = lines.find((l) => l.startsWith("ERR "));
+
+  if (okLine) {
+    const parts = okLine.slice(3).trim().split(/\s+/);
+    if (parts.length < 5) {
+      return {
+        ok: false,
+        error: "Malformed pose line",
+        liveRobotFatal: false,
+        ros,
+      };
+    }
+    const x = Number(parts[0]);
+    const y = Number(parts[1]);
+    const yaw = Number(parts[2]);
+    const parentFrame = parts[3];
+    const childFrame = parts[4];
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(yaw)) {
+      return {
+        ok: false,
+        error: "Non-numeric pose fields",
+        liveRobotFatal: false,
+        ros,
+      };
+    }
+    return {
+      ok: true,
+      x,
+      y,
+      yaw,
+      frameParent: parentFrame,
+      frameChild: childFrame,
+      units: "meters_map_frame",
+      ros,
+      liveRobotFatal: false,
+    };
+  }
+
+  if (errLine) {
+    return {
+      ok: false,
+      error: errLine.slice(4).trim() || "Unknown TF error",
+      liveRobotFatal: false,
+      ros,
+    };
+  }
+
+  return {
+    ok: false,
+    error: full.slice(0, 200),
+    liveRobotFatal: false,
+    ros,
+  };
+}
+
+async function dockerExecInContainer(container, cmd, env = []) {
+  const create = await dockerApiRequest(
+    "POST",
+    `/containers/${encodeURIComponent(container)}/exec`,
+    {
+      AttachStdout: true,
+      AttachStderr: true,
+      Tty: false,
+      Env: env,
+      Cmd: cmd,
+    }
+  );
+  if (create.statusCode < 200 || create.statusCode >= 300) {
+    let detail = create.body;
+    try {
+      const parsed = JSON.parse(create.body);
+      if (parsed?.message) detail = parsed.message;
+    } catch (_e) {
+      /* keep body string */
+    }
+    throw new Error(`exec create failed (${create.statusCode}): ${detail}`);
+  }
+  let execId;
+  try {
+    execId = JSON.parse(create.body).Id;
+  } catch (_e) {
+    throw new Error("exec create returned invalid JSON");
+  }
+  if (!execId) {
+    throw new Error("exec create missing Id");
+  }
+
+  const start = await dockerApiRequest(
+    "POST",
+    `/exec/${execId}/start`,
+    {
+      Detach: false,
+      Tty: false,
+    },
+    { binaryBody: true }
+  );
+  if (start.statusCode < 200 || start.statusCode >= 300) {
+    const errText =
+      Buffer.isBuffer(start.body) ? start.body.toString("utf8") : String(start.body);
+    throw new Error(`exec start failed (${start.statusCode}): ${errText}`);
+  }
+
+  return demuxDockerStream(start.body);
+}
+
+function demuxDockerStream(raw) {
+  if (!Buffer.isBuffer(raw)) {
+    return { stdout: String(raw || ""), stderr: "" };
+  }
+  let stdoutChunks = [];
+  let stderrChunks = [];
+  let offset = 0;
+  while (offset + 8 <= raw.length) {
+    const streamType = raw.readUInt8(offset);
+    const len = raw.readUInt32BE(offset + 4);
+    const start = offset + 8;
+    const end = start + len;
+    if (end > raw.length) break;
+    const chunk = raw.subarray(start, end);
+    if (streamType === 1) stdoutChunks.push(chunk);
+    else if (streamType === 2) stderrChunks.push(chunk);
+    offset = end;
+  }
+  if (stdoutChunks.length === 0 && stderrChunks.length === 0 && raw.length) {
+    return { stdout: raw.toString("utf8"), stderr: "" };
+  }
+  return {
+    stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+    stderr: Buffer.concat(stderrChunks).toString("utf8"),
+  };
+}
+
+async function inspectPoseContainer() {
+  const r = await dockerApiRequest(
+    "GET",
+    `/containers/${encodeURIComponent(poseContainerName)}/json`
+  );
+  if (r.statusCode === 404) {
+    let msg = `No such container: ${poseContainerName}`;
+    try {
+      const parsed = JSON.parse(r.body);
+      if (parsed?.message) msg = parsed.message;
+    } catch (_e) {
+      /* keep default */
+    }
+    return {
+      ok: false,
+      error: msg,
+      container: {
+        name: poseContainerName,
+        exists: false,
+        running: false,
+        status: "missing",
+      },
+    };
+  }
+  if (r.statusCode < 200 || r.statusCode >= 300) {
+    return {
+      ok: false,
+      error: `docker inspect failed (${r.statusCode})`,
+      container: {
+        name: poseContainerName,
+        exists: null,
+        running: false,
+        status: "unknown",
+      },
+    };
+  }
+  let j;
+  try {
+    j = JSON.parse(r.body);
+  } catch (_e) {
+    return {
+      ok: false,
+      error: "docker inspect returned invalid JSON",
+      container: null,
+    };
+  }
+  const running = j.State?.Running === true;
+  const status = j.State?.Status || "unknown";
+  return {
+    ok: true,
+    container: {
+      name: poseContainerName,
+      exists: true,
+      running,
+      status,
+      restartCount: j.RestartCount ?? 0,
+      startedAt: j.State?.StartedAt || null,
+    },
+  };
+}
+
+async function fetchRobotPoseFromRosContainer() {
+  if (poseDisabled) {
+    return {
+      ok: false,
+      error: "Robot pose disabled via OPENMOWER_POSE_DISABLE=1",
+      liveRobotFatal: true,
+      ros: null,
+    };
+  }
+  const bashCmd = buildRobotPoseProbeBash();
+  const { stdout, stderr } = await dockerExecInContainer(poseContainerName, [
+    "/bin/bash",
+    "-lc",
+    bashCmd,
+  ]);
+  const trimmedErr = stderr.trim();
+  if (trimmedErr) {
+    logWarn("Robot pose stderr", { container: poseContainerName, stderr: trimmedErr });
+  }
+  return parseRobotProbeOutput(stdout || stderr || "");
+}
+
+async function getRobotPoseCached() {
+  const now = Date.now();
+  if (robotPoseCache.payload && robotPoseCache.expiresAt > now) {
+    return { ...robotPoseCache.payload, cached: true };
+  }
+  if (robotPosePromise) {
+    return robotPosePromise;
+  }
+  robotPosePromise = (async () => {
+    try {
+      if (poseDisabled) {
+        const payload = {
+          ok: false,
+          error: "Robot pose disabled via OPENMOWER_POSE_DISABLE=1",
+          liveRobotFatal: true,
+          container: null,
+          ros: null,
+        };
+        robotPoseCache = {
+          expiresAt: Date.now() + poseCacheMs,
+          payload,
+        };
+        return { ...payload, cached: false };
+      }
+
+      const inspect = await inspectPoseContainer();
+      if (!inspect.ok) {
+        const payload = {
+          ok: false,
+          error: inspect.error,
+          container: inspect.container,
+          ros: null,
+          liveRobotFatal: true,
+        };
+        robotPoseCache = {
+          expiresAt: Date.now() + Math.min(poseCacheMs, 2000),
+          payload,
+        };
+        return { ...payload, cached: false };
+      }
+      if (!inspect.container.running) {
+        const payload = {
+          ok: false,
+          error: `Container '${poseContainerName}' is not running (${inspect.container.status})`,
+          container: inspect.container,
+          ros: null,
+          liveRobotFatal: true,
+        };
+        robotPoseCache = {
+          expiresAt: Date.now() + Math.min(poseCacheMs, 2000),
+          payload,
+        };
+        return { ...payload, cached: false };
+      }
+
+      let posePayload;
+      try {
+        posePayload = await fetchRobotPoseFromRosContainer();
+      } catch (error) {
+        const payload = {
+          ok: false,
+          error: error.message || "Docker exec failed (is the socket mounted?)",
+          container: inspect.container,
+          ros: null,
+          liveRobotFatal: true,
+        };
+        robotPoseCache = {
+          expiresAt: Date.now() + Math.min(poseCacheMs, 2000),
+          payload,
+        };
+        logWarn("Robot pose exec failed", {
+          container: poseContainerName,
+          error: error.message,
+        });
+        return { ...payload, cached: false };
+      }
+
+      const payload = {
+        ...posePayload,
+        container: inspect.container,
+        liveRobotFatal: posePayload.liveRobotFatal === true,
+      };
+      robotPoseCache = {
+        expiresAt: Date.now() + poseCacheMs,
+        payload,
+      };
+      return { ...payload, cached: false };
+    } catch (error) {
+      const payload = {
+        ok: false,
+        error: error.message || "Robot pose request failed",
+        container: null,
+        ros: null,
+        liveRobotFatal: true,
+      };
+      robotPoseCache = {
+        expiresAt: Date.now() + Math.min(poseCacheMs, 2000),
+        payload,
+      };
+      logWarn("Robot pose request failed", {
+        container: poseContainerName,
+        error: error.message,
+      });
+      return { ...payload, cached: false };
+    } finally {
+      robotPosePromise = null;
+    }
+  })();
+  return robotPosePromise;
 }
 
 async function restartOpenMowerContainer() {
@@ -143,7 +883,7 @@ async function restartOpenMowerContainer() {
 
 app.get("/api/params", async (_req, res) => {
   try {
-    logInfo("Reading mower params", { file: paramsPath });
+    if (verboseLogs) logInfo("Reading mower params", { file: paramsPath });
     const content = await fs.readFile(paramsPath, "utf8");
     const parsed = yaml.load(content);
     const datum = extractGpsDatum(parsed);
@@ -153,7 +893,7 @@ app.get("/api/params", async (_req, res) => {
         error: "datum_lat/datum_long not found in mower_params.yaml",
       });
     }
-    logInfo("Loaded mower params datum", datum);
+    if (verboseLogs) logInfo("Loaded mower params datum", datum);
     return res.json(datum);
   } catch (error) {
     if (error.code === "ENOENT") {
@@ -165,9 +905,32 @@ app.get("/api/params", async (_req, res) => {
   }
 });
 
+app.get("/api/robot_pose", async (_req, res) => {
+  try {
+    const result = await getRobotPoseCached();
+    const body = JSON.stringify({
+      container: poseContainerName,
+      ...result,
+    });
+    // Avoid Express res.json → res.send ETag / 304 handling: browsers send
+    // If-None-Match on poll; 304 + empty body breaks live pose/status updates.
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Length", Buffer.byteLength(body, "utf8"));
+    return res.end(body);
+  } catch (error) {
+    logError("Robot pose endpoint failed", { error: error.message });
+    return res.status(500).json({
+      ok: false,
+      error: error.message || "robot_pose_failed",
+    });
+  }
+});
+
 app.get("/api/map", async (_req, res) => {
   try {
-    logInfo("Reading active map file", { file: mapPath });
+    if (verboseLogs) logInfo("Reading active map file", { file: mapPath });
     const content = await fs.readFile(mapPath, "utf8");
     return res.type("application/json").send(content);
   } catch (error) {
@@ -182,7 +945,7 @@ app.get("/api/map", async (_req, res) => {
 
 app.get("/api/map/backups", async (_req, res) => {
   try {
-    logInfo("Listing map backups", { directory: mapDirectory });
+    if (verboseLogs) logInfo("Listing map backups", { directory: mapDirectory });
     const entries = await fs.readdir(mapDirectory, { withFileTypes: true });
     const mapFiles = entries
       .filter((entry) => entry.isFile() && isValidMapFileName(entry.name))
@@ -192,7 +955,7 @@ app.get("/api/map/backups", async (_req, res) => {
         if (b === "map.json") return 1;
         return b.localeCompare(a);
       });
-    logInfo("Listed map files", { count: mapFiles.length });
+    if (verboseLogs) logInfo("Listed map files", { count: mapFiles.length });
     return res.json({ backups: mapFiles });
   } catch (error) {
     logError("Failed to list map backups", { directory: mapDirectory, error: error.message });
@@ -207,7 +970,7 @@ app.get("/api/map/backups/:backupName", async (req, res) => {
       return res.status(400).json({ error: "Invalid map file name" });
     }
     const backupPath = path.join(mapDirectory, backupName);
-    logInfo("Reading map/backup file", { file: backupPath });
+    if (verboseLogs) logInfo("Reading map/backup file", { file: backupPath });
     const content = await fs.readFile(backupPath, "utf8");
     return res.type("application/json").send(content);
   } catch (error) {
@@ -303,6 +1066,13 @@ app.listen(port, () => {
     mapPath,
     paramsPath,
     restartContainerName,
+    poseContainerName,
+    poseCacheMs,
+    tfEchoTimeoutSec,
+    rosTopicSampleTimeoutSec,
+    rosTopicFallbackTimeoutSec,
+    poseDisabled,
+    verboseLogs,
     dockerSocketPath,
   });
 });

@@ -1,8 +1,12 @@
 ﻿services:
   openmower-map-editor:
     build:
-      context: .
-    image: ghcr.io/revlaw/openmowermapeditor:latest
+       context: .
+       dockerfile: Dockerfile
+       platforms:
+         - linux/amd64
+         - linux/arm64
+    image: ghcr.io/revlaw/openmowermapeditor:dev
     container_name: openmower-map-editor
     ports:
       - "5080:80"

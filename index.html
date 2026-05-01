@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenMower Map Editor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
+    />
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -18,7 +24,7 @@
         <div class="panel-header">
           <h1>OpenMower Map Editor</h1>
           <button id="themeToggle" class="theme-toggle" type="button" title="Toggle light/dark mode">
-            ☀️
+            <span class="material-symbols-outlined" aria-hidden="true">light_mode</span>
           </button>
         </div>
         <p class="panel-subtitle">Fast map edits with tool-based controls.</p>
@@ -47,10 +53,28 @@
               <option value="nav">nav</option>
             </select>
           </label>
-          <div class="undo-redo-row">
-            <button id="addZone" type="button" title="Add new zone">Add zone</button>
-            <button id="removeZone" type="button" title="Remove selected zone">Remove zone</button>
+          <div class="undo-redo-row zone-actions-row">
+            <button id="addZone" type="button" class="btn-with-icon btn-zone-action" title="Add new zone">
+              <span class="material-symbols-outlined" aria-hidden="true">add_circle</span>
+              <span>Add zone</span>
+            </button>
+            <button id="removeZone" type="button" class="btn-with-icon btn-zone-action" title="Remove selected zone">
+              <span class="material-symbols-outlined" aria-hidden="true">remove_circle</span>
+              <span>Remove zone</span>
+            </button>
           </div>
+          <button
+            type="button"
+            id="toggleRobotLive"
+            class="btn-with-icon robot-live-toggle"
+            title="Show robot position on the map (ROS TF via Docker)"
+            aria-pressed="false"
+            aria-label="Toggle live robot position on the map"
+          >
+            <span class="material-symbols-outlined" aria-hidden="true">radar</span>
+            <span>Live robot</span>
+          </button>
+          <div id="robotLiveReadout" class="robot-live-readout" hidden></div>
         </section>
 
         <section class="panel-card geo-box">
@@ -67,7 +91,10 @@
             Origin longitude
             <input id="originLng" type="number" step="0.000001" value="13.405" />
           </label>
-          <button id="applyProjection" type="button">Apply projection</button>
+          <button id="applyProjection" type="button" class="btn-with-icon">
+            <span class="material-symbols-outlined" aria-hidden="true">explore</span>
+            <span>Apply projection</span>
+          </button>
         </section>
 
         <section class="panel-card controls">
@@ -75,10 +102,10 @@
           <p class="controls-hint">Hover a tool for details.</p>
           <div class="undo-redo-row">
             <button id="undoEdit" class="tool-btn" type="button" title="Undo last edit action">
-              ↶
+              <span class="material-symbols-outlined" aria-hidden="true">undo</span>
             </button>
             <button id="redoEdit" class="tool-btn" type="button" title="Redo last undone action">
-              ↷
+              <span class="material-symbols-outlined" aria-hidden="true">redo</span>
             </button>
           </div>
           <div class="tool-row">
@@ -89,7 +116,7 @@
               title="Multi-select tool"
               aria-label="Multi-select tool"
             >
-              ◫
+              <span class="material-symbols-outlined" aria-hidden="true">select_all</span>
             </button>
             <button
               id="toggleAdd"
@@ -98,7 +125,7 @@
               title="Add point tool"
               aria-label="Add point tool"
             >
-              ＋
+              <span class="material-symbols-outlined" aria-hidden="true">add</span>
             </button>
             <button
               id="toggleBrush"
@@ -107,7 +134,7 @@
               title="Push brush tool"
               aria-label="Push brush tool"
             >
-              ◯
+              <span class="material-symbols-outlined" aria-hidden="true">blur_circular</span>
             </button>
             <button
               id="toggleSnap"
@@ -116,7 +143,7 @@
               title="Snap line tool"
               aria-label="Snap line tool"
             >
-              ╱
+              <span class="material-symbols-outlined" aria-hidden="true">horizontal_rule</span>
             </button>
             <button
               id="cleanupPoints"
@@ -125,7 +152,7 @@
               title="Cleanup tool"
               aria-label="Cleanup close points"
             >
-              🧹
+              <span class="material-symbols-outlined" aria-hidden="true">cleaning_services</span>
             </button>
             <button
               id="removePoint"
@@ -134,7 +161,7 @@
               title="Remove selected point"
               aria-label="Remove selected point"
             >
-              ✕
+              <span class="material-symbols-outlined" aria-hidden="true">delete</span>
             </button>
           </div>
 
@@ -189,17 +216,20 @@
           <button
             id="saveMapJson"
             type="button"
+            class="btn-with-icon"
             title="Save to /data/ros/map.json (fallback: browser download)"
           >
-            Save map.json
+            <span class="material-symbols-outlined" aria-hidden="true">save</span>
+            <span>Save map.json</span>
           </button>
           <button
             id="saveMapJsonRestart"
-            class="btn-warn"
+            class="btn-warn btn-with-icon"
             type="button"
             title="Save to /data/ros/map.json and restart open_mower_ros (fallback: browser download)"
           >
-            Save + restart ROS
+            <span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>
+            <span>Save + restart ROS</span>
           </button>
         </section>
 
