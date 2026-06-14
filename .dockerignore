@@ -1,6 +1,13 @@
-﻿node_modules
+node_modules
 .git
 *.log
 terminals
 agent-transcripts
 mcps
+
+# Build output (regenerated inside the image)
+dist
+
+# Private host data — never bake into the image
+ros
+params

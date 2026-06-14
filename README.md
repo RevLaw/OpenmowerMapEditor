@@ -1,8 +1,8 @@
-﻿# OpenMower Map Editor
+# OpenMower Map Editor
 
 Browser-based map editor for OpenMower JSON maps, deployed via Dockge on OpenMower.
 
-> **Vibecoded notice:** this project is **purely vibecoded**.
+Built with **Svelte + Vite + Tailwind** (compiled to static assets at build time) and served by a small **Express** backend. The compile step runs during the Docker build, so the Raspberry Pi runtime stays light — it only serves the prebuilt `dist/` plus the `/api/*` endpoints.
 
 ![OpenMower Map Editor Screenshot](./screenshot1.jpg)
 
@@ -12,14 +12,22 @@ Browser-based map editor for OpenMower JSON maps, deployed via Dockge on OpenMow
 - Drag single points directly (click and drag without selecting a separate handle first)
 - Add and remove points
 - Add and remove full zones (`mow`, `obstacle`, `nav`)
-- Push nearby points outward with a brush click/drag tool and live radius preview
+- Push points along your drag with a smear brush (radius + strength sliders, live cursor preview)
 - Lock closed-loop endpoints (first/last point stay synchronized)
 - Snap a selected index range to a straight, equally spaced line
 - Multi-select points and move them together
 - Box select in multi-select mode (`Shift + drag`)
-- Cleanup near-duplicate points with a meter threshold
 - Move the home station marker (`docking_stations[0].position`)
 - Undo/redo history for editing actions (arrow buttons)
+- **Command palette** (`Ctrl`/`Cmd + K`) to run any action, and a **keyboard-shortcut** map with an on-screen cheat sheet (`?`)
+- **Live measurements** — per-zone area (m²/ha) and perimeter, plus net mowable area (mow minus contained obstacles)
+- **Geometry validation** — flags self-intersections, too-few points, degenerate/duplicate vertices, orphan obstacles, and a dock placed inside an obstacle; click an issue to zoom to it
+- **Quick create & transform** — draw rectangle/circle zones, place the dock by clicking, duplicate a zone, move a whole zone, rotate/scale about its centroid, simplify an outline (Douglas–Peucker), smart add-point on the nearest edge, multi-point delete, and arrow-key nudging
+- **Switchable base maps** (bottom-left control) — Esri satellite (default), the free **20 cm Lower Saxony aerial (DOP20)**, or a custom XYZ/WMS URL; choice persists. Imagery is limited by its source resolution (DOP20 is true 20 cm), so very close zoom softens — for sharper-than-20 cm you'd need a paid/keyed provider via the custom URL
+- **Mowing coverage preview** — overlay the rows the robot drives: green **outline laps** (driven first) around the edge, then cyan **back-and-forth fill** inside, with obstacles carved out. Controls mirror OpenMower `mower_logic` (`outline_overlap_count`, `mow_angle_offset`, `mow_angle_offset_is_absolute`) plus a tool-width spacing; the angle is relative to the zone's main axis unless set absolute. Visual only; settings are remembered locally but not written to map.json (OpenMower decides the actual mowing pattern)
+- **Zone management** — change a zone's type (mow/obstacle/nav) after creation, rename its id, and reorder zones in the list
+- **Unsaved-changes guard** — an "Unsaved" indicator in the sidebar and a browser prompt before you leave with unsaved edits
+- Toast notifications and a modern dark-tech / HUD interface with glass map-overlay panels
 - Type-aware overlays while editing:
   - editing `mow`: shows `obstacle` (red dashed) and `nav` (blue dashed)
   - editing `obstacle`: shows `mow` (white dashed) and `nav` (blue dashed)
@@ -86,24 +94,34 @@ services:
   - **Save + restart ROS** does the same, then restarts the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
   - If direct save is unavailable, fallback is downloading the map as `openmower-map-edited.json`.
 9. Roll back from backup (if needed):
-  - Use the **Load map/backup** dropdown (under file upload) to pick either `map.json` (running) or a `map.json.bak-`* file from `/data/ros`.
-  - The selected entry is loaded immediately.
+  - Click **Load map / backup…** to open the gallery of `map.json` (running) and `map.json.bak-*` versions from `/data/ros`.
+  - Each version shows a **mini-map preview**, a friendly timestamp, summary stats (zones / points / mow area), and the **difference vs your current map** (Δ zones / points / area).
+  - Click **Load this version** to load it (nothing is overwritten).
   - Click **Save map.json** (or **Save + restart ROS**) to make a loaded backup your active `map.json`.
 
 ## Tool Legend
 
-Toolbar uses [Material Symbols Outlined](https://fonts.google.com/icons) (loaded from Google Fonts).
+Tools live in the floating dock on the right (icons from [Material Symbols Outlined](https://fonts.google.com/icons)). Every action is also reachable from the **command palette** (`Ctrl`/`Cmd + K`); press `?` for the full shortcut cheat sheet.
 
-- **undo** / **redo** — history.
-- **select_all** — multi-select (click points or `Shift + drag` rectangle, then drag group handle).
-- **add** — add point (click map to insert).
-- **blur_circular** — push brush (click or hold-and-drag).
-- **horizontal_rule** — snap line (pick start and end point).
-- **cleaning_services** — cleanup (first click enables slider, second click applies).
-- **delete** — remove selected point.
+- **near_me** — select / drag (`V`): default mode, drag a vertex or click to select. Arrow keys nudge the selection (`Shift` = larger step).
+- **add_location_alt** — add point (`A`): click near an outline and the vertex is inserted on the **nearest edge**.
+- **blur_circular** — push brush (`B`): drag across the outline to push points along your stroke; radius/strength sliders appear in the sidebar.
+- **horizontal_rule** — snap line (`S`): pick start and end point.
+- **select_all** — multi-select (`M`): click points or `Shift + drag` a rectangle, then drag the group handle.
+- **open_with** — move whole zone (`G`): drag the centroid handle to translate the entire zone.
+- **delete** — remove selected point(s) (`Del`): deletes the whole multi-selection when several points are selected.
+- **undo** / **redo** — history (`Ctrl + Z` / `Ctrl + Shift + Z`).
+
+Create & transform (sidebar **Create** and **Transform zone** panels, also in the command palette):
+
+- **Rectangle** (`R`) / **Circle** (`O`) — drag on the map to draw a new zone of the chosen type.
+- **Place dock** — click the map to set the docking station (`docking_stations[0]`).
+- **Duplicate zone** (`Ctrl + D`) — copy the selected zone, offset so the copy is visible.
+- **Rotate** ±15° / **Scale** ±5% — transform the selected zone about its centroid.
+- **Simplify outline** — Douglas–Peucker reduction with an adjustable tolerance, to thin out dense outlines.
 - `Add zone` / `Remove zone` create or delete the currently selected `mow` / `obstacle` / `nav` area.
 - **Live robot** (toolbar toggle) polls ROS TF via the mounted Docker socket and shows heading; marker color/icon follows **visual mode** (nav, docking, dock charging, dock full, emergency, error). Preference is stored in `localStorage`. The dock uses **ev_station** on the map.
-- `Load map/backup` dropdown loads `map.json` or a backup file directly on selection.
+- `Load map / backup…` opens a gallery of saved versions, each with a mini-map preview, timestamp, stats, and a diff vs your current map.
 
 Tool sliders are contextual:
 
@@ -111,6 +129,33 @@ Tool sliders are contextual:
 - Cleanup slider appears only while cleanup mode is active.
 - On touch devices, brush also supports finger paint (`touchstart/move/end`).
 - Light/dark mode affects sidebar/tool styling only. Map line/point colors remain identical in both modes.
+
+## Development
+
+Requirements: Node 20+.
+
+```bash
+npm install
+
+# Run the Express backend with local (non-container) data paths:
+PORT=5080 MAP_PATH=./ros/map.json PARAMS_PATH=./params/mower_params.yaml node server.js
+
+# In another terminal, start Vite with HMR (proxies /api -> :5080):
+npm run dev          # http://localhost:5173
+
+npm test             # vitest unit tests (geometry, projection, tools, validation)
+npm run build        # compile the Svelte app into dist/
+npm start            # serve the built dist/ via Express (production entry)
+```
+
+Project layout:
+
+- `src/lib/` — framework-free, unit-tested logic: `geo/` (projection, geometry, brush/snap/cleanup tools), `format/` (map.json + outline helpers), `validation.js`, `measurements.js`, `api.js`, and Svelte `stores/`.
+- `src/map/` — the Leaflet controller (rendering + interactions).
+- `src/components/` — Svelte UI (shell, sidebar panels, tool dock, robot HUD, command palette).
+- `server.js` — unchanged API; serves the built `dist/`. `MAP_PATH` / `PARAMS_PATH` override the in-container defaults for local dev.
+
+`POST /api/map`, `GET /api/map`, `/api/map/backups`, `/api/params`, and `/api/robot_pose` are the stable backend contract; the map.json on-disk format is unchanged.
 
 ## Environment variables
 
@@ -126,8 +171,10 @@ Tool sliders are contextual:
 | `OPENMOWER_VERBOSE_LOGS` | off | Set `1` to log every HTTP request, Docker API call, and routine file reads |
 | `DOCKER_SOCKET_PATH` | `/var/run/docker.sock` | Override if your host uses a non-default Docker socket |
 | `PORT` | `80` | HTTP listen port inside the container (compose maps `5080:80`) |
+| `MAP_PATH` | `/data/ros/map.json` | Map file path (override for local dev) |
+| `PARAMS_PATH` | `/data/params/mower_params.yaml` | Params file path (override for local dev) |
 
-Paths for map and params inside the container are fixed (`/data/ros`, `/data/params`); only the host bind mounts change.
+Inside the container the defaults match the bind mounts (`/data/ros`, `/data/params`); for local development point `MAP_PATH` / `PARAMS_PATH` at files in the repo.
 
 ## Security
 
