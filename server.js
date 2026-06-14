@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const fs = require("fs/promises");
 const http = require("http");
 const path = require("path");
@@ -7,9 +7,12 @@ const yaml = require("js-yaml");
 const app = express();
 const port = process.env.PORT || 80;
 
-const paramsPath = "/data/params/mower_params.yaml";
-const mapPath = "/data/ros/map.json";
+// Defaults match the in-container mount points; overridable for local dev
+// (e.g. PARAMS_PATH=./params/mower_params.yaml MAP_PATH=./ros/map.json).
+const paramsPath = process.env.PARAMS_PATH || "/data/params/mower_params.yaml";
+const mapPath = process.env.MAP_PATH || "/data/ros/map.json";
 const mapDirectory = path.dirname(mapPath);
+const distDir = path.join(__dirname, "dist");
 const dockerSocketPath = process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock";
 const restartContainerName = process.env.OPENMOWER_CONTAINER_NAME || "open_mower_ros";
 const poseContainerName = process.env.OPENMOWER_POSE_CONTAINER || restartContainerName;
@@ -51,7 +54,7 @@ function logError(message, meta = {}) {
 }
 
 app.use(express.json({ limit: "20mb" }));
-app.use(express.static(__dirname));
+app.use(express.static(distDir));
 app.use((req, res, next) => {
   if (!verboseLogs) {
     next();
@@ -1046,6 +1049,20 @@ app.post("/api/map", async (req, res) => {
     logError("Failed to save map.json", { file: mapPath, error: error.message });
     return res.status(500).json({ error: "Failed to save map.json" });
   }
+});
+
+// SPA fallback: serve the built index.html for any non-API GET so the
+// single-page app loads on a hard refresh. API 404s fall through untouched.
+app.get(/^(?!\/api\/).*/, (req, res, next) => {
+  if (req.method !== "GET") {
+    next();
+    return;
+  }
+  res.sendFile(path.join(distDir, "index.html"), (error) => {
+    if (error) {
+      next();
+    }
+  });
 });
 
 process.on("uncaughtException", (error) => {
