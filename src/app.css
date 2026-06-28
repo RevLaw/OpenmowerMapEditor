@@ -1,6 +1,6 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+/* Keep using the existing JS theme config (colors, fonts, shadows, etc.). */
+@config "../tailwind.config.js";
 
 /* ============================================================= *
  * Design tokens — modern dark tech / HUD.

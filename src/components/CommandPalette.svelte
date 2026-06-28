@@ -88,6 +88,7 @@
       on:click|stopPropagation
       transition:scale={{ duration: 140, start: 0.97 }}
       role="dialog"
+      tabindex="-1"
       aria-label="Command palette"
     >
       <div class="flex items-center gap-2 border-b px-3.5 py-2.5" style="border-color:var(--edge-soft)">

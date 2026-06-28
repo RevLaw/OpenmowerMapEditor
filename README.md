@@ -2,7 +2,7 @@
 
 Browser-based map editor for OpenMower JSON maps, deployed via Dockge on OpenMower.
 
-Built with **Svelte + Vite + Tailwind** (compiled to static assets at build time) and served by a small **Express** backend. The compile step runs during the Docker build, so the Raspberry Pi runtime stays light — it only serves the prebuilt `dist/` plus the `/api/*` endpoints.
+Built with **Svelte 5 + Vite 8 + Tailwind CSS 4** (compiled to static assets at build time) and served by a small **Express 5** backend. The compile step runs during the Docker build, so the Raspberry Pi runtime stays light — it only serves the prebuilt `dist/` plus the `/api/*` endpoints.
 
 ![OpenMower Map Editor Screenshot](./screenshot1.jpg)
 
@@ -135,7 +135,14 @@ Tool sliders are contextual:
 
 ## Development
 
-Requirements: Node 20+.
+Requirements: Node **20.19+** (Vite 8 / Vitest 4 floor); Node 22 LTS recommended.
+
+Stack (kept current):
+
+- Svelte **5**, Vite **8**, `@sveltejs/vite-plugin-svelte` **7**
+- Tailwind CSS **4** (`@tailwindcss/postcss`), PostCSS **8**
+- Vitest **4** (+ happy-dom for the component mount smoke test)
+- Express **5**, js-yaml **5**, Leaflet **1.9**
 
 ```bash
 npm install

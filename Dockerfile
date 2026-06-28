@@ -1,5 +1,6 @@
 # ---- Build stage: compile the Svelte/Vite frontend into dist/ ----
-FROM node:20-alpine AS build
+# Node 22 LTS — Vite 8 / Vitest 4 require Node >= 20.19.
+FROM node:22-alpine AS build
 
 WORKDIR /app
 
@@ -10,7 +11,7 @@ COPY . .
 RUN npm run build
 
 # ---- Runtime stage: lean Express server serving the built dist/ ----
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 ENV NODE_ENV=production
