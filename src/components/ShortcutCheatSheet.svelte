@@ -43,6 +43,7 @@
       on:click|stopPropagation
       transition:scale={{ duration: 140, start: 0.97 }}
       role="dialog"
+      tabindex="-1"
       aria-label="Keyboard shortcuts"
     >
       <header class="flex items-center justify-between border-b px-4 py-3" style="border-color:var(--edge-soft)">

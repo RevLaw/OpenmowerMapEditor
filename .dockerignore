@@ -1,13 +1,37 @@
-node_modules
+# VCS / CI
 .git
-*.log
+.github
+
+# Dependencies & build output (reinstalled / regenerated in the image)
+node_modules
+dist
+dist-ssr
+coverage
+.vite
+.cache
+
+# Local agent / IDE artifacts
+.cursor
+.claude
+.vscode
+.idea
 terminals
 agent-transcripts
 mcps
 
-# Build output (regenerated inside the image)
-dist
+# Logs
+*.log
 
-# Private host data — never bake into the image
+# Secrets & private host data — never bake into the image
+.env
+.env.*
+*.pem
+*.key
+map.json
+*.local.json
 ros
 params
+
+# Docs / compose (not needed inside the image)
+*.md
+docker-compose*.yml

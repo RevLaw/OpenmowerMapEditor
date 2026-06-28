@@ -18,6 +18,9 @@ export default defineConfig({
       "/api": { target: apiTarget, changeOrigin: true },
     },
   },
+  // Under Vitest, resolve Svelte's browser (client) build so component mount
+  // tests run client-side instead of in SSR mode.
+  resolve: process.env.VITEST ? { conditions: ["browser"] } : undefined,
   test: {
     environment: "node",
     include: ["src/**/*.{test,spec}.js"],
