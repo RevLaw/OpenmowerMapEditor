@@ -83,7 +83,9 @@ function buildTileLayer(cfg) {
 }
 
 export function createMapController(container) {
-  const map = L.map(container, { zoomControl: true, maxZoom: 24 }).setView(
+  // Native zoom control is hidden behind the sidebar (top-left); we render our
+  // own glass zoom buttons instead (see ZoomControl.svelte).
+  const map = L.map(container, { zoomControl: false, maxZoom: 24 }).setView(
     [52.52, 13.405],
     19
   );
@@ -778,7 +780,9 @@ export function createMapController(container) {
     const pts = currentEditablePoints();
     if (!pts.length) return;
     const bounds = L.latLngBounds(pts.map((p) => metersToLatLng(p, origin())));
-    if (bounds.isValid()) map.fitBounds(bounds.pad(0.2));
+    // Cap the fit zoom so tiny areas don't overshoot into blank imagery
+    // (Esri's detailed tiles run out at lower zoom in rural regions).
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.2), { maxZoom: 20 });
   }
 
   function panToPoint(meters, zoom) {
@@ -844,6 +848,8 @@ export function createMapController(container) {
     getCenterMeters,
     fitCurrentArea,
     panToPoint,
+    zoomIn: () => map.zoomIn(),
+    zoomOut: () => map.zoomOut(),
     invalidateSize: () => map.invalidateSize(),
     destroy() {
       unsubs.forEach((u) => u());

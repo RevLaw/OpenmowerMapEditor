@@ -14,7 +14,8 @@ import { getAreaType } from "./format/mapFormat.js";
 const DUP_EPSILON_M = 0.02;
 
 function zoneLabel(area, index) {
-  return `Zone ${index + 1} (${getAreaType(area)})`;
+  const name = area?.properties?.name?.trim();
+  return name || `Zone ${index + 1} (${getAreaType(area)})`;
 }
 
 /** Detect a self-intersection among non-adjacent edges of a closed ring. */

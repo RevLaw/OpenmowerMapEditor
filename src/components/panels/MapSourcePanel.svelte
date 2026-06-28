@@ -3,6 +3,11 @@
   import { loadFromFile } from "../../lib/actions.js";
   import { backupsOpen } from "../../lib/stores/ui.js";
 
+  // Native <option>s can't hold styled HTML, so a colored emoji acts as the
+  // type badge (🟩 mow · 🟥 obstacle · 🟦 nav).
+  const TYPE_BADGE = { mow: "🟩", obstacle: "🟥", nav: "🟦" };
+  const badge = (type) => TYPE_BADGE[type] || "⬜";
+
   function onFile(e) {
     const file = e.target.files?.[0];
     if (file) loadFromFile(file);
@@ -39,7 +44,10 @@
         on:change={(e) => setAreaIndex(Number(e.target.value))}
       >
         {#each $areaList as a}
-          <option value={String(a.index)}>{a.index + 1}: {a.type} ({a.id})</option>
+          <option value={String(a.index)}>
+            {badge(a.type)}
+            {a.name || `${a.type} ${a.index + 1}`}
+          </option>
         {/each}
       </select>
     </label>

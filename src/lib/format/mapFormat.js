@@ -34,6 +34,13 @@ export function getAreaType(area) {
   return area?.properties?.type || "area";
 }
 
+/** Friendly zone label: properties.name if set, else "<type> <n>". */
+export function getZoneName(area, index = 0) {
+  const n = area?.properties?.name;
+  if (typeof n === "string" && n.trim()) return n.trim();
+  return `${getAreaType(area)} ${index + 1}`;
+}
+
 /** Generate a reasonably unique zone id (matches app.js scheme). */
 export function generateZoneId() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;

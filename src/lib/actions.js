@@ -12,9 +12,10 @@ import {
   nudgeSelection,
   transformZone,
   simplifyZone,
+  offsetZone,
   duplicateZone,
   setZoneType,
-  renameZone,
+  setZoneName,
   reorderZone,
   pushHistory,
   undo as undoRaw,
@@ -23,7 +24,7 @@ import {
 } from "./stores/editor.js";
 import { markClean } from "./stores/dirty.js";
 import { toggleTool, simplifyTolerance } from "./stores/tools.js";
-import { simplify } from "./geo/geometry.js";
+import { simplify, offsetPolygon, polygonArea } from "./geo/geometry.js";
 import { mapApi } from "./stores/mapApi.js";
 import { serializeMap } from "./format/mapFormat.js";
 import * as api from "./api.js";
@@ -160,12 +161,10 @@ export function changeZoneType(type) {
   notify(`Zone type set to ${type}.`, "info");
 }
 
-export function renameCurrentZone(id) {
+export function renameCurrentZone(name) {
   if (!currentMap()?.areas?.length) return;
-  const clean = String(id || "").trim();
-  if (!clean) return;
   pushHistory();
-  renameZone(clean);
+  setZoneName(name);
 }
 
 export function moveZoneOrder(dir) {
@@ -253,6 +252,21 @@ export function scaleZone(factor) {
   }
   pushHistory();
   transformZone("scale", factor);
+}
+
+/** Grow (m > 0) or shrink (m < 0) the zone by offsetting every border by m. */
+export function growZone(meters) {
+  if (!currentMap()?.areas?.length) {
+    notify("No zone selected.", "warn");
+    return;
+  }
+  const next = offsetPolygon(currentEditablePoints(), -meters);
+  if (next.length < 3 || polygonArea(next) < 0.01) {
+    notify("Zone too small to resize further.", "warn");
+    return;
+  }
+  pushHistory();
+  offsetZone(meters);
 }
 
 export function applyProjection(lat, lng) {
