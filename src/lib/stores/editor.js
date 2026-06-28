@@ -17,6 +17,8 @@ import {
   rotatePoints,
   scalePoints,
   simplify,
+  offsetPolygon,
+  polygonArea,
 } from "../geo/geometry.js";
 
 const DEFAULT_ORIGIN = { lat: 52.52, lng: 13.405 };
@@ -88,6 +90,7 @@ export const areaList = derived(store, ($s) =>
     index: i,
     id: area.id,
     type: getAreaType(area),
+    name: area.properties?.name?.trim() || "",
   }))
 );
 
@@ -132,11 +135,15 @@ export function setZoneType(type) {
   });
 }
 
-export function renameZone(id) {
+/** Set a friendly name on the current zone (stored in properties.name). */
+export function setZoneName(name) {
   store.update((s) => {
     const a = s.mapData?.areas?.[s.areaIndex];
     if (!a) return s;
-    a.id = id;
+    if (!a.properties) a.properties = {};
+    const clean = (name || "").trim();
+    if (clean) a.properties.name = clean;
+    else delete a.properties.name;
     return { ...s, rev: s.rev + 1 };
   });
 }
@@ -383,6 +390,23 @@ export function transformZone(kind, amount) {
     const next = kind === "rotate" ? rotatePoints(pts, c, amount) : scalePoints(pts, c, amount);
     setCurrentEditable(next, s);
     return { ...s, rev: s.rev + 1 };
+  });
+}
+
+/**
+ * Grow (distMeters > 0) or shrink (< 0) the current zone by offsetting every
+ * border perpendicular by a fixed distance — i.e. all borders move outward/
+ * inward uniformly (a buffer), unlike Scale which is proportional to distance
+ * from the centroid. No-op if the result would collapse.
+ */
+export function offsetZone(distMeters) {
+  store.update((s) => {
+    if (!s.mapData?.areas?.[s.areaIndex]) return s;
+    // offsetPolygon insets by a positive distance, so grow = negative inset.
+    const next = offsetPolygon(currentEditablePoints(), -distMeters);
+    if (next.length < 3 || polygonArea(next) < 0.01) return s;
+    setCurrentEditable(next, s);
+    return { ...s, pointIndex: null, selectedPointIndices: [], rev: s.rev + 1 };
   });
 }
 

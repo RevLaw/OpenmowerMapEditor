@@ -6,6 +6,7 @@
   import ToolDock from "./ToolDock.svelte";
   import RobotHud from "./RobotHud.svelte";
   import ToolHint from "./ToolHint.svelte";
+  import ZoomControl from "./ZoomControl.svelte";
   import BasemapControl from "./BasemapControl.svelte";
   import StatusToasts from "./StatusToasts.svelte";
   import CommandPalette from "./CommandPalette.svelte";
@@ -89,6 +90,11 @@
   <!-- Robot HUD (top-right) -->
   <div class="absolute right-3 top-3 z-20">
     <RobotHud />
+  </div>
+
+  <!-- Zoom buttons (bottom-right, above the map attribution) -->
+  <div class="absolute bottom-7 right-3 z-20">
+    <ZoomControl />
   </div>
 
   <!-- Base-map switcher (bottom-left, clears the sidebar when open) -->

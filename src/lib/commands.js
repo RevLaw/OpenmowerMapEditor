@@ -5,6 +5,7 @@ import { setTool, toggleTool, coverageOn } from "./stores/tools.js";
 import { toggleTheme } from "./stores/theme.js";
 import { toggleRobotLive } from "./stores/robot.js";
 import { mapApi } from "./stores/mapApi.js";
+import { basemapId, BASEMAPS } from "./stores/basemap.js";
 import { backupsOpen } from "./stores/ui.js";
 import {
   saveCurrent,
@@ -17,6 +18,7 @@ import {
   simplifyZoneAction,
   rotateZone,
   scaleZone,
+  growZone,
   changeZoneType,
   moveZoneOrder,
 } from "./actions.js";
@@ -68,6 +70,8 @@ export function getCommands(ctx = {}) {
     { id: "zone-rotate-ccw", title: "Rotate zone −15°", group: "Transform", icon: "rotate_left", run: () => rotateZone(-15) },
     { id: "zone-scale-up", title: "Scale zone +5%", group: "Transform", icon: "zoom_out_map", run: () => scaleZone(1.05) },
     { id: "zone-scale-down", title: "Scale zone −5%", group: "Transform", icon: "zoom_in_map", run: () => scaleZone(0.95) },
+    { id: "zone-grow", title: "Grow zone border +0.2 m", group: "Transform", icon: "open_in_full", run: () => growZone(0.2) },
+    { id: "zone-shrink", title: "Shrink zone border −0.2 m", group: "Transform", icon: "close_fullscreen", run: () => growZone(-0.2) },
     { id: "zone-simplify", title: "Simplify zone outline", group: "Transform", icon: "compress", run: simplifyZoneAction },
 
     // View
@@ -76,5 +80,16 @@ export function getCommands(ctx = {}) {
     { id: "robot", title: "Toggle live robot overlay", group: "View", icon: "radar", run: toggleRobotLive },
     { id: "coverage", title: "Toggle mowing coverage preview", group: "View", icon: "grid_on", run: () => coverageOn.update((v) => !v) },
     { id: "shortcuts", title: "Keyboard shortcuts", group: "View", icon: "keyboard", shortcut: "?", run: () => ctx.openCheatSheet?.() },
+
+    // Map
+    { id: "zoom-in", title: "Zoom in", group: "Map", icon: "add", shortcut: "+", run: () => get(mapApi)?.zoomIn() },
+    { id: "zoom-out", title: "Zoom out", group: "Map", icon: "remove", shortcut: "−", run: () => get(mapApi)?.zoomOut() },
+    ...BASEMAPS.map((b) => ({
+      id: `basemap-${b.id}`,
+      title: `Base map: ${b.label}`,
+      group: "Map",
+      icon: "layers",
+      run: () => basemapId.set(b.id),
+    })),
   ];
 }

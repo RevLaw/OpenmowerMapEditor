@@ -26,6 +26,16 @@ export const BASEMAPS = [
     maxZoom: 24,
     attribution: "&copy; GeoBasis-DE / LGLN (DOP20)",
   },
+  {
+    id: "osm",
+    label: "Streets — OpenStreetMap",
+    note: "Global fallback where aerial is missing",
+    type: "xyz",
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    maxNativeZoom: 19,
+    maxZoom: 24,
+    attribution: "&copy; OpenStreetMap contributors",
+  },
 ];
 
 const ID_KEY = "openmower-map-editor-basemap";

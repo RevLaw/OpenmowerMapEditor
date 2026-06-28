@@ -1,6 +1,6 @@
 <script>
   import { currentArea, editor } from "../../lib/stores/editor.js";
-  import { getAreaType } from "../../lib/format/mapFormat.js";
+  import { getAreaType, getZoneName } from "../../lib/format/mapFormat.js";
   import {
     changeZoneType,
     renameCurrentZone,
@@ -8,21 +8,22 @@
     removeCurrentZone,
   } from "../../lib/actions.js";
 
-  let idDraft = "";
-  let editingId = false;
+  let nameDraft = "";
+  let editingName = false;
 
   $: area = $currentArea;
   $: type = getAreaType(area);
   $: index = $editor.areaIndex;
   $: count = $editor.mapData?.areas?.length ?? 0;
-  // Keep the id field synced with the selected zone unless it's being edited.
-  $: if (area && !editingId) idDraft = area.id ?? "";
+  $: currentName = area?.properties?.name?.trim() ?? "";
+  // Keep the name field synced with the selected zone unless it's being edited.
+  $: if (area && !editingName) nameDraft = currentName;
 
-  function commitId() {
-    editingId = false;
-    // Only commit when the id actually changed (avoid a no-op undo entry).
-    if (area && idDraft.trim() && idDraft.trim() !== area.id) {
-      renameCurrentZone(idDraft);
+  function commitName() {
+    editingName = false;
+    // Only commit when the name actually changed (avoid a no-op undo entry).
+    if (area && nameDraft.trim() !== currentName) {
+      renameCurrentZone(nameDraft);
     }
   }
 </script>
@@ -44,15 +45,17 @@
     </label>
 
     <label class="field">
-      Zone id
+      Name
       <input
         class="input"
-        bind:value={idDraft}
-        on:focus={() => (editingId = true)}
-        on:blur={commitId}
+        placeholder={getZoneName(area, index)}
+        bind:value={nameDraft}
+        on:focus={() => (editingName = true)}
+        on:blur={commitName}
         on:keydown={(e) => e.key === "Enter" && e.currentTarget.blur()}
       />
     </label>
+    <p class="mb-2 truncate text-[10px] text-subtle" title={area.id}>id: {area.id}</p>
 
     <div class="mb-2 grid grid-cols-2 gap-2">
       <button class="btn" disabled={index <= 0} on:click={() => moveZoneOrder(-1)}>

@@ -22,10 +22,11 @@ Built with **Svelte + Vite + Tailwind** (compiled to static assets at build time
 - **Command palette** (`Ctrl`/`Cmd + K`) to run any action, and a **keyboard-shortcut** map with an on-screen cheat sheet (`?`)
 - **Live measurements** — per-zone area (m²/ha) and perimeter, plus net mowable area (mow minus contained obstacles)
 - **Geometry validation** — flags self-intersections, too-few points, degenerate/duplicate vertices, orphan obstacles, and a dock placed inside an obstacle; click an issue to zoom to it
-- **Quick create & transform** — draw rectangle/circle zones, place the dock by clicking, duplicate a zone, move a whole zone, rotate/scale about its centroid, simplify an outline (Douglas–Peucker), smart add-point on the nearest edge, multi-point delete, and arrow-key nudging
-- **Switchable base maps** (bottom-left control) — Esri satellite (default), the free **20 cm Lower Saxony aerial (DOP20)**, or a custom XYZ/WMS URL; choice persists. Imagery is limited by its source resolution (DOP20 is true 20 cm), so very close zoom softens — for sharper-than-20 cm you'd need a paid/keyed provider via the custom URL
+- **Quick create & transform** — draw rectangle/circle zones, place the dock by clicking, duplicate a zone, move a whole zone, rotate/scale about its centroid, **grow/shrink** (offset every border by a margin — a buffer), simplify an outline (Douglas–Peucker), smart add-point on the nearest edge, multi-point delete, and arrow-key nudging
+- **Map navigation** — zoom buttons (bottom-right), scroll-wheel / `+` `−` keys, plus zoom in/out and base-map switching from the command palette
+- **Switchable base maps** (bottom-left **Layers** control) — Esri satellite (default), the free **20 cm Lower Saxony aerial (DOP20)**, **OpenStreetMap** (global fallback), or a custom XYZ/WMS URL; choice persists. Esri is global but its detailed imagery has coverage gaps in rural regions worldwide (blank tiles past where data exists) — switch to OpenStreetMap or a regional/custom source there. WMS layers render crisp at any zoom; XYZ layers soften past their native zoom (DOP20 is true 20 cm)
 - **Mowing coverage preview** — overlay the rows the robot drives: green **outline laps** (driven first) around the edge, then cyan **back-and-forth fill** inside, with obstacles carved out. Controls mirror OpenMower `mower_logic` (`outline_overlap_count`, `mow_angle_offset`, `mow_angle_offset_is_absolute`) plus a tool-width spacing; the angle is relative to the zone's main axis unless set absolute. Visual only; settings are remembered locally but not written to map.json (OpenMower decides the actual mowing pattern)
-- **Zone management** — change a zone's type (mow/obstacle/nav) after creation, rename its id, and reorder zones in the list
+- **Zone management** — give a zone a friendly **name** (stored as `properties.name`; the random `id` stays as the stable identifier), change its type (mow/obstacle/nav), reorder, and remove it. The zone selector shows a colored type badge (🟩 mow · 🟥 obstacle · 🟦 nav)
 - **Unsaved-changes guard** — an "Unsaved" indicator in the sidebar and a browser prompt before you leave with unsaved edits
 - Toast notifications and a modern dark-tech / HUD interface with glass map-overlay panels
 - Type-aware overlays while editing:
@@ -85,9 +86,9 @@ services:
   - load `/data/ros/map.json`
   - read `/data/params/mower_params.yaml` and apply `datum_lat` / `datum_long`
 3. If no map is found, load one manually with the file picker.
-4. Pick an area in the area selector.
-5. To manage full zones, choose a type in **New zone type** and use **Add zone** / **Remove zone**.
-6. Use the tool buttons below the area selector to edit your map geometry.
+4. Pick a zone from the **Selected zone** dropdown (colored type badge: 🟩 mow · 🟥 obstacle · 🟦 nav).
+5. Create zones in the **Create zone** panel — pick a type, then **Add zone** (square at the map center) or draw a rectangle/circle. Use the **Selected zone** panel to name, retype, reorder, or remove the current zone.
+6. Use the tool dock on the right to edit your map geometry.
 7. Optional: turn on **Live robot** to poll pose from the running ROS container (requires the Docker socket mount). Position matches the map when TF uses the `map` frame; if only `odom` is available, the marker may drift relative to `map.json` until localization aligns. Status and mode lines update from ROS when topics respond in time.
 8. Save your edits:
   - **Save map.json** writes to `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
@@ -118,15 +119,17 @@ Create & transform (sidebar **Create** and **Transform zone** panels, also in th
 - **Place dock** — click the map to set the docking station (`docking_stations[0]`).
 - **Duplicate zone** (`Ctrl + D`) — copy the selected zone, offset so the copy is visible.
 - **Rotate** ±15° / **Scale** ±5% — transform the selected zone about its centroid.
+- **Grow / Shrink** — offset every border of the selected zone outward/inward by a margin (a buffer; unlike Scale it keeps a uniform border distance). For a donut (mow + obstacle), **Grow** the mow and **Shrink** the obstacle to widen the mowable ring.
 - **Simplify outline** — Douglas–Peucker reduction with an adjustable tolerance, to thin out dense outlines.
-- `Add zone` / `Remove zone` create or delete the currently selected `mow` / `obstacle` / `nav` area.
+- **Create zone** panel adds a zone (square at center, or rectangle/circle draw); the **Selected zone** panel names / retypes / reorders / removes the current zone.
 - **Live robot** (toolbar toggle) polls ROS TF via the mounted Docker socket and shows heading; marker color/icon follows **visual mode** (nav, docking, dock charging, dock full, emergency, error). Preference is stored in `localStorage`. The dock uses **ev_station** on the map.
 - `Load map / backup…` opens a gallery of saved versions, each with a mini-map preview, timestamp, stats, and a diff vs your current map.
+- **Zoom** buttons sit at the bottom-right; the **Layers** button (bottom-left) switches the base map.
 
 Tool sliders are contextual:
 
 - Brush sliders appear only while brush mode is active.
-- Cleanup slider appears only while cleanup mode is active.
+- The mowing-preview and transform sliders live in their sidebar panels.
 - On touch devices, brush also supports finger paint (`touchstart/move/end`).
 - Light/dark mode affects sidebar/tool styling only. Map line/point colors remain identical in both modes.
 
@@ -150,7 +153,7 @@ npm start            # serve the built dist/ via Express (production entry)
 
 Project layout:
 
-- `src/lib/` — framework-free, unit-tested logic: `geo/` (projection, geometry, brush/snap/cleanup tools), `format/` (map.json + outline helpers), `validation.js`, `measurements.js`, `api.js`, and Svelte `stores/`.
+- `src/lib/` — framework-free, unit-tested logic: `geo/` (projection, geometry, offset/simplify, coverage, brush/snap tools), `format/` (map.json + outline/shape helpers), `validation.js`, `measurements.js`, `summary.js`, `api.js`, and Svelte `stores/`.
 - `src/map/` — the Leaflet controller (rendering + interactions).
 - `src/components/` — Svelte UI (shell, sidebar panels, tool dock, robot HUD, command palette).
 - `server.js` — unchanged API; serves the built `dist/`. `MAP_PATH` / `PARAMS_PATH` override the in-container defaults for local dev.
@@ -193,5 +196,7 @@ This repository should not contain real mower coordinates, passwords, or API key
 ## Notes
 
 - OpenMower uses local meter coordinates (`x`, `y`), so map projection is an approximation from your configured datum.
+- Aerial imagery coverage and zoom depth vary by provider and region. Esri World Imagery is global but lacks deep zoom in many rural areas (it returns blank tiles past where data exists) — switch to OpenStreetMap or a custom regional source via the **Layers** control there.
+- Zone names are stored under `properties.name` (editor convenience metadata). OpenMower's firmware selects zones by order/index, not by name, so naming doesn't change robot behavior.
 - Live pose runs **`ros2 run tf2_ros tf2_echo`** or **`rosrun tf tf_echo`** inside the ROS container (after sourcing ROS setup scripts, including `/opt/open_mower_ros/devel/setup.bash` when present). Topic sampling prefers **`rostopic echo`** on ROS 1 before trying `ros2 topic echo`. Output is parsed with **stdlib-only `python3`**. If TF is not published yet, the HUD shows the probe error.
 - Always validate edited borders before deploying to a mower in production.
