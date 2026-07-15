@@ -12,19 +12,6 @@ const port = process.env.PORT || 80;
 const paramsPath = process.env.PARAMS_PATH || "/data/params/mower_params.yaml";
 const mapPath = process.env.MAP_PATH || "/data/ros/map.json";
 const mapDirectory = path.dirname(mapPath);
-const wifiMapPath = process.env.WIFI_MAP_PATH || path.join(mapDirectory, "wifi-signal-map.json");
-const wifiCellSizeM = Math.max(
-  0.25,
-  Math.min(5, Number(process.env.WIFI_MAP_CELL_SIZE_M) || 0.75)
-);
-const wifiMaxPoints = Math.max(
-  100,
-  Math.min(10000, Math.floor(Number(process.env.WIFI_MAP_MAX_POINTS) || 2000))
-);
-const wifiFlushMs = Math.max(
-  10000,
-  Math.min(300000, Math.floor(Number(process.env.WIFI_MAP_FLUSH_MS) || 30000))
-);
 const distDir = path.join(__dirname, "dist");
 const dockerSocketPath = process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock";
 const restartContainerName = process.env.OPENMOWER_CONTAINER_NAME || "open_mower_ros";
@@ -64,210 +51,6 @@ function logWarn(message, meta = {}) {
 
 function logError(message, meta = {}) {
   console.error(`[${nowIso()}] [ERROR] ${message}`, meta);
-}
-
-const wifiSurvey = new Map();
-let wifiSurveyLoaded = false;
-let wifiSurveyLoadPromise = null;
-let wifiSurveyDirty = false;
-let wifiSurveyFlushTimer = null;
-let wifiSurveyFlushPromise = null;
-let wifiSurveyRevision = 0;
-let wifiSurveyUpdatedAt = null;
-let wifiSurveyLastBytes = 0;
-
-function wifiCellKey(x, y) {
-  return `${Math.round(x / wifiCellSizeM)},${Math.round(y / wifiCellSizeM)}`;
-}
-
-function normalizeWifiSample(sample) {
-  const x = Number(sample?.x);
-  const y = Number(sample?.y);
-  const signalDbm = Number(sample?.signalDbm);
-  if (
-    !Number.isFinite(x) ||
-    !Number.isFinite(y) ||
-    !Number.isFinite(signalDbm) ||
-    Math.abs(x) > 100000 ||
-    Math.abs(y) > 100000 ||
-    signalDbm < -120 ||
-    signalDbm > 0
-  ) {
-    return null;
-  }
-  const key = wifiCellKey(x, y);
-  const [cellX, cellY] = key.split(",").map(Number);
-  return {
-    key,
-    x: Number((cellX * wifiCellSizeM).toFixed(3)),
-    y: Number((cellY * wifiCellSizeM).toFixed(3)),
-    signalDbm,
-    timestamp: Date.now(),
-  };
-}
-
-function evictOldestWifiSample() {
-  let oldestKey = null;
-  let oldestTimestamp = Infinity;
-  for (const [key, sample] of wifiSurvey) {
-    if (sample.timestamp < oldestTimestamp) {
-      oldestKey = key;
-      oldestTimestamp = sample.timestamp;
-    }
-  }
-  if (oldestKey != null) wifiSurvey.delete(oldestKey);
-}
-
-function mergeWifiSurveySample(input, markDirty = true) {
-  const sample = normalizeWifiSample(input);
-  if (!sample) return false;
-  const previous = wifiSurvey.get(sample.key);
-  if (previous) {
-    const weight = Math.min(Math.max(previous.samples || 1, 1), 9);
-    previous.signalDbm = Number(
-      ((previous.signalDbm * weight + sample.signalDbm) / (weight + 1)).toFixed(1)
-    );
-    previous.samples = Math.min((previous.samples || 1) + 1, 1000000);
-    previous.timestamp = sample.timestamp;
-  } else {
-    if (wifiSurvey.size >= wifiMaxPoints) evictOldestWifiSample();
-    wifiSurvey.set(sample.key, {
-      x: sample.x,
-      y: sample.y,
-      signalDbm: Number(sample.signalDbm.toFixed(1)),
-      samples: 1,
-      timestamp: sample.timestamp,
-    });
-  }
-  if (markDirty) {
-    wifiSurveyDirty = true;
-    wifiSurveyRevision += 1;
-    wifiSurveyUpdatedAt = Date.now();
-    scheduleWifiSurveyFlush();
-  }
-  return true;
-}
-
-async function ensureWifiSurveyLoaded() {
-  if (wifiSurveyLoaded) return;
-  if (wifiSurveyLoadPromise) return wifiSurveyLoadPromise;
-  wifiSurveyLoadPromise = (async () => {
-    try {
-      const content = await fs.readFile(wifiMapPath, "utf8");
-      wifiSurveyLastBytes = Buffer.byteLength(content, "utf8");
-      const parsed = JSON.parse(content);
-      const samples = Array.isArray(parsed?.samples) ? parsed.samples.slice(-wifiMaxPoints) : [];
-      for (const sample of samples) mergeWifiSurveySample(sample, false);
-      wifiSurveyUpdatedAt = Number(parsed?.updatedAt) || null;
-      wifiSurveyRevision = 1;
-      logInfo("Loaded central WiFi survey", {
-        file: wifiMapPath,
-        points: wifiSurvey.size,
-        bytes: wifiSurveyLastBytes,
-      });
-    } catch (error) {
-      if (error.code !== "ENOENT") {
-        logWarn("Failed to load central WiFi survey; starting empty", {
-          file: wifiMapPath,
-          error: error.message,
-        });
-      }
-    } finally {
-      wifiSurveyLoaded = true;
-      wifiSurveyLoadPromise = null;
-    }
-  })();
-  return wifiSurveyLoadPromise;
-}
-
-function wifiSurveyPayload() {
-  return {
-    version: 1,
-    cellSizeM: wifiCellSizeM,
-    maxPoints: wifiMaxPoints,
-    updatedAt: wifiSurveyUpdatedAt,
-    samples: [...wifiSurvey.values()],
-  };
-}
-
-async function applyMowerFileOwnership(filePath) {
-  for (const ownerPath of [wifiMapPath, mapPath, mapDirectory]) {
-    try {
-      const owner = await fs.stat(ownerPath);
-      await fs.chown(filePath, owner.uid, owner.gid);
-      break;
-    } catch (error) {
-      if (error.code !== "ENOENT" && error.code !== "EPERM") throw error;
-    }
-  }
-  await fs.chmod(filePath, 0o664);
-}
-
-async function flushWifiSurvey(forceAll = false) {
-  if (wifiSurveyFlushTimer) {
-    clearTimeout(wifiSurveyFlushTimer);
-    wifiSurveyFlushTimer = null;
-  }
-  if (wifiSurveyFlushPromise) {
-    await wifiSurveyFlushPromise;
-    if (forceAll && wifiSurveyDirty) return flushWifiSurvey(true);
-    return;
-  }
-  if (!wifiSurveyLoaded || !wifiSurveyDirty) return;
-  const flushRevision = wifiSurveyRevision;
-  wifiSurveyFlushPromise = (async () => {
-    const payload = JSON.stringify(wifiSurveyPayload());
-    const temporaryPath = `${wifiMapPath}.tmp`;
-    await fs.mkdir(path.dirname(wifiMapPath), { recursive: true });
-    await fs.writeFile(temporaryPath, payload, "utf8");
-    await applyMowerFileOwnership(temporaryPath);
-    await fs.rename(temporaryPath, wifiMapPath);
-    wifiSurveyLastBytes = Buffer.byteLength(payload, "utf8");
-    wifiSurveyDirty = wifiSurveyRevision !== flushRevision;
-    logInfo("Flushed central WiFi survey", {
-      file: wifiMapPath,
-      points: wifiSurvey.size,
-      bytes: wifiSurveyLastBytes,
-    });
-  })();
-  try {
-    await wifiSurveyFlushPromise;
-  } finally {
-    wifiSurveyFlushPromise = null;
-  }
-  if (wifiSurveyDirty) {
-    if (forceAll) return flushWifiSurvey(true);
-    scheduleWifiSurveyFlush();
-  }
-}
-
-function scheduleWifiSurveyFlush() {
-  if (wifiSurveyFlushTimer) return;
-  wifiSurveyFlushTimer = setTimeout(() => {
-    flushWifiSurvey().catch((error) => {
-      logError("Failed to flush central WiFi survey", {
-        file: wifiMapPath,
-        error: error.message,
-      });
-      if (wifiSurveyDirty) scheduleWifiSurveyFlush();
-    });
-  }, wifiFlushMs);
-  wifiSurveyFlushTimer.unref?.();
-}
-
-function wifiSurveyMeta() {
-  return {
-    revision: wifiSurveyRevision,
-    sampleCount: wifiSurvey.size,
-    updatedAt: wifiSurveyUpdatedAt,
-    storage: {
-      central: true,
-      cellSizeM: wifiCellSizeM,
-      maxPoints: wifiMaxPoints,
-      flushIntervalMs: wifiFlushMs,
-      fileBytes: wifiSurveyLastBytes,
-    },
-  };
 }
 
 app.use(express.json({ limit: "20mb" }));
@@ -472,9 +255,6 @@ function buildRobotPoseProbeBash() {
     "        if sample_extra \"$t\"; then break; fi",
     "      done",
     "    fi",
-    "    echo WIFI_BEGIN",
-    "    cat /proc/net/wireless 2>/dev/null",
-    "    echo WIFI_END",
     "    exit 0",
     "  done",
     "done",
@@ -734,28 +514,6 @@ function parseRobotProbeOutput(text) {
     }
   }
 
-  let wifi = null;
-  const wifiBegin = lines.indexOf("WIFI_BEGIN");
-  const wifiEnd = lines.indexOf("WIFI_END", wifiBegin + 1);
-  if (wifiBegin >= 0 && wifiEnd > wifiBegin) {
-    for (const line of lines.slice(wifiBegin + 1, wifiEnd)) {
-      const match = line.match(/^([^:\s]+):\s+\S+\s+([-+\d.]+)\s+([-+\d.]+)/);
-      if (!match) continue;
-      const linkQuality = Number(match[2]);
-      const signalDbm = Number(match[3]);
-      if (!Number.isFinite(signalDbm)) continue;
-      const percent = Math.max(0, Math.min(100, Math.round((signalDbm + 100) * 2)));
-      wifi = {
-        interface: match[1],
-        signalDbm,
-        linkQuality: Number.isFinite(linkQuality) ? linkQuality : null,
-        linkQualityMax: 70,
-        percent,
-      };
-      break;
-    }
-  }
-
   const okLine = [...lines].reverse().find((l) => l.startsWith("OK "));
   const errLine = lines.find((l) => l.startsWith("ERR "));
 
@@ -791,7 +549,6 @@ function parseRobotProbeOutput(text) {
       frameChild: childFrame,
       units: "meters_map_frame",
       ros,
-      wifi,
       liveRobotFatal: false,
     };
   }
@@ -1174,64 +931,6 @@ app.get("/api/robot_pose", async (_req, res) => {
   }
 });
 
-app.get("/api/wifi-map", async (req, res) => {
-  try {
-    await ensureWifiSurveyLoaded();
-    const knownRevision = Number(req.query.revision);
-    res.setHeader("Cache-Control", "no-store");
-    if (Number.isFinite(knownRevision) && knownRevision === wifiSurveyRevision) {
-      return res.json({ ok: true, notModified: true, ...wifiSurveyMeta() });
-    }
-    return res.json({ ok: true, ...wifiSurveyMeta(), samples: [...wifiSurvey.values()] });
-  } catch (error) {
-    logError("Failed to read central WiFi survey", { error: error.message });
-    return res.status(500).json({ ok: false, error: "Failed to read WiFi survey" });
-  }
-});
-
-app.post("/api/wifi-map/samples", async (req, res) => {
-  try {
-    await ensureWifiSurveyLoaded();
-    const samples = Array.isArray(req.body?.samples)
-      ? req.body.samples
-      : req.body && typeof req.body === "object"
-        ? [req.body]
-        : [];
-    if (samples.length < 1 || samples.length > wifiMaxPoints) {
-      return res.status(400).json({
-        ok: false,
-        error: `Expected 1-${wifiMaxPoints} WiFi samples`,
-      });
-    }
-    let accepted = 0;
-    for (const sample of samples) {
-      if (mergeWifiSurveySample(sample)) accepted += 1;
-    }
-    if (!accepted) {
-      return res.status(422).json({ ok: false, error: "No valid WiFi samples" });
-    }
-    return res.json({ ok: true, accepted, ...wifiSurveyMeta() });
-  } catch (error) {
-    logError("Failed to record central WiFi samples", { error: error.message });
-    return res.status(500).json({ ok: false, error: "Failed to record WiFi samples" });
-  }
-});
-
-app.delete("/api/wifi-map", async (_req, res) => {
-  try {
-    await ensureWifiSurveyLoaded();
-    wifiSurvey.clear();
-    wifiSurveyDirty = true;
-    wifiSurveyRevision += 1;
-    wifiSurveyUpdatedAt = Date.now();
-    await flushWifiSurvey(true);
-    return res.json({ ok: true, ...wifiSurveyMeta() });
-  } catch (error) {
-    logError("Failed to clear central WiFi survey", { error: error.message });
-    return res.status(500).json({ ok: false, error: "Failed to clear WiFi survey" });
-  }
-});
-
 app.get("/api/map", async (_req, res) => {
   try {
     if (verboseLogs) logInfo("Reading active map file", { file: mapPath });
@@ -1378,7 +1077,7 @@ process.on("unhandledRejection", (reason) => {
   logError("Unhandled promise rejection", { reason });
 });
 
-const server = app.listen(port, () => {
+app.listen(port, () => {
   logInfo("OpenMower Map Editor listening", {
     port,
     mapPath,
@@ -1392,26 +1091,5 @@ const server = app.listen(port, () => {
     poseDisabled,
     verboseLogs,
     dockerSocketPath,
-    wifiMapPath,
-    wifiCellSizeM,
-    wifiMaxPoints,
-    wifiFlushMs,
   });
 });
-
-let shuttingDown = false;
-async function shutdown(signal) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  logInfo("Shutting down", { signal });
-  server.close();
-  try {
-    await flushWifiSurvey(true);
-  } catch (error) {
-    logError("Final WiFi survey flush failed", { error: error.message });
-  }
-  process.exit(0);
-}
-
-process.once("SIGTERM", () => shutdown("SIGTERM"));
-process.once("SIGINT", () => shutdown("SIGINT"));

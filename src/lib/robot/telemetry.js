@@ -145,8 +145,5 @@ export function buildRobotPoseTooltip(data) {
     if (data.ros.summary) lines.push(`Status: ${data.ros.summary}`);
     if (data.ros.topic) lines.push(`ROS sample: ${data.ros.topic}`);
   }
-  if (Number.isFinite(data.wifi?.signalDbm)) {
-    lines.push(`WiFi: ${Math.round(data.wifi.signalDbm)} dBm (${data.wifi.interface || "radio"})`);
-  }
   return lines.join("\n");
 }

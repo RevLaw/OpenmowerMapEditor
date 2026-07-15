@@ -16,7 +16,6 @@
   import { get } from "svelte/store";
   import { bootstrap } from "../lib/actions.js";
   import { initRobotLifecycle } from "../lib/stores/robot.js";
-  import { initWifiSurveyLifecycle } from "../lib/stores/wifi.js";
   import { isDirty } from "../lib/stores/dirty.js";
   import { initShortcuts } from "../lib/shortcuts.js";
 
@@ -36,7 +35,6 @@
   onMount(() => {
     bootstrap();
     cleanups.push(initRobotLifecycle());
-    cleanups.push(initWifiSurveyLifecycle());
     cleanups.push(
       initShortcuts({
         openPalette: () => (paletteOpen = true),
