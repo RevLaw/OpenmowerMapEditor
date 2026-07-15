@@ -35,6 +35,7 @@ Built with **Svelte 5 + Vite 8 + Tailwind CSS 4** (compiled to static assets at 
   - editing `nav`: shows `mow` (white dashed) and `obstacle` (red dashed)
 - Stable map readability: map colors stay fixed; light/dark toggle changes sidebar UI only
 - Optional **live robot** overlay: **Live robot** toolbar button polls `GET /api/robot_pose`, which runs **`tf2_echo` / `tf_echo`** in the ROS container (Docker socket) and parses output with stdlib-only Python (tries `map`/`odom` → `base_link`/`base_footprint`). Marker style reflects **navigation**, **docking**, **charging at dock**, **dock full**, **emergency**, and **error** states (from sampled ROS topics when available). Polling pauses while the browser tab is hidden.
+- Optional **WiFi signal map**: records the mower radio's dBm value together with each live pose and paints a red-to-green heatmap over the map. Measurements are stored centrally on the mower, shared by every browser, quantized to 0.75 m cells, and capped at 2,000 points.
 - Auto-load `/data/ros/map.json` (if present)
 - Auto-fill projection from `/data/params/mower_params.yaml` (`datum_lat`, `datum_long`)
 - Save directly to `/data/ros/map.json` with automatic timestamped backup
@@ -74,6 +75,9 @@ services:
       # OPENMOWER_ROS_TOPIC_TIMEOUT_SEC: "4"
       # OPENMOWER_ROS_TOPIC_FALLBACK_SEC: "10"
       # OPENMOWER_VERBOSE_LOGS: "0"
+      # WIFI_MAP_CELL_SIZE_M: "0.75"
+      # WIFI_MAP_MAX_POINTS: "2000"
+      # WIFI_MAP_FLUSH_MS: "30000"
 ```
 
 1. Click **Deploy**
@@ -90,15 +94,32 @@ services:
 5. Create zones in the **Create zone** panel — pick a type, then **Add zone** (square at the map center) or draw a rectangle/circle. Use the **Selected zone** panel to name, retype, reorder, or remove the current zone.
 6. Use the tool dock on the right to edit your map geometry.
 7. Optional: turn on **Live robot** to poll pose from the running ROS container (requires the Docker socket mount). Position matches the map when TF uses the `map` frame; if only `odom` is available, the marker may drift relative to `map.json` until localization aligns. Status and mode lines update from ROS when topics respond in time.
-8. Save your edits:
+8. Optional: turn on **WiFi signal map** in the live robot panel. This also enables the live robot feed and records readings while the editor tab is open. The mower stores the shared survey in `/data/ros/wifi-signal-map.json`; every device refreshes it every 15 seconds. Use **Clear shared survey** to start a fresh measurement for all devices.
+9. Save your edits:
   - **Save map.json** writes to `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
   - **Save + restart ROS** does the same, then restarts the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
   - If direct save is unavailable, fallback is downloading the map as `openmower-map-edited.json`.
-9. Roll back from backup (if needed):
+10. Roll back from backup (if needed):
   - Click **Load map / backup…** to open the gallery of `map.json` (running) and `map.json.bak-*` versions from `/data/ros`.
   - Each version shows a **mini-map preview**, a friendly timestamp, summary stats (zones / points / mow area), and the **difference vs your current map** (Δ zones / points / area).
   - Click **Load this version** to load it (nothing is overwritten).
   - Click **Save map.json** (or **Save + restart ROS**) to make a loaded backup your active `map.json`.
+
+## WiFi survey storage
+
+The WiFi heatmap is shared mower-side state, not map geometry and not browser data:
+
+- The browser combines each successful live pose with the mower's current `/proc/net/wireless` dBm reading and sends at most one reading every 2 seconds while moving, or every 5 seconds within the same cell.
+- The backend merges readings into configurable spatial cells (`0.75 m` by default), keeps at most 2,000 cells, and evicts the oldest cell when the limit is reached. A full default survey is typically well below 200 KB.
+- In-memory changes are written atomically to `/data/ros/wifi-signal-map.json` no more than once every 30 seconds. A graceful container stop forces the final pending write. Ownership and mode follow the mower map directory (`openmower:openmower`, mode `664` on a standard deployment).
+- Browsers refresh the shared survey every 15 seconds. Revision-aware requests return metadata without resending the point list when nothing changed.
+- Existing survey points from the earlier browser-local implementation are imported once and then removed from `localStorage`. Only the user's on/off preference remains browser-local.
+
+API endpoints:
+
+- `GET /api/wifi-map?revision=<n>` returns the shared points, limits, file size, and revision. If `<n>` is current, the response contains `notModified: true` and omits the points.
+- `POST /api/wifi-map/samples` validates and merges one or more `{ x, y, signalDbm }` readings; the backend assigns the timestamp.
+- `DELETE /api/wifi-map` clears the shared survey for every connected device and flushes the empty state immediately.
 
 ## Tool Legend
 
@@ -163,9 +184,9 @@ Project layout:
 - `src/lib/` — framework-free, unit-tested logic: `geo/` (projection, geometry, offset/simplify, coverage, brush/snap tools), `format/` (map.json + outline/shape helpers), `validation.js`, `measurements.js`, `summary.js`, `api.js`, and Svelte `stores/`.
 - `src/map/` — the Leaflet controller (rendering + interactions).
 - `src/components/` — Svelte UI (shell, sidebar panels, tool dock, robot HUD, command palette).
-- `server.js` — unchanged API; serves the built `dist/`. `MAP_PATH` / `PARAMS_PATH` override the in-container defaults for local dev.
+- `server.js` — serves the built `dist/` and implements map, robot-pose, restart, backup, and WiFi-survey APIs. Paths are configurable for local development.
 
-`POST /api/map`, `GET /api/map`, `/api/map/backups`, `/api/params`, and `/api/robot_pose` are the stable backend contract; the map.json on-disk format is unchanged.
+`POST /api/map`, `GET /api/map`, `/api/map/backups`, `/api/params`, `/api/robot_pose`, and `/api/wifi-map` are the stable backend contract; the map.json on-disk format is unchanged.
 
 ## Environment variables
 
@@ -183,6 +204,10 @@ Project layout:
 | `PORT` | `80` | HTTP listen port inside the container (compose maps `5080:80`) |
 | `MAP_PATH` | `/data/ros/map.json` | Map file path (override for local dev) |
 | `PARAMS_PATH` | `/data/params/mower_params.yaml` | Params file path (override for local dev) |
+| `WIFI_MAP_PATH` | `/data/ros/wifi-signal-map.json` | Shared WiFi survey file |
+| `WIFI_MAP_CELL_SIZE_M` | `0.75` | Spatial cell size used to merge nearby readings |
+| `WIFI_MAP_MAX_POINTS` | `2000` | Hard upper bound for stored survey cells |
+| `WIFI_MAP_FLUSH_MS` | `30000` | Minimum delay between atomic disk writes |
 
 Inside the container the defaults match the bind mounts (`/data/ros`, `/data/params`); for local development point `MAP_PATH` / `PARAMS_PATH` at files in the repo.
 
@@ -206,4 +231,5 @@ This repository should not contain real mower coordinates, passwords, or API key
 - Aerial imagery coverage and zoom depth vary by provider and region. Esri World Imagery is global but lacks deep zoom in many rural areas (it returns blank tiles past where data exists) — switch to OpenStreetMap or a custom regional source via the **Layers** control there.
 - Zone names are stored under `properties.name` (editor convenience metadata). OpenMower's firmware selects zones by order/index, not by name, so naming doesn't change robot behavior.
 - Live pose runs **`ros2 run tf2_ros tf2_echo`** or **`rosrun tf tf_echo`** inside the ROS container (after sourcing ROS setup scripts, including `/opt/open_mower_ros/devel/setup.bash` when present). Topic sampling prefers **`rostopic echo`** on ROS 1 before trying `ros2 topic echo`. Output is parsed with **stdlib-only `python3`**. If TF is not published yet, the HUD shows the probe error.
+- WiFi signal is read from `/proc/net/wireless` inside the ROS container, which must share the host network namespace. The compact survey is stored separately from `map.json`, written atomically at most once per flush interval, owned like the mower map files, and never sent to GitHub.
 - Always validate edited borders before deploying to a mower in production.

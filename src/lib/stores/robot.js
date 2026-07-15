@@ -2,6 +2,7 @@ import { writable, derived, get } from "svelte/store";
 import { fetchRobotPose } from "../api.js";
 import { buildRobotHudLines } from "../robot/telemetry.js";
 import { notify, setStatus } from "./toast.js";
+import { ingestWifiPose } from "./wifi.js";
 
 const STORAGE_KEY = "openmower-map-editor-robot-live";
 const POLL_MS = 1000;
@@ -61,6 +62,7 @@ async function pollOnce() {
     }
     failCount = 0;
     robotPose.set(data);
+    ingestWifiPose(data);
   } catch (_e) {
     failCount += 1;
     if (failCount === 1 || failCount % 6 === 0) {
