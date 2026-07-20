@@ -4,6 +4,7 @@
   import { validateMap } from "../../lib/validation.js";
   import { getEditablePoints } from "../../lib/format/outline.js";
   import { mapApi } from "../../lib/stores/mapApi.js";
+  import Collapsible from "../Collapsible.svelte";
 
   $: issues = $editor.mapData ? validateMap($editor.mapData) : [];
   $: errors = issues.filter((i) => i.severity === "error").length;
@@ -25,12 +26,8 @@
   }
 </script>
 
-<section class="card">
-  <h2 class="card-title justify-between">
-    <span class="flex items-center gap-2">
-      <span class="material-symbols-outlined" style="font-size:16px">rule</span>
-      Validation
-    </span>
+<Collapsible title="Validation" icon="rule" key="validation">
+  <span slot="badge">
     {#if issues.length === 0}
       <span class="chip" style="color:var(--ok)">all clear</span>
     {:else}
@@ -39,7 +36,7 @@
         {#if warnings}<span class="chip" style="color:var(--warn)">{warnings} warn</span>{/if}
       </span>
     {/if}
-  </h2>
+  </span>
 
   {#if issues.length === 0}
     <p class="text-[11px] text-subtle">No geometry problems detected.</p>
@@ -64,4 +61,4 @@
       {/each}
     </ul>
   {/if}
-</section>
+</Collapsible>

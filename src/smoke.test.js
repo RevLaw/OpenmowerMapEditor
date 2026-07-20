@@ -7,6 +7,7 @@ import { mount, unmount } from "svelte";
 import ToolHint from "./components/ToolHint.svelte";
 import ProjectionPanel from "./components/panels/ProjectionPanel.svelte";
 import CoveragePanel from "./components/panels/CoveragePanel.svelte";
+import ZonePanel from "./components/panels/ZonePanel.svelte";
 import ThemeToggle from "./components/ThemeToggle.svelte";
 
 function mountOk(Component) {
@@ -22,6 +23,7 @@ describe("Svelte 5 mount smoke", () => {
     ["ToolHint", ToolHint],
     ["ProjectionPanel", ProjectionPanel],
     ["CoveragePanel", CoveragePanel],
+    ["ZonePanel", ZonePanel],
     ["ThemeToggle", ThemeToggle],
   ]) {
     it(`mounts ${name} without error`, () => {

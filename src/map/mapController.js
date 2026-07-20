@@ -1,7 +1,7 @@
 import L from "leaflet";
 import { get } from "svelte/store";
 import { metersToLatLng, latLngToMeters } from "../lib/geo/projection.js";
-import { getAreaType } from "../lib/format/mapFormat.js";
+import { getAreaType, getZoneOverrides } from "../lib/format/mapFormat.js";
 import {
   nearestEdgeInsertIndex,
   distance,
@@ -10,9 +10,9 @@ import {
   offsetPolygon,
   polygonArea,
   simplify,
-  principalAngleDeg,
 } from "../lib/geo/geometry.js";
 import { coverageLines } from "../lib/geo/coverage.js";
+import { resolveMowSettings } from "../lib/coverage/mowSettings.js";
 import { rectangleOutline, circleOutline } from "../lib/format/shapes.js";
 import { getEditablePoints } from "../lib/format/outline.js";
 import {
@@ -40,21 +40,34 @@ import {
   brushStrength,
   drawZoneType,
   coverageOn,
-  coverageSpacing,
-  coverageAngle,
-  coverageAbsolute,
-  coveragePasses,
 } from "../lib/stores/tools.js";
+import { mowParams } from "../lib/stores/mowParams.js";
 import { robotLive, robotPose } from "../lib/stores/robot.js";
+import { exactPath } from "../lib/stores/exactPath.js";
 import {
   resolveRobotVisualMode,
   robotVisualToMarkerStyle,
-  buildRobotHudHtml,
   buildRobotHudLines,
   buildRobotPoseTooltip,
+  escapeHtml,
 } from "../lib/robot/telemetry.js";
+import { poseDist2, stepPose } from "../lib/robot/interpolate.js";
 import { notify, setStatus } from "../lib/stores/toast.js";
 import { activeBasemap } from "../lib/stores/basemap.js";
+
+// Top-down robot mower, pointing "up" by default so applyRobotTransform's
+// rotate(90 - yaw) maps heading correctly (yaw 0 = east). Filled nose = front;
+// centre disc + cross = the cutting blade. White strokes read on any basemap.
+const ROBOT_MOWER_SVG = `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#fff" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"><path d="M12 2.4 L15.6 6.6 H8.4 Z" fill="#fff" stroke="none"/><rect x="5.8" y="6.4" width="12.4" height="12.9" rx="3.8"/><circle cx="12" cy="13" r="3.3"/><path d="M12 9.7 v6.6 M8.7 13 h6.6" stroke-width="1.3"/></svg>`;
+
+/** Marker inner content: the mower SVG while driving/mowing, else the status glyph. */
+function robotGlyphInner(visual, glyph) {
+  const inner =
+    visual === "nav"
+      ? ROBOT_MOWER_SVG
+      : `<span class="material-symbols-outlined">${glyph}</span>`;
+  return `<span class="robot-glyph">${inner}</span>`;
+}
 
 function cssVar(name, fallback) {
   if (typeof getComputedStyle === "undefined") return fallback;
@@ -111,6 +124,7 @@ export function createMapController(container) {
     coverage: [],
     dock: null,
     robot: null,
+    exactPath: null,
   };
 
   // Local mirror of state read inside imperative handlers.
@@ -203,7 +217,7 @@ export function createMapController(container) {
       }
     });
 
-    if (get(coverageOn) && type === "mow") renderCoverage(pts);
+    if (get(coverageOn) && type === "mow") renderCoverage(pts, area);
     renderPoints(pts, latlngs);
     renderMultiHandle(pts);
     if (tool === "move") renderMoveHandle(pts);
@@ -212,19 +226,33 @@ export function createMapController(container) {
     if (tool === "brush" && brushCursorLatLng) updateBrushCursor(brushCursorLatLng);
   }
 
-  function renderCoverage(pts) {
-    const spacing = get(coverageSpacing);
-    const laps = Math.max(0, Math.round(get(coveragePasses)));
+  // Accurate mowing preview: uses the robot's real parameters — global params
+  // from /mower_logic (tool_width = spacing) plus per-area map.json overrides,
+  // and OpenMower's exact angle logic. Mirrors MowingBehavior.
+  function renderCoverage(pts, area) {
+    const gp = get(mowParams);
+    const spacing = gp.toolWidth;
     if (!(spacing > 0)) return;
 
-    // Clean, lighter outline for offset rings on dense polygons.
-    const base = pts.length > 60 ? simplify(pts, Math.min(0.1, spacing / 3)) : pts;
-    if (base.length < 3) return;
+    const { laps: lapsRaw, overlap: overlapRaw, outerOffset, angleRad } = resolveMowSettings(
+      getZoneOverrides(area),
+      gp,
+      pts
+    );
+    const laps = Math.max(0, Math.round(lapsRaw));
+    const overlap = Math.max(0, Math.round(overlapRaw));
 
-    // mow_angle_offset, relative to the zone's main axis unless absolute.
-    const offset = get(coverageAngle);
-    const baseAngle = get(coverageAbsolute) ? 0 : principalAngleDeg(base);
-    const angle = baseAngle + offset;
+    const simplified = pts.length > 60 ? simplify(pts, Math.min(0.1, spacing / 3)) : pts;
+    if (simplified.length < 3) return;
+
+    // outer_offset shifts the outermost outline (positive = inward for safety).
+    let base = simplified;
+    if (outerOffset && Math.abs(outerOffset) > 1e-6) {
+      const off = offsetPolygon(simplified, outerOffset);
+      if (off.length >= 3 && polygonArea(off) > spacing * spacing) base = off;
+    }
+
+    const angleDeg = (angleRad * 180) / Math.PI;
 
     const obstacles = [];
     (s.mapData?.areas || []).forEach((a, i) => {
@@ -239,14 +267,10 @@ export function createMapController(container) {
     const fillColor = cssVar("--accent-2", "#22d3ee");
     const minArea = spacing * spacing;
 
-    // Perimeter laps the robot follows first (outline, then inset rings).
-    let fillBoundary = base;
+    // Perimeter (outline) laps the robot follows first.
     for (let k = 0; k < laps; k += 1) {
       const ring = k === 0 ? base : offsetPolygon(base, k * spacing);
-      if (ring.length < 3 || polygonArea(ring) < minArea) {
-        fillBoundary = null;
-        break;
-      }
+      if (ring.length < 3 || polygonArea(ring) < minArea) break;
       const lls = ring.map((p) => metersToLatLng(p, origin()));
       layers.coverage.push(
         L.polyline([...lls, lls[0]], {
@@ -256,14 +280,13 @@ export function createMapController(container) {
           interactive: false,
         }).addTo(map)
       );
-      // Fill goes inside the innermost perimeter lap.
-      const inner = offsetPolygon(base, (k + 1) * spacing);
-      fillBoundary = inner.length >= 3 && polygonArea(inner) >= minArea ? inner : null;
     }
 
-    // Back-and-forth fill stripes.
-    if (fillBoundary) {
-      const segs = coverageLines(fillBoundary, obstacles, spacing, angle);
+    // Back-and-forth fill, overlapping the innermost `overlap` outline laps.
+    const fillInset = Math.max(0, laps - overlap) * spacing;
+    const fillBoundary = fillInset > 0 ? offsetPolygon(base, fillInset) : base;
+    if (fillBoundary.length >= 3 && polygonArea(fillBoundary) >= minArea) {
+      const segs = coverageLines(fillBoundary, obstacles, spacing, angleDeg);
       segs.forEach((seg) => {
         layers.coverage.push(
           L.polyline([metersToLatLng(seg.a, origin()), metersToLatLng(seg.b, origin())], {
@@ -718,56 +741,178 @@ export function createMapController(container) {
   map.on("touchend", () => tool === "brush" && brushPainting && endBrush());
 
   // ---- robot marker (separate subscription, avoids full re-render) ---------
+  //
+  // The server streams discrete pose samples (~20 Hz). We tween the marker
+  // toward the latest sample every animation frame so it glides smoothly:
+  // position + heading update per frame (cheap), while the icon HTML (visual
+  // mode + HUD) is only rebuilt when its content actually changes.
+
+  const ROBOT_LERP = 0.25; // fraction toward target per frame (~150 ms settle)
+  const ROBOT_SNAP_DIST2 = 9; // >3 m jump → teleport instead of gliding across
+  const ROBOT_SETTLE_D2 = 1e-4; // ~1 cm: close enough to snap and stop the loop
+  const ROBOT_SETTLE_YAW = 0.005; // ~0.3°
+  const robotAnim = { cur: null, target: null, raf: 0, iconKey: "", rotate: false, glyphEl: null };
+
+  function stopRobotAnim() {
+    if (robotAnim.raf) {
+      cancelAnimationFrame(robotAnim.raf);
+      robotAnim.raf = 0;
+    }
+  }
+
+  // Rotate just the cached glyph element (re-queried only when the icon rebuilds).
+  function applyRobotTransform() {
+    const el = robotAnim.glyphEl;
+    if (!el || !robotAnim.cur) return;
+    el.style.transform = robotAnim.rotate
+      ? `rotate(${90 - (robotAnim.cur.yaw * 180) / Math.PI}deg)`
+      : "none";
+  }
+
+  function moveRobotTo(pt) {
+    layers.robot.setLatLng(metersToLatLng(pt, origin()));
+    applyRobotTransform();
+  }
+
+  function stepRobot() {
+    if (!layers.robot || !robotAnim.cur || !robotAnim.target) {
+      robotAnim.raf = 0;
+      return;
+    }
+    const t = robotAnim.target;
+    let dyaw = (t.yaw - robotAnim.cur.yaw) % (2 * Math.PI);
+    if (dyaw > Math.PI) dyaw -= 2 * Math.PI;
+    else if (dyaw < -Math.PI) dyaw += 2 * Math.PI;
+    // Settled: snap exactly, apply once, and idle the loop (renderRobot restarts
+    // it on the next sample). Avoids 60 fps DOM writes for a parked robot.
+    if (poseDist2(robotAnim.cur, t) < ROBOT_SETTLE_D2 && Math.abs(dyaw) < ROBOT_SETTLE_YAW) {
+      robotAnim.cur = { ...t };
+      moveRobotTo(robotAnim.cur);
+      robotAnim.raf = 0;
+      return;
+    }
+    robotAnim.cur = stepPose(robotAnim.cur, t, ROBOT_LERP);
+    moveRobotTo(robotAnim.cur);
+    robotAnim.raf = requestAnimationFrame(stepRobot);
+  }
 
   function renderRobot(live, pose) {
     if (!live || !pose || !pose.ok) {
+      stopRobotAnim();
       if (layers.robot) {
         map.removeLayer(layers.robot);
         layers.robot = null;
       }
+      robotAnim.cur = null;
+      robotAnim.target = null;
+      robotAnim.iconKey = "";
+      robotAnim.glyphEl = null;
       return;
     }
-    const latlng = metersToLatLng({ x: pose.x, y: pose.y }, origin());
-    const icon = makeRobotIcon(pose);
-    const tooltip = buildRobotPoseTooltip(pose);
+
+    const target = { x: pose.x, y: pose.y, yaw: pose.yaw };
+    robotAnim.target = target;
+    const visual = resolveRobotVisualMode(pose.ros);
+    robotAnim.rotate = visual === "nav";
+
+    // First fix, or a large jump (relocalization) → snap rather than glide.
+    if (!robotAnim.cur || !layers.robot || poseDist2(robotAnim.cur, target) > ROBOT_SNAP_DIST2) {
+      robotAnim.cur = { ...target };
+    }
+
+    // Cheap change key from visual + HUD text; only rebuild the icon when it moves.
+    const lines = buildRobotHudLines(pose.ros?.telemetry || null);
+    const key = `${visual}|${lines.join("")}`;
     if (!layers.robot) {
-      layers.robot = L.marker(latlng, { icon, zIndexOffset: 800 })
-        .bindTooltip(tooltip, {
+      layers.robot = L.marker(metersToLatLng(robotAnim.cur, origin()), {
+        icon: makeRobotIcon(visual, lines),
+        zIndexOffset: 800,
+      })
+        .bindTooltip(buildRobotPoseTooltip(pose), {
           sticky: true,
           direction: "top",
           opacity: 0.95,
           className: "robot-tooltip",
         })
         .addTo(map);
+      robotAnim.iconKey = key;
+      robotAnim.glyphEl = layers.robot._icon?.querySelector(".robot-glyph") || null;
     } else {
-      layers.robot.setLatLng(latlng).setIcon(icon).setTooltipContent(tooltip);
+      if (key !== robotAnim.iconKey) {
+        layers.robot.setIcon(makeRobotIcon(visual, lines));
+        robotAnim.iconKey = key;
+        robotAnim.glyphEl = layers.robot._icon?.querySelector(".robot-glyph") || null;
+      }
+      // Only refresh the tooltip text while it's actually open.
+      if (layers.robot.isTooltipOpen()) {
+        layers.robot.setTooltipContent(buildRobotPoseTooltip(pose));
+      }
     }
+    applyRobotTransform(); // avoid a one-frame flash after an icon rebuild
+    if (!robotAnim.raf) robotAnim.raf = requestAnimationFrame(stepRobot);
   }
 
-  function makeRobotIcon(pose) {
-    const visual = resolveRobotVisualMode(pose.ros);
+  function makeRobotIcon(visual, lines) {
     const { modifier, glyph } = robotVisualToMarkerStyle(visual);
-    const telemetry = pose.ros?.telemetry || null;
-    const rotationDeg = 90 - (pose.yaw * 180) / Math.PI;
-    const yawCss = visual === "nav" ? `transform: rotate(${rotationDeg}deg)` : "transform: none";
-    const hud = buildRobotHudHtml(telemetry);
+    // Rotation is applied per-frame via applyRobotTransform(), not baked here.
+    const inner = robotGlyphInner(visual, glyph);
+    const hud = lines.length
+      ? lines.map((l) => `<div class="robot-marker-hud__line">${escapeHtml(l)}</div>`).join("")
+      : "";
     if (!hud) {
       return L.divIcon({
         className: "map-marker-leaflet",
-        html: `<div class="map-marker--robot ${modifier}" style="${yawCss}"><span class="material-symbols-outlined">${glyph}</span></div>`,
+        html: `<div class="map-marker--robot ${modifier}">${inner}</div>`,
         iconSize: [40, 40],
         iconAnchor: [20, 20],
       });
     }
     const stackW = 200;
-    const lineCount = buildRobotHudLines(telemetry).length;
-    const stackH = 40 + 4 + 6 + lineCount * 15;
+    const stackH = 40 + 4 + 6 + lines.length * 15;
     return L.divIcon({
       className: "map-marker-leaflet robot-marker-stack-wrap",
-      html: `<div class="robot-marker-stack" style="width:${stackW}px"><div class="robot-marker-stack__pin"><div class="map-marker--robot ${modifier}" style="${yawCss}"><span class="material-symbols-outlined">${glyph}</span></div></div><div class="robot-marker-stack__hud">${hud}</div></div>`,
+      html: `<div class="robot-marker-stack" style="width:${stackW}px"><div class="robot-marker-stack__pin"><div class="map-marker--robot ${modifier}">${inner}</div></div><div class="robot-marker-stack__hud">${hud}</div></div>`,
       iconSize: [stackW, stackH],
       iconAnchor: [stackW / 2, 20],
     });
+  }
+
+  // ---- exact path (real slic3r planner overlay) ----------------------------
+
+  function renderExactPath(data) {
+    if (layers.exactPath) {
+      map.removeLayer(layers.exactPath);
+      layers.exactPath = null;
+    }
+    if (!data || !Array.isArray(data.paths) || !data.paths.length) return;
+    const outlineColor = cssVar("--ok", "#34d399");
+    const fillColor = cssVar("--accent-2", "#22d3ee");
+    const group = L.layerGroup();
+    for (const seg of data.paths) {
+      if (!seg.pts || seg.pts.length < 2) continue;
+      L.polyline(
+        seg.pts.map((p) => metersToLatLng(p, origin())),
+        {
+          color: seg.isOutline ? outlineColor : fillColor,
+          weight: 2,
+          opacity: 0.9,
+          interactive: false,
+        }
+      ).addTo(group);
+    }
+    const first = data.paths[0]?.pts?.[0];
+    if (first) {
+      L.circleMarker(metersToLatLng(first, origin()), {
+        radius: 4,
+        color: outlineColor,
+        fillColor: outlineColor,
+        fillOpacity: 1,
+        weight: 1,
+        interactive: false,
+      }).addTo(group);
+    }
+    group.addTo(map);
+    layers.exactPath = group;
   }
 
   // ---- public helpers ------------------------------------------------------
@@ -792,11 +937,19 @@ export function createMapController(container) {
   // ---- store wiring --------------------------------------------------------
 
   const unsubs = [];
+  let prevOriginKey = "";
   unsubs.push(activeBasemap.subscribe((cfg) => applyBasemap(cfg)));
   unsubs.push(
     editor.subscribe((value) => {
       s = value;
       render();
+      // The exact-path overlay uses absolute map metres, so it only needs a
+      // redraw when the projection origin moves — not on every vertex edit.
+      const key = `${value.origin?.lat},${value.origin?.lng}`;
+      if (key !== prevOriginKey) {
+        prevOriginKey = key;
+        renderExactPath(get(exactPath));
+      }
     })
   );
   unsubs.push(
@@ -835,10 +988,8 @@ export function createMapController(container) {
   );
   unsubs.push(robotLive.subscribe((live) => renderRobot(live, get(robotPose))));
   unsubs.push(coverageOn.subscribe(() => render()));
-  unsubs.push(coverageSpacing.subscribe(() => render()));
-  unsubs.push(coverageAngle.subscribe(() => render()));
-  unsubs.push(coverageAbsolute.subscribe(() => render()));
-  unsubs.push(coveragePasses.subscribe(() => render()));
+  unsubs.push(mowParams.subscribe(() => render()));
+  unsubs.push(exactPath.subscribe((d) => renderExactPath(d)));
 
   // Keep Leaflet sized correctly once laid out.
   setTimeout(() => map.invalidateSize(), 60);
@@ -852,6 +1003,7 @@ export function createMapController(container) {
     zoomOut: () => map.zoomOut(),
     invalidateSize: () => map.invalidateSize(),
     destroy() {
+      stopRobotAnim();
       unsubs.forEach((u) => u());
       map.remove();
     },

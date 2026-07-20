@@ -101,14 +101,6 @@ export function buildRobotHudLines(telemetry) {
   return lines;
 }
 
-export function buildRobotHudHtml(telemetry) {
-  const lines = buildRobotHudLines(telemetry);
-  if (!lines.length) return "";
-  return lines
-    .map((line) => `<div class="robot-marker-hud__line">${escapeHtml(line)}</div>`)
-    .join("");
-}
-
 function appendRobotTelemetryTooltipBrief(lines, telemetry) {
   if (!telemetry || typeof telemetry !== "object") return;
   if (Number.isFinite(telemetry.batteryPercent)) {

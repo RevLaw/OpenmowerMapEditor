@@ -1,6 +1,7 @@
 <script>
   import { editor } from "../../lib/stores/editor.js";
   import { applyProjection } from "../../lib/actions.js";
+  import Collapsible from "../Collapsible.svelte";
 
   let lat = 52.52;
   let lng = 13.405;
@@ -18,11 +19,7 @@
   }
 </script>
 
-<section class="card">
-  <h2 class="card-title">
-    <span class="material-symbols-outlined" style="font-size:16px">explore</span>
-    Projection
-  </h2>
+<Collapsible title="Projection" icon="explore" key="projection" open={false}>
   <p class="mb-2 text-[10px] text-subtle">
     From <code class="text-muted">openmower config ros</code>: <code class="text-muted">datum_lat</code> /
     <code class="text-muted">datum_long</code>.
@@ -55,4 +52,4 @@
     <span class="material-symbols-outlined" style="font-size:18px">my_location</span>
     Apply projection
   </button>
-</section>
+</Collapsible>

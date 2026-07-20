@@ -34,6 +34,28 @@ export function getAreaType(area) {
   return area?.properties?.type || "area";
 }
 
+// Per-area mowing overrides (OpenMower v1.2) live in area.properties. A key
+// that's absent means "use the global default" (angle absent = auto-detect).
+// `angle` is stored in RADIANS, as OpenMower reads it.
+export const ZONE_OVERRIDE_KEYS = [
+  "outline_count",
+  "outline_overlap_count",
+  "outline_offset",
+  "angle",
+];
+
+/** Read a zone's overrides as numbers, or null when unset. */
+export function getZoneOverrides(area) {
+  const p = area?.properties || {};
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return {
+    outlineCount: num(p.outline_count),
+    outlineOverlapCount: num(p.outline_overlap_count),
+    outlineOffset: num(p.outline_offset),
+    angle: num(p.angle), // radians
+  };
+}
+
 /** Friendly zone label: properties.name if set, else "<type> <n>". */
 export function getZoneName(area, index = 0) {
   const n = area?.properties?.name;

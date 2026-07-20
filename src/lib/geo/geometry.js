@@ -180,32 +180,19 @@ export function boundingBox(points) {
 }
 
 /**
- * Principal-axis orientation of a point set, in degrees (PCA). Robust for the
- * dense outlines OpenMower records. Used as the base direction for "relative"
- * mowing-angle preview (mow_angle_offset_is_absolute = false).
+ * OpenMower's auto mow orientation: the direction (radians) of the first
+ * outline segment that reaches >= minDist meters from the start point. Returns
+ * 0 if no such point (matches MowingBehavior's default). East (+x) = 0.
  */
-export function principalAngleDeg(points) {
-  const n = points?.length || 0;
-  if (n < 2) return 0;
-  let mx = 0;
-  let my = 0;
-  for (const p of points) {
-    mx += p.x;
-    my += p.y;
+export function firstSegmentAngle(points, minDist = 2) {
+  if (!points || points.length < 2) return 0;
+  const p0 = points[0];
+  for (let i = 1; i < points.length; i += 1) {
+    const dx = points[i].x - p0.x;
+    const dy = points[i].y - p0.y;
+    if (Math.hypot(dx, dy) >= minDist) return Math.atan2(dy, dx);
   }
-  mx /= n;
-  my /= n;
-  let sxx = 0;
-  let syy = 0;
-  let sxy = 0;
-  for (const p of points) {
-    const dx = p.x - mx;
-    const dy = p.y - my;
-    sxx += dx * dx;
-    syy += dy * dy;
-    sxy += dx * dy;
-  }
-  return (0.5 * Math.atan2(2 * sxy, sxx - syy) * 180) / Math.PI;
+  return 0;
 }
 
 function lineIntersect(p1, d1, p2, d2) {

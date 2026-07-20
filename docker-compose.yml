@@ -2,6 +2,7 @@
   openmower-map-editor:
     image: ghcr.io/revlaw/openmowermapeditor:latest
     container_name: openmower-map-editor
+    restart: unless-stopped
     ports:
       - "5080:80"
     volumes:
@@ -17,8 +18,12 @@
         target: /var/run/docker.sock
     environment:
       OPENMOWER_CONTAINER_NAME: open_mower_ros
-      # Optional — see README "Environment variables":
-      # OPENMOWER_POSE_CACHE_MS: "2200"
+      # Optional tuning — see README "Environment variables":
+      # OPENMOWER_POSE_CONTAINER: open_mower_ros    # container for live pose / control (defaults to the above)
+      # OPENMOWER_POSE_DISABLE: "0"                 # "1" disables the live robot overlay
+      # OPENMOWER_CONTROL_DISABLE: "0"              # "1" disables the Start/Stop/Home/Reset buttons
+      # OPENMOWER_POSE_CACHE_MS: "2200"             # fallback-probe cache (ms)
+      # OPENMOWER_STREAM_FRESH_MS: "2000"           # how long a streamed pose stays "fresh" before fallback (ms)
       # OPENMOWER_TF_ECHO_TIMEOUT_SEC: "4"
       # OPENMOWER_ROS_TOPIC_TIMEOUT_SEC: "4"
       # OPENMOWER_ROS_TOPIC_FALLBACK_SEC: "10"

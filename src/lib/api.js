@@ -51,3 +51,29 @@ export async function fetchRobotPose() {
   const res = await fetch("/api/robot_pose");
   return res.json();
 }
+
+/** GET /api/mow_params -> global mowing params from /mower_logic (or fallback). */
+export async function fetchMowParams() {
+  const res = await fetch("/api/mow_params");
+  return res.json();
+}
+
+/** POST /api/plan_path -> exact coverage path from OpenMower's slic3r planner. */
+export async function planPath(payload) {
+  const res = await fetch("/api/plan_path", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+/** POST /api/control -> send a high-level command (start|stop|home|reset_emergency). */
+export async function sendControl(command) {
+  const res = await fetch("/api/control", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command }),
+  });
+  return res.json();
+}

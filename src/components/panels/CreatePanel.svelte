@@ -1,6 +1,7 @@
 <script>
   import { activeTool, toggleTool, drawZoneType } from "../../lib/stores/tools.js";
   import { addZoneAtCenter, duplicateZoneAction } from "../../lib/actions.js";
+  import Collapsible from "../Collapsible.svelte";
 
   const drawTools = [
     { id: "rect", icon: "crop_square", label: "Rectangle", hint: "drag on map" },
@@ -9,12 +10,7 @@
   ];
 </script>
 
-<section class="card">
-  <h2 class="card-title">
-    <span class="material-symbols-outlined" style="font-size:16px">add_box</span>
-    Create zone
-  </h2>
-
+<Collapsible title="Create zone" icon="add_box" key="create" open={false}>
   <label class="field">
     Zone type
     <select class="select" bind:value={$drawZoneType}>
@@ -50,4 +46,4 @@
     <span class="material-symbols-outlined" style="font-size:18px">content_copy</span>
     Duplicate selected zone
   </button>
-</section>
+</Collapsible>
