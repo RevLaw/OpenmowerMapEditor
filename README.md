@@ -74,6 +74,7 @@ services:
       # Optional tuning (see Environment variables below):
       # OPENMOWER_POSE_CONTAINER: open_mower_ros
       # OPENMOWER_POSE_CACHE_MS: "2200"
+      # OPENMOWER_STREAM_FRESH_MS: "2000"
       # OPENMOWER_POSE_DISABLE: "0"
       # OPENMOWER_CONTROL_DISABLE: "0"   # set "1" to hide/disable Start/Stop/Home/Reset
       # OPENMOWER_TF_ECHO_TIMEOUT_SEC: "4"
@@ -181,7 +182,8 @@ Project layout:
 | `OPENMOWER_POSE_CONTAINER` | same as above | Container used for TF echo / ROS topic sampling |
 | `OPENMOWER_POSE_DISABLE` | `0` | Set `1` to disable live pose entirely |
 | `OPENMOWER_CONTROL_DISABLE` | `0` | Set `1` to disable the Start/Stop/Home/Reset mower control buttons |
-| `OPENMOWER_POSE_CACHE_MS` | `2200` | Server-side cache for pose probe (ms) |
+| `OPENMOWER_POSE_CACHE_MS` | `2200` | Server-side cache for the pose fallback probe (ms) |
+| `OPENMOWER_STREAM_FRESH_MS` | `2000` | How long a streamed pose sample stays "fresh" before the SSE endpoint falls back to the probe (ms) |
 | `OPENMOWER_TF_ECHO_TIMEOUT_SEC` | `4` | Timeout for `tf_echo` / `tf2_echo` inside the container |
 | `OPENMOWER_ROS_TOPIC_TIMEOUT_SEC` | `4` | Timeout for `rostopic` / `ros2 topic echo` samples |
 | `OPENMOWER_ROS_TOPIC_FALLBACK_SEC` | `10` | Longer timeout when sampling `/mower_logic/current_state` fallback |
