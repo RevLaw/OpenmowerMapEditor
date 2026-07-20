@@ -51,3 +51,9 @@ export async function fetchRobotPose() {
   const res = await fetch("/api/robot_pose");
   return res.json();
 }
+
+/** GET /api/mow_params -> global mowing params from /mower_logic (or fallback). */
+export async function fetchMowParams() {
+  const res = await fetch("/api/mow_params");
+  return res.json();
+}

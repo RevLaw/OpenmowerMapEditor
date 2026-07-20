@@ -9,6 +9,7 @@ import {
   simplify,
   offsetPolygon,
   principalAngleDeg,
+  firstSegmentAngle,
 } from "./geometry.js";
 import { rectangleOutline, circleOutline } from "../format/shapes.js";
 
@@ -99,6 +100,17 @@ describe("offsetPolygon", () => {
     const outer = offsetPolygon(sq, -1);
     expect(outer[0].x).toBeCloseTo(-1, 6);
     expect(outer[0].y).toBeCloseTo(-1, 6);
+  });
+});
+
+describe("firstSegmentAngle", () => {
+  it("uses the first vertex >= 2 m from the start (radians, East=0)", () => {
+    // first far point is due north (0,3) -> +90deg
+    const pts = [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }, { x: 0, y: 3 }];
+    expect(firstSegmentAngle(pts)).toBeCloseTo(Math.PI / 2, 6);
+  });
+  it("returns 0 when nothing is >= 2 m away", () => {
+    expect(firstSegmentAngle([{ x: 0, y: 0 }, { x: 0.5, y: 0 }])).toBe(0);
   });
 });
 

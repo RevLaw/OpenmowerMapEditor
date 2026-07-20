@@ -7,6 +7,7 @@
     formatLength,
   } from "../../lib/measurements.js";
   import { getAreaType } from "../../lib/format/mapFormat.js";
+  import Collapsible from "../Collapsible.svelte";
 
   // $editor.rev bumps on every edit, so these recompute live.
   $: areas = $editor.mapData?.areas || [];
@@ -14,12 +15,7 @@
   $: totals = totalMowArea(areas);
 </script>
 
-<section class="card">
-  <h2 class="card-title">
-    <span class="material-symbols-outlined" style="font-size:16px">straighten</span>
-    Measurements
-  </h2>
-
+<Collapsible title="Measurements" icon="straighten" key="measure">
   {#if cur}
     <div class="mb-2 grid grid-cols-3 gap-2 text-center">
       <div class="rounded-lg py-1.5" style="background:var(--surface-2)">
@@ -46,4 +42,4 @@
   <div class="mt-1 flex items-center justify-between text-[11px] text-subtle">
     <span>{formatArea(totals.mow)} mow − {formatArea(totals.obstacle)} obstacles</span>
   </div>
-</section>
+</Collapsible>

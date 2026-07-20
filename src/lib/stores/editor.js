@@ -135,6 +135,21 @@ export function setZoneType(type) {
   });
 }
 
+/**
+ * Set (or clear, when value == null) a per-area mowing override on the current
+ * zone. `rosKey` is the map.json properties key (outline_count, angle, …).
+ */
+export function writeZoneOverride(rosKey, value) {
+  store.update((s) => {
+    const a = s.mapData?.areas?.[s.areaIndex];
+    if (!a) return s;
+    if (!a.properties) a.properties = {};
+    if (value == null || Number.isNaN(value)) delete a.properties[rosKey];
+    else a.properties[rosKey] = value;
+    return { ...s, rev: s.rev + 1 };
+  });
+}
+
 /** Set a friendly name on the current zone (stored in properties.name). */
 export function setZoneName(name) {
   store.update((s) => {

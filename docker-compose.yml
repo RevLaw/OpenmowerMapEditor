@@ -2,6 +2,7 @@
   openmower-map-editor:
     image: ghcr.io/revlaw/openmowermapeditor:latest
     container_name: openmower-map-editor
+    restart: unless-stopped
     ports:
       - "5080:80"
     volumes:

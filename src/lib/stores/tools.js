@@ -34,17 +34,10 @@ export const simplifyTolerance = writable(0.05);
 // Zone type used by the rectangle / circle draw tools.
 export const drawZoneType = writable("mow");
 
-// Mowing coverage preview (visual overlay only). Settings persist locally and
-// mirror OpenMower mower_logic params:
-//   coverageSpacing   ~ tool/cutting width (line spacing)
-//   coverageAngle     = mow_angle_offset (deg)
-//   coverageAbsolute  = mow_angle_offset_is_absolute
-//   coveragePasses    = outline_overlap_count
+// Mowing coverage preview toggle. The parameters now come from the robot's
+// real /mower_logic values (mowParams store) + per-area map.json overrides,
+// so there are no manual sliders here anymore.
 export const coverageOn = persisted("om-coverage-on", false);
-export const coverageSpacing = persisted("om-coverage-spacing", 0.25);
-export const coverageAngle = persisted("om-coverage-angle", 0);
-export const coverageAbsolute = persisted("om-coverage-absolute", false);
-export const coveragePasses = persisted("om-coverage-passes", 1);
 
 export function setTool(tool) {
   activeTool.set(tool);

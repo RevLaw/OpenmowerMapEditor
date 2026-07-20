@@ -25,8 +25,10 @@ Built with **Svelte 5 + Vite 8 + Tailwind CSS 4** (compiled to static assets at 
 - **Quick create & transform** — draw rectangle/circle zones, place the dock by clicking, duplicate a zone, move a whole zone, rotate/scale about its centroid, **grow/shrink** (offset every border by a margin — a buffer), simplify an outline (Douglas–Peucker), smart add-point on the nearest edge, multi-point delete, and arrow-key nudging
 - **Map navigation** — zoom buttons (bottom-right), scroll-wheel / `+` `−` keys, plus zoom in/out and base-map switching from the command palette
 - **Switchable base maps** (bottom-left **Layers** control) — Esri satellite (default), the free **20 cm Lower Saxony aerial (DOP20)**, **OpenStreetMap** (global fallback), or a custom XYZ/WMS URL; choice persists. Esri is global but its detailed imagery has coverage gaps in rural regions worldwide (blank tiles past where data exists) — switch to OpenStreetMap or a regional/custom source there. WMS layers render crisp at any zoom; XYZ layers soften past their native zoom (DOP20 is true 20 cm)
-- **Mowing coverage preview** — overlay the rows the robot drives: green **outline laps** (driven first) around the edge, then cyan **back-and-forth fill** inside, with obstacles carved out. Controls mirror OpenMower `mower_logic` (`outline_overlap_count`, `mow_angle_offset`, `mow_angle_offset_is_absolute`) plus a tool-width spacing; the angle is relative to the zone's main axis unless set absolute. Visual only; settings are remembered locally but not written to map.json (OpenMower decides the actual mowing pattern)
-- **Zone management** — give a zone a friendly **name** (stored as `properties.name`; the random `id` stays as the stable identifier), change its type (mow/obstacle/nav), reorder, and remove it. The zone selector shows a colored type badge (🟩 mow · 🟥 obstacle · 🟦 nav)
+- **Mowing coverage preview** — overlay the rows the robot drives: green **outline laps** (driven first) around the edge, then cyan **back-and-forth fill** inside, with obstacles carved out. It uses the robot's **real** parameters: global values read live from `/mower_logic` (`tool_width` = spacing, `outline_count`, `outline_overlap_count`, `mow_angle_offset`, …) via `GET /api/mow_params`, plus any **per-area overrides** in `map.json`, and OpenMower's exact angle logic (first-2 m auto-orientation, or a fixed per-area angle). Falls back to the params file + OpenMower defaults offline
+- **Per-area mowing overrides (OpenMower v1.2)** — set `outline_count`, `outline_overlap_count`, `outline_offset`, and `angle` **per mow zone** in the **Mowing** panel (alongside the preview); they're written to `map.json` under `area.properties` (an unchecked control = use the global default). Angle is shown in degrees and stored in radians, and a hint shows the effective direction after the robot's global `mow_angle_offset`. This is the v1.2 area-override feature that otherwise requires hand-editing JSON
+- **Zone management** — give a zone a friendly **name** (stored as `properties.name`; the random `id` stays as the stable identifier), change its type (mow/obstacle/nav), reorder, and remove it. The zone picker (in the **Selected zone** panel) shows a colored type badge (🟩 mow · 🟥 obstacle · 🟦 nav)
+- **Organized sidebar** — panels are **collapsible** and remember their open/closed state (Projection, Transform, and Create start folded); mowing parameters and the coverage preview live together in one **Mowing** panel
 - **Unsaved-changes guard** — an "Unsaved" indicator in the sidebar and a browser prompt before you leave with unsaved edits
 - Toast notifications and a modern dark-tech / HUD interface with glass map-overlay panels
 - Type-aware overlays while editing:
@@ -34,7 +36,7 @@ Built with **Svelte 5 + Vite 8 + Tailwind CSS 4** (compiled to static assets at 
   - editing `obstacle`: shows `mow` (white dashed) and `nav` (blue dashed)
   - editing `nav`: shows `mow` (white dashed) and `obstacle` (red dashed)
 - Stable map readability: map colors stay fixed; light/dark toggle changes sidebar UI only
-- Optional **live robot** overlay: **Live robot** toolbar button polls `GET /api/robot_pose`, which runs **`tf2_echo` / `tf_echo`** in the ROS container (Docker socket) and parses output with stdlib-only Python (tries `map`/`odom` → `base_link`/`base_footprint`). Marker style reflects **navigation**, **docking**, **charging at dock**, **dock full**, **emergency**, and **error** states (from sampled ROS topics when available). Polling pauses while the browser tab is hidden.
+- Optional **live robot** overlay with **smooth motion**: the **Live robot** toolbar button opens an **SSE stream** (`GET /api/robot_pose/stream`). The server holds **one persistent ROS subscriber** inside `open_mower_ros` to `/xbot_positioning/xb_pose` (the ~48 Hz fused GPS/odometry pose, map frame) plus `/xbot_monitoring/robot_state` (telemetry), and pushes each sample to the browser, which **interpolates** the marker between frames every animation frame — so it glides instead of jumping every few seconds. On ROS 2 / non-xbot setups it transparently falls back to a `tf2_echo` / `tf_echo` probe (tries `map`/`odom` → `base_link`/`base_footprint`), and the client falls back to polling `GET /api/robot_pose` if SSE is unavailable. Marker style reflects **navigation**, **docking**, **charging at dock**, **dock full**, **emergency**, and **error** states, with RTK status. Streaming pauses while the browser tab is hidden.
 - Auto-load `/data/ros/map.json` (if present)
 - Auto-fill projection from `/data/params/mower_params.yaml` (`datum_lat`, `datum_long`)
 - Save directly to `/data/ros/map.json` with automatic timestamped backup
@@ -51,6 +53,7 @@ services:
   openmower-map-editor:
     image: ghcr.io/revlaw/openmowermapeditor:latest
     container_name: openmower-map-editor
+    restart: unless-stopped
     ports:
       - "5080:80"
     volumes:
@@ -87,9 +90,9 @@ services:
   - read `/data/params/mower_params.yaml` and apply `datum_lat` / `datum_long`
 3. If no map is found, load one manually with the file picker.
 4. Pick a zone from the **Selected zone** dropdown (colored type badge: 🟩 mow · 🟥 obstacle · 🟦 nav).
-5. Create zones in the **Create zone** panel — pick a type, then **Add zone** (square at the map center) or draw a rectangle/circle. Use the **Selected zone** panel to name, retype, reorder, or remove the current zone.
+5. Create zones in the **Create zone** panel — pick a type, then **Add zone** (square at the map center) or draw a rectangle/circle. Use the **Selected zone** panel to pick, name, retype, reorder, or remove a zone, and the **Mowing** panel to set a mow zone's cutting parameters and preview the path.
 6. Use the tool dock on the right to edit your map geometry.
-7. Optional: turn on **Live robot** to poll pose from the running ROS container (requires the Docker socket mount). Position matches the map when TF uses the `map` frame; if only `odom` is available, the marker may drift relative to `map.json` until localization aligns. Status and mode lines update from ROS when topics respond in time.
+7. Optional: turn on **Live robot** to stream the pose from the running ROS container (requires the Docker socket mount). The marker glides in real time from the fused map-frame pose; on fallback (probe) setups it matches the map when TF uses the `map` frame, and may drift relative to `map.json` while only `odom` is available until localization aligns. Status and mode lines update from ROS telemetry.
 8. Save your edits:
   - **Save map.json** writes to `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
   - **Save + restart ROS** does the same, then restarts the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
@@ -122,14 +125,14 @@ Create & transform (sidebar **Create** and **Transform zone** panels, also in th
 - **Grow / Shrink** — offset every border of the selected zone outward/inward by a margin (a buffer; unlike Scale it keeps a uniform border distance). For a donut (mow + obstacle), **Grow** the mow and **Shrink** the obstacle to widen the mowable ring.
 - **Simplify outline** — Douglas–Peucker reduction with an adjustable tolerance, to thin out dense outlines.
 - **Create zone** panel adds a zone (square at center, or rectangle/circle draw); the **Selected zone** panel names / retypes / reorders / removes the current zone.
-- **Live robot** (toolbar toggle) polls ROS TF via the mounted Docker socket and shows heading; marker color/icon follows **visual mode** (nav, docking, dock charging, dock full, emergency, error). Preference is stored in `localStorage`. The dock uses **ev_station** on the map.
+- **Live robot** (toolbar toggle) streams the fused ROS pose via the mounted Docker socket (SSE) and interpolates the marker for smooth motion + heading. While driving/mowing it shows a **top-down mower** icon rotated to the live heading; other states swap the icon (docking, dock charging, dock full, emergency, error) and keep the badge fixed. Preference is stored in `localStorage`. The dock uses **ev_station** on the map.
 - `Load map / backup…` opens a gallery of saved versions, each with a mini-map preview, timestamp, stats, and a diff vs your current map.
 - **Zoom** buttons sit at the bottom-right; the **Layers** button (bottom-left) switches the base map.
 
 Tool sliders are contextual:
 
 - Brush sliders appear only while brush mode is active.
-- The mowing-preview and transform sliders live in their sidebar panels.
+- Mowing parameters (**Mowing** panel) and transform controls (**Transform zone** panel) live in the sidebar.
 - On touch devices, brush also supports finger paint (`touchstart/move/end`).
 - Light/dark mode affects sidebar/tool styling only. Map line/point colors remain identical in both modes.
 
@@ -165,7 +168,7 @@ Project layout:
 - `src/components/` — Svelte UI (shell, sidebar panels, tool dock, robot HUD, command palette).
 - `server.js` — unchanged API; serves the built `dist/`. `MAP_PATH` / `PARAMS_PATH` override the in-container defaults for local dev.
 
-`POST /api/map`, `GET /api/map`, `/api/map/backups`, `/api/params`, and `/api/robot_pose` are the stable backend contract; the map.json on-disk format is unchanged.
+`POST /api/map`, `GET /api/map`, `/api/map/backups`, `/api/params`, `/api/robot_pose`, `/api/robot_pose/stream` (SSE), and `/api/mow_params` are the stable backend contract; the map.json on-disk format is unchanged.
 
 ## Environment variables
 
@@ -205,5 +208,5 @@ This repository should not contain real mower coordinates, passwords, or API key
 - OpenMower uses local meter coordinates (`x`, `y`), so map projection is an approximation from your configured datum.
 - Aerial imagery coverage and zoom depth vary by provider and region. Esri World Imagery is global but lacks deep zoom in many rural areas (it returns blank tiles past where data exists) — switch to OpenStreetMap or a custom regional source via the **Layers** control there.
 - Zone names are stored under `properties.name` (editor convenience metadata). OpenMower's firmware selects zones by order/index, not by name, so naming doesn't change robot behavior.
-- Live pose runs **`ros2 run tf2_ros tf2_echo`** or **`rosrun tf tf_echo`** inside the ROS container (after sourcing ROS setup scripts, including `/opt/open_mower_ros/devel/setup.bash` when present). Topic sampling prefers **`rostopic echo`** on ROS 1 before trying `ros2 topic echo`. Output is parsed with **stdlib-only `python3`**. If TF is not published yet, the HUD shows the probe error.
+- Smooth live pose runs a **persistent `rospy` subscriber** (`/xbot_positioning/xb_pose` + `/xbot_monitoring/robot_state`) inside the ROS container via a **long-lived streamed `docker exec`**, so there's no per-poll exec overhead; samples are pushed to the browser over **SSE** and interpolated client-side. When `xbot_msgs` isn't present (ROS 2 / other setups) the server falls back to **`ros2 run tf2_ros tf2_echo`** / **`rosrun tf tf_echo`** and topic sampling (`rostopic echo` before `ros2 topic echo`), parsed with **stdlib-only `python3`**. If no pose is published yet, the HUD shows the probe error.
 - Always validate edited borders before deploying to a mower in production.

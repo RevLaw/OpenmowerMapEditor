@@ -16,6 +16,7 @@ import {
   duplicateZone,
   setZoneType,
   setZoneName,
+  writeZoneOverride,
   reorderZone,
   pushHistory,
   undo as undoRaw,
@@ -30,6 +31,7 @@ import { serializeMap } from "./format/mapFormat.js";
 import * as api from "./api.js";
 import { notify, setStatus } from "./stores/toast.js";
 import { markMapReady, markParamsReady, refreshRobotIfLive } from "./stores/robot.js";
+import { loadMowParams } from "./stores/mowParams.js";
 
 export const backups = writable([]);
 
@@ -171,6 +173,13 @@ export function moveZoneOrder(dir) {
   if (!currentMap()?.areas?.length) return;
   pushHistory();
   reorderZone(dir);
+}
+
+/** Set/clear a per-area mowing override (rosKey, value|null) on the zone. */
+export function setZoneOverride(rosKey, value) {
+  if (!currentMap()?.areas?.length) return;
+  pushHistory();
+  writeZoneOverride(rosKey, value);
 }
 
 export function removePoint() {
@@ -319,4 +328,7 @@ export async function bootstrap() {
     await refreshBackups();
     markMapReady();
   }
+
+  // Global mowing params for the accurate coverage preview (best-effort).
+  loadMowParams();
 }

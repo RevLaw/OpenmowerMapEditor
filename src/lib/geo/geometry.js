@@ -208,6 +208,22 @@ export function principalAngleDeg(points) {
   return (0.5 * Math.atan2(2 * sxy, sxx - syy) * 180) / Math.PI;
 }
 
+/**
+ * OpenMower's auto mow orientation: the direction (radians) of the first
+ * outline segment that reaches >= minDist meters from the start point. Returns
+ * 0 if no such point (matches MowingBehavior's default). East (+x) = 0.
+ */
+export function firstSegmentAngle(points, minDist = 2) {
+  if (!points || points.length < 2) return 0;
+  const p0 = points[0];
+  for (let i = 1; i < points.length; i += 1) {
+    const dx = points[i].x - p0.x;
+    const dy = points[i].y - p0.y;
+    if (Math.hypot(dx, dy) >= minDist) return Math.atan2(dy, dx);
+  }
+  return 0;
+}
+
 function lineIntersect(p1, d1, p2, d2) {
   const denom = d1.x * d2.y - d1.y * d2.x;
   if (Math.abs(denom) < 1e-9) return null; // parallel

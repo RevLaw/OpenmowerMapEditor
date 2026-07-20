@@ -8,6 +8,7 @@
          - linux/arm64
     image: ghcr.io/revlaw/openmowermapeditor:dev
     container_name: openmower-map-editor
+    restart: unless-stopped
     ports:
       - "5080:80"
     volumes:

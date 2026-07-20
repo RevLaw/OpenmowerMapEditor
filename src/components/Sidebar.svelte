@@ -48,11 +48,11 @@
     <MapSourcePanel />
     <ProjectionPanel />
     <ZonePanel />
-    <CreatePanel />
-    <ToolSettingsPanel />
-    <TransformPanel />
-    <MeasurementsPanel />
     <CoveragePanel />
+    <TransformPanel />
+    <ToolSettingsPanel />
+    <CreatePanel />
+    <MeasurementsPanel />
     <ValidationPanel />
   </div>
 
