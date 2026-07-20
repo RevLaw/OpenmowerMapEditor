@@ -6,6 +6,7 @@
   import { getAreaType, getZoneOverrides } from "../../lib/format/mapFormat.js";
   import { getEditablePoints } from "../../lib/format/outline.js";
   import { firstSegmentAngle } from "../../lib/geo/geometry.js";
+  import { resolveMowSettings } from "../../lib/coverage/mowSettings.js";
   import { mowParams } from "../../lib/stores/mowParams.js";
   import { setZoneOverride } from "../../lib/actions.js";
   import {
@@ -27,16 +28,13 @@
   $: ov = getZoneOverrides(area);
   $: gp = $mowParams;
   $: pts = area ? getEditablePoints(area.outline || []) : [];
-  $: autoAngleDeg = Math.round((firstSegmentAngle(pts) * 180) / Math.PI);
-  $: laps = ov.outlineCount ?? gp.outlineCount;
-  $: overlap = ov.outlineOverlapCount ?? gp.outlineOverlapCount;
-  $: offset = ov.outlineOffset ?? gp.outlineOffset;
-  // Final mow direction, mirroring MowingBehavior.cpp: base (fixed or auto) plus
-  // the robot's global offset — or, in absolute mode, the offset alone.
-  $: baseRad = ov.angle != null ? ov.angle : firstSegmentAngle(pts);
-  $: offsetRad = ((gp.mowAngleOffset || 0) * Math.PI) / 180;
-  $: finalRad = gp.mowAngleOffsetIsAbsolute ? offsetRad : baseRad + offsetRad;
-  $: effAngleDeg = Math.round(((finalRad * 180) / Math.PI) % 360);
+  $: autoAngleRad = firstSegmentAngle(pts);
+  $: autoAngleDeg = Math.round((autoAngleRad * 180) / Math.PI);
+  $: settings = resolveMowSettings(ov, gp, pts);
+  $: laps = settings.laps;
+  $: overlap = settings.overlap;
+  $: offset = settings.outerOffset;
+  $: effAngleDeg = Math.round(((settings.angleRad * 180) / Math.PI) % 360);
   $: angleOffsetActive = gp.mowAngleOffsetIsAbsolute || Math.abs(gp.mowAngleOffset || 0) > 0.01;
 
   // Toggle an override: enable it seeded with the current global value, or clear.
@@ -125,7 +123,7 @@
         type="checkbox"
         class="accent-[var(--accent)]"
         checked={ov.angle != null}
-        on:change={() => toggleOv("angle", "angle", firstSegmentAngle(pts))}
+        on:change={() => toggleOv("angle", "angle", autoAngleRad)}
       />
       <span class="flex-1 text-xs text-muted">
         Mow angle (°) <span class="text-subtle">{ov.angle == null ? "· auto" : "· fixed"}</span>

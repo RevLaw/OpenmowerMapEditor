@@ -38,6 +38,7 @@ Built with **Svelte 5 + Vite 8 + Tailwind CSS 4** (compiled to static assets at 
   - editing `nav`: shows `mow` (white dashed) and `obstacle` (red dashed)
 - Stable map readability: map colors stay fixed; light/dark toggle changes sidebar UI only
 - Optional **live robot** overlay with **smooth motion**: the **Live robot** toolbar button opens an **SSE stream** (`GET /api/robot_pose/stream`). The server holds **one persistent ROS subscriber** inside `open_mower_ros` to `/xbot_positioning/xb_pose` (the ~48 Hz fused GPS/odometry pose, map frame) plus `/xbot_monitoring/robot_state` (telemetry), and pushes each sample to the browser, which **interpolates** the marker between frames every animation frame — so it glides instead of jumping every few seconds. On ROS 2 / non-xbot setups it transparently falls back to a `tf2_echo` / `tf_echo` probe (tries `map`/`odom` → `base_link`/`base_footprint`), and the client falls back to polling `GET /api/robot_pose` if SSE is unavailable. Marker style reflects **navigation**, **docking**, **charging at dock**, **dock full**, **emergency**, and **error** states, with RTK status. Streaming pauses while the browser tab is hidden.
+- **Mower control** — a floating control bar on the map with **Start**, **Stop**, **Home**, and **Reset E-stop**, wired to OpenMower's real services (`/mower_service/high_level_control` for start/home/reset-emergency; `/ll/_service/emergency` for the immediate stop) via `POST /api/control`. **Start/Home/Reset need a two-step confirm** (click → *Confirm?* → click); **Stop** is one tap. ⚠️ These move a real robot with spinning blades — disable the feature entirely with `OPENMOWER_CONTROL_DISABLE=1`
 - Auto-load `/data/ros/map.json` (if present)
 - Auto-fill projection from `/data/params/mower_params.yaml` (`datum_lat`, `datum_long`)
 - Save directly to `/data/ros/map.json` with automatic timestamped backup
@@ -74,6 +75,7 @@ services:
       # OPENMOWER_POSE_CONTAINER: open_mower_ros
       # OPENMOWER_POSE_CACHE_MS: "2200"
       # OPENMOWER_POSE_DISABLE: "0"
+      # OPENMOWER_CONTROL_DISABLE: "0"   # set "1" to hide/disable Start/Stop/Home/Reset
       # OPENMOWER_TF_ECHO_TIMEOUT_SEC: "4"
       # OPENMOWER_ROS_TOPIC_TIMEOUT_SEC: "4"
       # OPENMOWER_ROS_TOPIC_FALLBACK_SEC: "10"
@@ -169,7 +171,7 @@ Project layout:
 - `src/components/` — Svelte UI (shell, sidebar panels, tool dock, robot HUD, command palette).
 - `server.js` — unchanged API; serves the built `dist/`. `MAP_PATH` / `PARAMS_PATH` override the in-container defaults for local dev.
 
-`POST /api/map`, `GET /api/map`, `/api/map/backups`, `/api/params`, `/api/robot_pose`, `/api/robot_pose/stream` (SSE), `/api/mow_params`, and `POST /api/plan_path` are the stable backend contract; the map.json on-disk format is unchanged.
+`POST /api/map`, `GET /api/map`, `/api/map/backups`, `/api/params`, `/api/robot_pose`, `/api/robot_pose/stream` (SSE), `/api/mow_params`, `POST /api/plan_path`, and `POST /api/control` are the stable backend contract; the map.json on-disk format is unchanged.
 
 ## Environment variables
 
@@ -178,6 +180,7 @@ Project layout:
 | `OPENMOWER_CONTAINER_NAME` | `open_mower_ros` | Container restarted by **Save + restart ROS** |
 | `OPENMOWER_POSE_CONTAINER` | same as above | Container used for TF echo / ROS topic sampling |
 | `OPENMOWER_POSE_DISABLE` | `0` | Set `1` to disable live pose entirely |
+| `OPENMOWER_CONTROL_DISABLE` | `0` | Set `1` to disable the Start/Stop/Home/Reset mower control buttons |
 | `OPENMOWER_POSE_CACHE_MS` | `2200` | Server-side cache for pose probe (ms) |
 | `OPENMOWER_TF_ECHO_TIMEOUT_SEC` | `4` | Timeout for `tf_echo` / `tf2_echo` inside the container |
 | `OPENMOWER_ROS_TOPIC_TIMEOUT_SEC` | `4` | Timeout for `rostopic` / `ros2 topic echo` samples |

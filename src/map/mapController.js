@@ -10,9 +10,9 @@ import {
   offsetPolygon,
   polygonArea,
   simplify,
-  firstSegmentAngle,
 } from "../lib/geo/geometry.js";
 import { coverageLines } from "../lib/geo/coverage.js";
+import { resolveMowSettings } from "../lib/coverage/mowSettings.js";
 import { rectangleOutline, circleOutline } from "../lib/format/shapes.js";
 import { getEditablePoints } from "../lib/format/outline.js";
 import {
@@ -47,9 +47,9 @@ import { exactPath } from "../lib/stores/exactPath.js";
 import {
   resolveRobotVisualMode,
   robotVisualToMarkerStyle,
-  buildRobotHudHtml,
   buildRobotHudLines,
   buildRobotPoseTooltip,
+  escapeHtml,
 } from "../lib/robot/telemetry.js";
 import { poseDist2, stepPose } from "../lib/robot/interpolate.js";
 import { notify, setStatus } from "../lib/stores/toast.js";
@@ -231,13 +231,16 @@ export function createMapController(container) {
   // and OpenMower's exact angle logic. Mirrors MowingBehavior.
   function renderCoverage(pts, area) {
     const gp = get(mowParams);
-    const ov = getZoneOverrides(area);
     const spacing = gp.toolWidth;
     if (!(spacing > 0)) return;
 
-    const laps = Math.max(0, Math.round(ov.outlineCount ?? gp.outlineCount));
-    const overlap = Math.max(0, Math.round(ov.outlineOverlapCount ?? gp.outlineOverlapCount));
-    const outerOffset = ov.outlineOffset ?? gp.outlineOffset;
+    const { laps: lapsRaw, overlap: overlapRaw, outerOffset, angleRad } = resolveMowSettings(
+      getZoneOverrides(area),
+      gp,
+      pts
+    );
+    const laps = Math.max(0, Math.round(lapsRaw));
+    const overlap = Math.max(0, Math.round(overlapRaw));
 
     const simplified = pts.length > 60 ? simplify(pts, Math.min(0.1, spacing / 3)) : pts;
     if (simplified.length < 3) return;
@@ -249,12 +252,7 @@ export function createMapController(container) {
       if (off.length >= 3 && polygonArea(off) > spacing * spacing) base = off;
     }
 
-    // Exact mow angle: per-area override, else the first outline segment >= 2 m;
-    // plus mow_angle_offset unless absolute (increment = 0 on the first pass).
-    const baseRad = ov.angle != null ? ov.angle : firstSegmentAngle(pts);
-    const offsetRad = (gp.mowAngleOffset * Math.PI) / 180;
-    const finalRad = gp.mowAngleOffsetIsAbsolute ? offsetRad : baseRad + offsetRad;
-    const angleDeg = (finalRad * 180) / Math.PI;
+    const angleDeg = (angleRad * 180) / Math.PI;
 
     const obstacles = [];
     (s.mapData?.areas || []).forEach((a, i) => {
@@ -751,7 +749,9 @@ export function createMapController(container) {
 
   const ROBOT_LERP = 0.25; // fraction toward target per frame (~150 ms settle)
   const ROBOT_SNAP_DIST2 = 9; // >3 m jump → teleport instead of gliding across
-  const robotAnim = { cur: null, target: null, raf: 0, iconKey: "", rotate: false };
+  const ROBOT_SETTLE_D2 = 1e-4; // ~1 cm: close enough to snap and stop the loop
+  const ROBOT_SETTLE_YAW = 0.005; // ~0.3°
+  const robotAnim = { cur: null, target: null, raf: 0, iconKey: "", rotate: false, glyphEl: null };
 
   function stopRobotAnim() {
     if (robotAnim.raf) {
@@ -760,13 +760,18 @@ export function createMapController(container) {
     }
   }
 
+  // Rotate just the cached glyph element (re-queried only when the icon rebuilds).
   function applyRobotTransform() {
-    if (!layers.robot?._icon || !robotAnim.cur) return;
-    const el = layers.robot._icon.querySelector(".robot-glyph");
-    if (!el) return;
+    const el = robotAnim.glyphEl;
+    if (!el || !robotAnim.cur) return;
     el.style.transform = robotAnim.rotate
       ? `rotate(${90 - (robotAnim.cur.yaw * 180) / Math.PI}deg)`
       : "none";
+  }
+
+  function moveRobotTo(pt) {
+    layers.robot.setLatLng(metersToLatLng(pt, origin()));
+    applyRobotTransform();
   }
 
   function stepRobot() {
@@ -774,9 +779,20 @@ export function createMapController(container) {
       robotAnim.raf = 0;
       return;
     }
-    robotAnim.cur = stepPose(robotAnim.cur, robotAnim.target, ROBOT_LERP);
-    layers.robot.setLatLng(metersToLatLng(robotAnim.cur, origin()));
-    applyRobotTransform();
+    const t = robotAnim.target;
+    let dyaw = (t.yaw - robotAnim.cur.yaw) % (2 * Math.PI);
+    if (dyaw > Math.PI) dyaw -= 2 * Math.PI;
+    else if (dyaw < -Math.PI) dyaw += 2 * Math.PI;
+    // Settled: snap exactly, apply once, and idle the loop (renderRobot restarts
+    // it on the next sample). Avoids 60 fps DOM writes for a parked robot.
+    if (poseDist2(robotAnim.cur, t) < ROBOT_SETTLE_D2 && Math.abs(dyaw) < ROBOT_SETTLE_YAW) {
+      robotAnim.cur = { ...t };
+      moveRobotTo(robotAnim.cur);
+      robotAnim.raf = 0;
+      return;
+    }
+    robotAnim.cur = stepPose(robotAnim.cur, t, ROBOT_LERP);
+    moveRobotTo(robotAnim.cur);
     robotAnim.raf = requestAnimationFrame(stepRobot);
   }
 
@@ -790,6 +806,7 @@ export function createMapController(container) {
       robotAnim.cur = null;
       robotAnim.target = null;
       robotAnim.iconKey = "";
+      robotAnim.glyphEl = null;
       return;
     }
 
@@ -803,14 +820,15 @@ export function createMapController(container) {
       robotAnim.cur = { ...target };
     }
 
-    const { icon, key } = makeRobotIcon(pose, visual);
-    const tooltip = buildRobotPoseTooltip(pose);
+    // Cheap change key from visual + HUD text; only rebuild the icon when it moves.
+    const lines = buildRobotHudLines(pose.ros?.telemetry || null);
+    const key = `${visual}|${lines.join("")}`;
     if (!layers.robot) {
       layers.robot = L.marker(metersToLatLng(robotAnim.cur, origin()), {
-        icon,
+        icon: makeRobotIcon(visual, lines),
         zIndexOffset: 800,
       })
-        .bindTooltip(tooltip, {
+        .bindTooltip(buildRobotPoseTooltip(pose), {
           sticky: true,
           direction: "top",
           opacity: 0.95,
@@ -818,46 +836,45 @@ export function createMapController(container) {
         })
         .addTo(map);
       robotAnim.iconKey = key;
+      robotAnim.glyphEl = layers.robot._icon?.querySelector(".robot-glyph") || null;
     } else {
       if (key !== robotAnim.iconKey) {
-        layers.robot.setIcon(icon);
+        layers.robot.setIcon(makeRobotIcon(visual, lines));
         robotAnim.iconKey = key;
+        robotAnim.glyphEl = layers.robot._icon?.querySelector(".robot-glyph") || null;
       }
-      layers.robot.setTooltipContent(tooltip);
+      // Only refresh the tooltip text while it's actually open.
+      if (layers.robot.isTooltipOpen()) {
+        layers.robot.setTooltipContent(buildRobotPoseTooltip(pose));
+      }
     }
     applyRobotTransform(); // avoid a one-frame flash after an icon rebuild
     if (!robotAnim.raf) robotAnim.raf = requestAnimationFrame(stepRobot);
   }
 
-  function makeRobotIcon(pose, visual) {
+  function makeRobotIcon(visual, lines) {
     const { modifier, glyph } = robotVisualToMarkerStyle(visual);
-    const telemetry = pose.ros?.telemetry || null;
     // Rotation is applied per-frame via applyRobotTransform(), not baked here.
-    const hud = buildRobotHudHtml(telemetry);
-    const key = `${visual}|${hud}`;
+    const inner = robotGlyphInner(visual, glyph);
+    const hud = lines.length
+      ? lines.map((l) => `<div class="robot-marker-hud__line">${escapeHtml(l)}</div>`).join("")
+      : "";
     if (!hud) {
-      return {
-        key,
-        icon: L.divIcon({
-          className: "map-marker-leaflet",
-          html: `<div class="map-marker--robot ${modifier}">${robotGlyphInner(visual, glyph)}</div>`,
-          iconSize: [40, 40],
-          iconAnchor: [20, 20],
-        }),
-      };
+      return L.divIcon({
+        className: "map-marker-leaflet",
+        html: `<div class="map-marker--robot ${modifier}">${inner}</div>`,
+        iconSize: [40, 40],
+        iconAnchor: [20, 20],
+      });
     }
     const stackW = 200;
-    const lineCount = buildRobotHudLines(telemetry).length;
-    const stackH = 40 + 4 + 6 + lineCount * 15;
-    return {
-      key,
-      icon: L.divIcon({
-        className: "map-marker-leaflet robot-marker-stack-wrap",
-        html: `<div class="robot-marker-stack" style="width:${stackW}px"><div class="robot-marker-stack__pin"><div class="map-marker--robot ${modifier}">${robotGlyphInner(visual, glyph)}</div></div><div class="robot-marker-stack__hud">${hud}</div></div>`,
-        iconSize: [stackW, stackH],
-        iconAnchor: [stackW / 2, 20],
-      }),
-    };
+    const stackH = 40 + 4 + 6 + lines.length * 15;
+    return L.divIcon({
+      className: "map-marker-leaflet robot-marker-stack-wrap",
+      html: `<div class="robot-marker-stack" style="width:${stackW}px"><div class="robot-marker-stack__pin"><div class="map-marker--robot ${modifier}">${inner}</div></div><div class="robot-marker-stack__hud">${hud}</div></div>`,
+      iconSize: [stackW, stackH],
+      iconAnchor: [stackW / 2, 20],
+    });
   }
 
   // ---- exact path (real slic3r planner overlay) ----------------------------

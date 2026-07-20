@@ -5,7 +5,8 @@
 
 import { getAreaType, getZoneOverrides } from "../format/mapFormat.js";
 import { getEditablePoints } from "../format/outline.js";
-import { firstSegmentAngle, centroid, bestContainingMowAreaIndex } from "../geo/geometry.js";
+import { centroid, bestContainingMowAreaIndex } from "../geo/geometry.js";
+import { resolveMowSettings } from "./mowSettings.js";
 
 const toXY = (pts) => pts.map((p) => [p.x, p.y]);
 
@@ -24,9 +25,7 @@ export function buildPlanRequest(areaIndex, areas, mowParams) {
 
   const ov = getZoneOverrides(area);
   const gp = mowParams || {};
-  const baseRad = ov.angle != null ? ov.angle : firstSegmentAngle(pts);
-  const offsetRad = ((gp.mowAngleOffset || 0) * Math.PI) / 180;
-  const angle = gp.mowAngleOffsetIsAbsolute ? offsetRad : baseRad + offsetRad;
+  const { laps, overlap, outerOffset, angleRad } = resolveMowSettings(ov, gp, pts);
 
   // Obstacles whose centroid falls in THIS mow area become holes (same linkage
   // the validation/obstacle logic uses).
@@ -43,11 +42,11 @@ export function buildPlanRequest(areaIndex, areas, mowParams) {
 
   return {
     fill_type: 0, // FILL_LINEAR — what MowingBehavior uses
-    angle,
+    angle: angleRad,
     distance: gp.toolWidth > 0 ? gp.toolWidth : 0.14,
-    outer_offset: ov.outlineOffset ?? gp.outlineOffset ?? 0,
-    outline_count: ov.outlineCount ?? gp.outlineCount ?? 3,
-    outline_overlap_count: ov.outlineOverlapCount ?? gp.outlineOverlapCount ?? 0,
+    outer_offset: outerOffset,
+    outline_count: laps,
+    outline_overlap_count: overlap,
     outline: toXY(pts),
     holes,
   };

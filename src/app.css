@@ -233,6 +233,38 @@
     transform: none;
   }
 
+  /* Icon button + slide-out name label — shared by the right-side floating bars
+     (tool dock, mower control) so hover naming is uniform. Label sits to the
+     left of the icon and is revealed on hover, or forced with `.show`. */
+  .hicon {
+    position: relative;
+    display: flex;
+  }
+  .hicon > .hicon-label {
+    position: absolute;
+    right: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    white-space: nowrap;
+    pointer-events: none;
+    padding: 4px 9px;
+    border-radius: 9px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    background: var(--surface-3, var(--surface-2));
+    color: var(--ink);
+    border: 1px solid var(--edge);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    z-index: 50;
+  }
+  .hicon:hover > .hicon-label,
+  .hicon > .hicon-label.show {
+    opacity: 1;
+  }
+
   /* Form controls */
   .field {
     @apply mb-2 block text-xs font-medium;

@@ -8,7 +8,6 @@ import {
   boundingBox,
   simplify,
   offsetPolygon,
-  principalAngleDeg,
   firstSegmentAngle,
 } from "./geometry.js";
 import { rectangleOutline, circleOutline } from "../format/shapes.js";
@@ -111,14 +110,6 @@ describe("firstSegmentAngle", () => {
   });
   it("returns 0 when nothing is >= 2 m away", () => {
     expect(firstSegmentAngle([{ x: 0, y: 0 }, { x: 0.5, y: 0 }])).toBe(0);
-  });
-});
-
-describe("principalAngleDeg", () => {
-  it("finds the dominant orientation", () => {
-    expect(principalAngleDeg([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }])).toBeCloseTo(0, 6);
-    expect(Math.abs(principalAngleDeg([{ x: 0, y: 0 }, { x: 0, y: 1 }, { x: 0, y: 2 }]))).toBeCloseTo(90, 6);
-    expect(principalAngleDeg([{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 }])).toBeCloseTo(45, 6);
   });
 });
 

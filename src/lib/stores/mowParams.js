@@ -11,7 +11,6 @@ export const MOW_DEFAULTS = {
   outlineOffset: 0,
   mowAngleOffset: 0,
   mowAngleOffsetIsAbsolute: false,
-  mowAngleIncrement: 0,
   source: "default",
 };
 

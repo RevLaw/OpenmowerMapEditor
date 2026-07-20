@@ -180,35 +180,6 @@ export function boundingBox(points) {
 }
 
 /**
- * Principal-axis orientation of a point set, in degrees (PCA). Robust for the
- * dense outlines OpenMower records. Used as the base direction for "relative"
- * mowing-angle preview (mow_angle_offset_is_absolute = false).
- */
-export function principalAngleDeg(points) {
-  const n = points?.length || 0;
-  if (n < 2) return 0;
-  let mx = 0;
-  let my = 0;
-  for (const p of points) {
-    mx += p.x;
-    my += p.y;
-  }
-  mx /= n;
-  my /= n;
-  let sxx = 0;
-  let syy = 0;
-  let sxy = 0;
-  for (const p of points) {
-    const dx = p.x - mx;
-    const dy = p.y - my;
-    sxx += dx * dx;
-    syy += dy * dy;
-    sxy += dx * dy;
-  }
-  return (0.5 * Math.atan2(2 * sxy, sxx - syy) * 180) / Math.PI;
-}
-
-/**
  * OpenMower's auto mow orientation: the direction (radians) of the first
  * outline segment that reaches >= minDist meters from the start point. Returns
  * 0 if no such point (matches MowingBehavior's default). East (+x) = 0.

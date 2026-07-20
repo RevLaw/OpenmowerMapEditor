@@ -320,11 +320,16 @@ print(json.dumps({"t": "R"}), flush=True)
 rospy.spin()
 `;
 
-function buildRobotStreamBash() {
-  const b64 = Buffer.from(ROBOT_STREAM_PY, "utf8").toString("base64");
+/**
+ * Emit a bash program that decodes an embedded python script to /tmp, sources
+ * ROS 1 (+ the OpenMower workspace), and runs it. Shared by the pose-stream,
+ * plan_path, and control execs — they differ only in tmp name and exec line.
+ */
+function buildRosPythonBash(scriptSrc, { tmpName, exec = "python3" }) {
+  const b64 = Buffer.from(scriptSrc, "utf8").toString("base64");
   return [
     "set +e",
-    `echo '${b64}' | base64 -d > /tmp/om_pose_stream.py`,
+    `echo '${b64}' | base64 -d > /tmp/${tmpName}`,
     "for SETUP in /opt/ros/noetic/setup.bash /opt/ros/melodic/setup.bash; do",
     '  [ -f "$SETUP" ] || continue',
     '  . "$SETUP"',
@@ -335,8 +340,12 @@ function buildRobotStreamBash() {
     '  . "$WS"',
     "  break",
     "done",
-    "exec python3 -u /tmp/om_pose_stream.py",
+    `exec ${exec} /tmp/${tmpName}`,
   ].join("\n");
+}
+
+function buildRobotStreamBash() {
+  return buildRosPythonBash(ROBOT_STREAM_PY, { tmpName: "om_pose_stream.py", exec: "python3 -u" });
 }
 
 /** How long a streamed pose sample is considered current before we fall back. */
@@ -409,26 +418,63 @@ except Exception as e:
 `;
 
 function buildPlanPathBash() {
-  const b64 = Buffer.from(PLAN_PATH_PY, "utf8").toString("base64");
-  return [
-    "set +e",
-    `echo '${b64}' | base64 -d > /tmp/om_plan_path.py`,
-    "for SETUP in /opt/ros/noetic/setup.bash /opt/ros/melodic/setup.bash; do",
-    '  [ -f "$SETUP" ] || continue',
-    '  . "$SETUP"',
-    "  break",
-    "done",
-    "for WS in /opt/open_mower_ros/devel/setup.bash /root/*/devel/setup.bash /catkin_ws/devel/setup.bash /open_mower/devel/setup.bash; do",
-    '  [ -f "$WS" ] || continue',
-    '  . "$WS"',
-    "  break",
-    "done",
-    "exec timeout 25 python3 /tmp/om_plan_path.py",
-  ].join("\n");
+  return buildRosPythonBash(PLAN_PATH_PY, { tmpName: "om_plan_path.py", exec: "timeout 25 python3" });
 }
 
 const planPathCache = new Map(); // requestKey -> { expiresAt, payload }
 const PLAN_PATH_CACHE_MS = 60000;
+
+/**
+ * Sends a whitelisted high-level command to the running mower. Start/Home/Reset
+ * go through /mower_service/high_level_control; Stop is an immediate emergency
+ * stop via /ll/_service/emergency. Command name comes in via $OM_CMD.
+ *
+ * SAFETY: these commands move a robot with spinning blades. Disable entirely
+ * with OPENMOWER_CONTROL_DISABLE=1.
+ */
+const CONTROL_PY = `import json, os
+import rospy
+from mower_msgs.srv import (
+    HighLevelControlSrv, HighLevelControlSrvRequest,
+    EmergencyStopSrv, EmergencyStopSrvRequest,
+)
+
+HIGH_LEVEL = {"start": 1, "home": 2, "reset_emergency": 254}
+
+
+def main():
+    cmd = os.environ.get("OM_CMD", "")
+    rospy.init_node("om_editor_control", anonymous=True, disable_signals=True)
+    if cmd == "stop":
+        rospy.wait_for_service("/ll/_service/emergency", timeout=8.0)
+        proxy = rospy.ServiceProxy("/ll/_service/emergency", EmergencyStopSrv)
+        req = EmergencyStopSrvRequest()
+        req.emergency = 1
+        proxy(req)
+    elif cmd in HIGH_LEVEL:
+        rospy.wait_for_service("/mower_service/high_level_control", timeout=8.0)
+        proxy = rospy.ServiceProxy("/mower_service/high_level_control", HighLevelControlSrv)
+        req = HighLevelControlSrvRequest()
+        req.command = HIGH_LEVEL[cmd]
+        proxy(req)
+    else:
+        print(json.dumps({"ok": False, "error": "unknown command"}))
+        return
+    print(json.dumps({"ok": True, "command": cmd}))
+
+
+try:
+    main()
+except Exception as e:
+    print(json.dumps({"ok": False, "error": str(e)[:200]}))
+`;
+
+function buildControlBash() {
+  return buildRosPythonBash(CONTROL_PY, { tmpName: "om_control.py", exec: "timeout 15 python3" });
+}
+
+const controlDisabled = String(process.env.OPENMOWER_CONTROL_DISABLE || "").trim() === "1";
+const CONTROL_COMMANDS = new Set(["start", "stop", "home", "reset_emergency"]);
 
 /** Parse rostopic echo text (YAML-ish) for map HUD / tooltips. Percents normalized to 0–100. */
 function extractRosTelemetry(topic, raw) {
@@ -1173,8 +1219,15 @@ function broadcastLivePose() {
   if (robotStream.clients.size === 0) return;
   const payload = liveSampleToPayload();
   if (!payload) return;
-  const enriched = { container: poseContainerName, ...payload };
-  for (const res of robotStream.clients) writeSse(res, enriched);
+  // Serialize once, then write the shared frame to every client.
+  const frame = `data: ${JSON.stringify({ container: poseContainerName, ...payload })}\n\n`;
+  for (const res of robotStream.clients) {
+    try {
+      res.write(frame);
+    } catch (_e) {
+      /* client gone; cleaned up on 'close' */
+    }
+  }
 }
 
 function handleStreamLine(line) {
@@ -1375,7 +1428,6 @@ const MOW_PARAM_DEFAULTS = {
   outlineOffset: 0,
   mowAngleOffset: 0,
   mowAngleOffsetIsAbsolute: false,
-  mowAngleIncrement: 0,
 };
 const MOW_PARAM_KEYS = {
   tool_width: "toolWidth",
@@ -1384,7 +1436,6 @@ const MOW_PARAM_KEYS = {
   outline_offset: "outlineOffset",
   mow_angle_offset: "mowAngleOffset",
   mow_angle_offset_is_absolute: "mowAngleOffsetIsAbsolute",
-  mow_angle_increment: "mowAngleIncrement",
 };
 
 function buildMowParamsBash() {
@@ -1634,6 +1685,47 @@ app.post("/api/plan_path", async (req, res) => {
   } catch (error) {
     logError("plan_path endpoint failed", { error: error.message });
     return res.status(500).json({ ok: false, error: error.message || "plan_path_failed" });
+  }
+});
+
+/**
+ * Whitelisted mower control. Body: { command: start|stop|home|reset_emergency }.
+ * Moves a real robot — kept behind an explicit command whitelist and the
+ * OPENMOWER_CONTROL_DISABLE kill-switch.
+ */
+app.post("/api/control", async (req, res) => {
+  try {
+    if (controlDisabled) {
+      return res.json({ ok: false, error: "Mower control disabled (OPENMOWER_CONTROL_DISABLE=1)" });
+    }
+    const command = String(req.body?.command || "").trim();
+    if (!CONTROL_COMMANDS.has(command)) {
+      return res.status(400).json({ ok: false, error: "unknown command" });
+    }
+    const inspect = await inspectPoseContainer();
+    if (!inspect.ok || !inspect.container.running) {
+      return res.json({
+        ok: false,
+        error: inspect.ok ? `Container '${poseContainerName}' is not running` : inspect.error,
+      });
+    }
+    const { stdout, stderr } = await dockerExecInContainer(
+      poseContainerName,
+      ["/bin/bash", "-lc", buildControlBash()],
+      [`OM_CMD=${command}`]
+    );
+    const line = (stdout || "").split(/\r?\n/).filter(Boolean).pop() || "";
+    let payload;
+    try {
+      payload = JSON.parse(line);
+    } catch (_e) {
+      payload = { ok: false, error: (stderr || stdout || "no response from control").trim().slice(0, 200) };
+    }
+    logInfo("Mower control command", { command, ok: payload.ok, error: payload.error || null });
+    return res.json(payload);
+  } catch (error) {
+    logError("control endpoint failed", { error: error.message });
+    return res.status(500).json({ ok: false, error: error.message || "control_failed" });
   }
 });
 

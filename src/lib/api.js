@@ -67,3 +67,13 @@ export async function planPath(payload) {
   });
   return res.json();
 }
+
+/** POST /api/control -> send a high-level command (start|stop|home|reset_emergency). */
+export async function sendControl(command) {
+  const res = await fetch("/api/control", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command }),
+  });
+  return res.json();
+}

@@ -20,29 +20,40 @@
 
 <div class="glass flex flex-col gap-1 rounded-2xl p-1.5">
   {#each tools as t}
-    <button
-      class="tool-btn"
-      class:active={$activeTool === t.id}
-      title={t.label}
-      aria-label={t.label}
-      on:click={() => pick(t.id)}
-    >
-      <span class="material-symbols-outlined" style="font-size:22px">{t.icon}</span>
-    </button>
+    <div class="hicon">
+      <button
+        class="tool-btn"
+        class:active={$activeTool === t.id}
+        aria-label={t.label}
+        on:click={() => pick(t.id)}
+      >
+        <span class="material-symbols-outlined" style="font-size:22px">{t.icon}</span>
+      </button>
+      <span class="hicon-label">{t.label}</span>
+    </div>
   {/each}
 
   <div class="my-1 h-px" style="background:var(--edge-soft)"></div>
 
-  <button class="tool-btn danger" title="Remove selected point (Del)" on:click={removePoint}>
-    <span class="material-symbols-outlined" style="font-size:22px">delete</span>
-  </button>
+  <div class="hicon">
+    <button class="tool-btn danger" aria-label="Remove selected point (Del)" on:click={removePoint}>
+      <span class="material-symbols-outlined" style="font-size:22px">delete</span>
+    </button>
+    <span class="hicon-label">Remove point (Del)</span>
+  </div>
 
   <div class="my-1 h-px" style="background:var(--edge-soft)"></div>
 
-  <button class="tool-btn" disabled={!$history.canUndo} title="Undo (Ctrl+Z)" on:click={undo}>
-    <span class="material-symbols-outlined" style="font-size:22px">undo</span>
-  </button>
-  <button class="tool-btn" disabled={!$history.canRedo} title="Redo (Ctrl+Shift+Z)" on:click={redo}>
-    <span class="material-symbols-outlined" style="font-size:22px">redo</span>
-  </button>
+  <div class="hicon">
+    <button class="tool-btn" disabled={!$history.canUndo} aria-label="Undo (Ctrl+Z)" on:click={undo}>
+      <span class="material-symbols-outlined" style="font-size:22px">undo</span>
+    </button>
+    <span class="hicon-label">Undo (Ctrl+Z)</span>
+  </div>
+  <div class="hicon">
+    <button class="tool-btn" disabled={!$history.canRedo} aria-label="Redo (Ctrl+Shift+Z)" on:click={redo}>
+      <span class="material-symbols-outlined" style="font-size:22px">redo</span>
+    </button>
+    <span class="hicon-label">Redo (Ctrl+Shift+Z)</span>
+  </div>
 </div>

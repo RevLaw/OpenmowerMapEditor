@@ -8,6 +8,7 @@
   import ToolHint from "./ToolHint.svelte";
   import ZoomControl from "./ZoomControl.svelte";
   import BasemapControl from "./BasemapControl.svelte";
+  import MowerControl from "./MowerControl.svelte";
   import StatusToasts from "./StatusToasts.svelte";
   import CommandPalette from "./CommandPalette.svelte";
   import ShortcutCheatSheet from "./ShortcutCheatSheet.svelte";
@@ -75,8 +76,9 @@
     </button>
   {/if}
 
-  <!-- Tool dock (right, vertically centered) -->
-  <div class="absolute right-3 top-1/2 z-20 -translate-y-1/2">
+  <!-- Right-side bars (vertically centered): mower control above the tool dock -->
+  <div class="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-end gap-2">
+    <MowerControl />
     <ToolDock />
   </div>
 
