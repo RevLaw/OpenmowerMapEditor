@@ -43,6 +43,7 @@ import {
 } from "../lib/stores/tools.js";
 import { mowParams } from "../lib/stores/mowParams.js";
 import { robotLive, robotPose } from "../lib/stores/robot.js";
+import { exactPath } from "../lib/stores/exactPath.js";
 import {
   resolveRobotVisualMode,
   robotVisualToMarkerStyle,
@@ -123,6 +124,7 @@ export function createMapController(container) {
     coverage: [],
     dock: null,
     robot: null,
+    exactPath: null,
   };
 
   // Local mirror of state read inside imperative handlers.
@@ -858,6 +860,44 @@ export function createMapController(container) {
     };
   }
 
+  // ---- exact path (real slic3r planner overlay) ----------------------------
+
+  function renderExactPath(data) {
+    if (layers.exactPath) {
+      map.removeLayer(layers.exactPath);
+      layers.exactPath = null;
+    }
+    if (!data || !Array.isArray(data.paths) || !data.paths.length) return;
+    const outlineColor = cssVar("--ok", "#34d399");
+    const fillColor = cssVar("--accent-2", "#22d3ee");
+    const group = L.layerGroup();
+    for (const seg of data.paths) {
+      if (!seg.pts || seg.pts.length < 2) continue;
+      L.polyline(
+        seg.pts.map((p) => metersToLatLng(p, origin())),
+        {
+          color: seg.isOutline ? outlineColor : fillColor,
+          weight: 2,
+          opacity: 0.9,
+          interactive: false,
+        }
+      ).addTo(group);
+    }
+    const first = data.paths[0]?.pts?.[0];
+    if (first) {
+      L.circleMarker(metersToLatLng(first, origin()), {
+        radius: 4,
+        color: outlineColor,
+        fillColor: outlineColor,
+        fillOpacity: 1,
+        weight: 1,
+        interactive: false,
+      }).addTo(group);
+    }
+    group.addTo(map);
+    layers.exactPath = group;
+  }
+
   // ---- public helpers ------------------------------------------------------
 
   function getCenterMeters() {
@@ -880,11 +920,19 @@ export function createMapController(container) {
   // ---- store wiring --------------------------------------------------------
 
   const unsubs = [];
+  let prevOriginKey = "";
   unsubs.push(activeBasemap.subscribe((cfg) => applyBasemap(cfg)));
   unsubs.push(
     editor.subscribe((value) => {
       s = value;
       render();
+      // The exact-path overlay uses absolute map metres, so it only needs a
+      // redraw when the projection origin moves — not on every vertex edit.
+      const key = `${value.origin?.lat},${value.origin?.lng}`;
+      if (key !== prevOriginKey) {
+        prevOriginKey = key;
+        renderExactPath(get(exactPath));
+      }
     })
   );
   unsubs.push(
@@ -924,6 +972,7 @@ export function createMapController(container) {
   unsubs.push(robotLive.subscribe((live) => renderRobot(live, get(robotPose))));
   unsubs.push(coverageOn.subscribe(() => render()));
   unsubs.push(mowParams.subscribe(() => render()));
+  unsubs.push(exactPath.subscribe((d) => renderExactPath(d)));
 
   // Keep Leaflet sized correctly once laid out.
   setTimeout(() => map.invalidateSize(), 60);

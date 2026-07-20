@@ -52,7 +52,7 @@ node_modules/
 # Build / runtime / caches
 dist/
 dist-ssr/
-coverage/
+/coverage/
 .vite/
 .cache/
 .eslintcache

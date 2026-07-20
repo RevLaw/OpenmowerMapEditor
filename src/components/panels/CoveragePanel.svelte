@@ -2,12 +2,22 @@
   import { slide } from "svelte/transition";
   import Collapsible from "../Collapsible.svelte";
   import { coverageOn } from "../../lib/stores/tools.js";
-  import { currentArea } from "../../lib/stores/editor.js";
+  import { currentArea, editor } from "../../lib/stores/editor.js";
   import { getAreaType, getZoneOverrides } from "../../lib/format/mapFormat.js";
   import { getEditablePoints } from "../../lib/format/outline.js";
   import { firstSegmentAngle } from "../../lib/geo/geometry.js";
   import { mowParams } from "../../lib/stores/mowParams.js";
   import { setZoneOverride } from "../../lib/actions.js";
+  import {
+    exactPath,
+    exactPathLoading,
+    computeExactPath,
+    clearExactPath,
+  } from "../../lib/stores/exactPath.js";
+
+  // The exact path is stale once the zone or its geometry changed after planning.
+  $: exactStale =
+    $exactPath && ($exactPath.rev !== $editor.rev || $exactPath.areaIndex !== $editor.areaIndex);
 
   const fmt = (v) => Number(v).toFixed(2).replace(/\.?0+$/, "");
   const SRC = { live: "from robot", file: "from params file", default: "defaults" };
@@ -195,5 +205,35 @@
         </div>
       </div>
     {/if}
+
+    <div class="mt-3 border-t pt-2" style="border-color:var(--edge-soft)">
+      <div class="flex items-center gap-2">
+        <button class="btn flex-1" on:click={computeExactPath} disabled={$exactPathLoading}>
+          <span class="material-symbols-outlined" style="font-size:18px">
+            {$exactPathLoading ? "hourglass_top" : "route"}
+          </span>
+          {$exactPathLoading ? "Planning…" : "Compute exact path"}
+        </button>
+        {#if $exactPath}
+          <button class="btn-icon !h-8 !w-8" title="Clear exact path" on:click={clearExactPath}>
+            <span class="material-symbols-outlined" style="font-size:20px">close</span>
+          </button>
+        {/if}
+      </div>
+      {#if $exactPath}
+        <p class="mt-1 text-[10px]" style={exactStale ? "color:var(--warn)" : "color:var(--subtle)"}>
+          {#if exactStale}
+            Edited — recompute to refresh the exact path.
+          {:else}
+            Real planner: {$exactPath.stats?.laps ?? 0} outline · {$exactPath.stats?.fillRows ?? 0} fill ·
+            {$exactPath.stats?.points ?? 0} pts
+          {/if}
+        </p>
+      {:else}
+        <p class="mt-1 text-[10px] text-subtle">
+          Runs OpenMower's real planner for this zone.
+        </p>
+      {/if}
+    </div>
   {/if}
 </Collapsible>

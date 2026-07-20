@@ -57,3 +57,13 @@ export async function fetchMowParams() {
   const res = await fetch("/api/mow_params");
   return res.json();
 }
+
+/** POST /api/plan_path -> exact coverage path from OpenMower's slic3r planner. */
+export async function planPath(payload) {
+  const res = await fetch("/api/plan_path", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}

@@ -345,6 +345,91 @@ const liveStreamFreshMs = Math.max(
   Number(process.env.OPENMOWER_STREAM_FRESH_MS) || 2000
 );
 
+/**
+ * Calls OpenMower's real coverage planner (/slic3r_coverage_planner/plan_path) so
+ * the editor can draw the LITERAL path the robot drives, not an approximation.
+ * Request comes in as base64 JSON via $PLAN_REQ_B64; prints the ordered paths as
+ * JSON. Read-only: planning never commands the robot to move.
+ */
+const PLAN_PATH_PY = `import base64, json, os
+import rospy
+from geometry_msgs.msg import Polygon, Point32
+from slic3r_coverage_planner.srv import PlanPath, PlanPathRequest
+
+
+def poly(points):
+    p = Polygon()
+    for xy in points:
+        pt = Point32()
+        pt.x = float(xy[0])
+        pt.y = float(xy[1])
+        pt.z = 0.0
+        p.points.append(pt)
+    return p
+
+
+def main():
+    raw = base64.b64decode(os.environ.get("PLAN_REQ_B64", "")).decode() or "{}"
+    req = json.loads(raw)
+    rospy.init_node("om_editor_plan_path", anonymous=True, disable_signals=True)
+    rospy.wait_for_service("/slic3r_coverage_planner/plan_path", timeout=10.0)
+    call = rospy.ServiceProxy("/slic3r_coverage_planner/plan_path", PlanPath)
+    r = PlanPathRequest()
+    r.fill_type = int(req.get("fill_type", 0))
+    r.angle = float(req.get("angle", 0.0))
+    r.distance = float(req.get("distance", 0.14))
+    r.outer_offset = float(req.get("outer_offset", 0.0))
+    r.outline_count = int(req.get("outline_count", 3))
+    r.outline_overlap_count = int(req.get("outline_overlap_count", 0))
+    r.skip_area_outline = bool(req.get("skip_area_outline", False))
+    r.skip_obstacle_outlines = bool(req.get("skip_obstacle_outlines", False))
+    r.skip_fill = bool(req.get("skip_fill", False))
+    r.outline = poly(req.get("outline", []))
+    r.holes = [poly(h) for h in req.get("holes", [])]
+    resp = call(r)
+    paths = []
+    laps = 0
+    fill = 0
+    npts = 0
+    for pth in resp.paths:
+        pts = [[round(ps.pose.position.x, 2), round(ps.pose.position.y, 2)] for ps in pth.path.poses]
+        npts += len(pts)
+        if int(pth.is_outline):
+            laps += 1
+        else:
+            fill += 1
+        paths.append({"is_outline": bool(int(pth.is_outline)), "pts": pts})
+    print(json.dumps({"ok": True, "paths": paths, "stats": {"laps": laps, "fillRows": fill, "points": npts}}))
+
+
+try:
+    main()
+except Exception as e:
+    print(json.dumps({"ok": False, "error": str(e)[:300]}))
+`;
+
+function buildPlanPathBash() {
+  const b64 = Buffer.from(PLAN_PATH_PY, "utf8").toString("base64");
+  return [
+    "set +e",
+    `echo '${b64}' | base64 -d > /tmp/om_plan_path.py`,
+    "for SETUP in /opt/ros/noetic/setup.bash /opt/ros/melodic/setup.bash; do",
+    '  [ -f "$SETUP" ] || continue',
+    '  . "$SETUP"',
+    "  break",
+    "done",
+    "for WS in /opt/open_mower_ros/devel/setup.bash /root/*/devel/setup.bash /catkin_ws/devel/setup.bash /open_mower/devel/setup.bash; do",
+    '  [ -f "$WS" ] || continue',
+    '  . "$WS"',
+    "  break",
+    "done",
+    "exec timeout 25 python3 /tmp/om_plan_path.py",
+  ].join("\n");
+}
+
+const planPathCache = new Map(); // requestKey -> { expiresAt, payload }
+const PLAN_PATH_CACHE_MS = 60000;
+
 /** Parse rostopic echo text (YAML-ish) for map HUD / tooltips. Percents normalized to 0–100. */
 function extractRosTelemetry(topic, raw) {
   const trimmed = (raw || "").trim();
@@ -1475,6 +1560,81 @@ app.get("/api/robot_pose/stream", async (req, res) => {
     robotStream.clients.delete(res);
     if (!streamStillWanted()) stopRobotStream();
   });
+});
+
+/**
+ * On-demand exact coverage path from OpenMower's own planner. Body carries the
+ * mow polygon + holes (obstacles) + resolved params; we run the plan_path script
+ * inside the ROS container and return the ordered paths. Cached briefly by request
+ * so repeated clicks on an unchanged zone are instant.
+ */
+app.post("/api/plan_path", async (req, res) => {
+  try {
+    if (poseDisabled) {
+      return res.json({ ok: false, error: "Live robot disabled (OPENMOWER_POSE_DISABLE=1)" });
+    }
+    const body = req.body || {};
+    if (!Array.isArray(body.outline) || body.outline.length < 3) {
+      return res.status(400).json({ ok: false, error: "outline must have at least 3 points" });
+    }
+
+    const normalized = {
+      fill_type: Number(body.fill_type) || 0,
+      angle: Number(body.angle) || 0,
+      distance: Number(body.distance) > 0 ? Number(body.distance) : 0.14,
+      outer_offset: Number(body.outer_offset) || 0,
+      outline_count: Math.max(0, Math.round(Number(body.outline_count) || 0)),
+      outline_overlap_count: Math.max(0, Math.round(Number(body.outline_overlap_count) || 0)),
+      outline: body.outline,
+      holes: Array.isArray(body.holes) ? body.holes : [],
+    };
+
+    const key = JSON.stringify(normalized);
+    const now = Date.now();
+    const cached = planPathCache.get(key);
+    if (cached && cached.expiresAt > now) {
+      return res.json({ ...cached.payload, cached: true });
+    }
+
+    const inspect = await inspectPoseContainer();
+    if (!inspect.ok || !inspect.container.running) {
+      return res.json({
+        ok: false,
+        error: inspect.ok
+          ? `Container '${poseContainerName}' is not running`
+          : inspect.error,
+      });
+    }
+
+    const reqB64 = Buffer.from(key, "utf8").toString("base64");
+    const { stdout, stderr } = await dockerExecInContainer(
+      poseContainerName,
+      ["/bin/bash", "-lc", buildPlanPathBash()],
+      [`PLAN_REQ_B64=${reqB64}`]
+    );
+    const line = (stdout || "").split(/\r?\n/).filter(Boolean).pop() || "";
+    let payload;
+    try {
+      payload = JSON.parse(line);
+    } catch (_e) {
+      payload = {
+        ok: false,
+        error: (stderr || stdout || "planner returned no JSON").trim().slice(0, 300),
+      };
+    }
+    if (payload.ok) {
+      planPathCache.set(key, { expiresAt: now + PLAN_PATH_CACHE_MS, payload });
+      if (planPathCache.size > 24) {
+        planPathCache.delete(planPathCache.keys().next().value);
+      }
+    } else {
+      logWarn("plan_path planner error", { container: poseContainerName, error: payload.error });
+    }
+    return res.json({ ...payload, cached: false });
+  } catch (error) {
+    logError("plan_path endpoint failed", { error: error.message });
+    return res.status(500).json({ ok: false, error: error.message || "plan_path_failed" });
+  }
 });
 
 app.get("/api/map", async (_req, res) => {
