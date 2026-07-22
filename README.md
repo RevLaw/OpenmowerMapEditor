@@ -86,7 +86,6 @@ services:
       # WIFI_MAP_MAX_POINTS: "2000"
       # WIFI_MAP_FLUSH_MS: "30000"
       # WIFI_MAP_COLLECTOR_INTERVAL_MS: "10000"
-      # WIFI_MAP_COLLECTOR_TF_TIMEOUT_SEC: "2"
       # WIFI_MAP_COLLECTOR_CELL_REVISIT_MS: "300000"
       # WIFI_MAP_COLLECTOR_DISABLE: "0"
 ```
@@ -120,8 +119,9 @@ services:
 
 The WiFi heatmap is shared mower-side state, not map geometry and not browser data. No active browser session is required:
 
-- The editor backend runs a lightweight collector every 10 seconds. It reads only the `map` to `base_link`/`base_footprint` TF and the mower's current `/proc/net/wireless` dBm value; it does not poll ROS status topics.
+- The editor backend starts one persistent, fixed-name `rospy` collector in the ROS container. It subscribes to the fused map-frame pose and emits only one compact pose/dBm sample every 10 seconds; it does not poll ROS status topics or spawn a process per sample.
 - A newly visited cell is stored immediately. A known cell is sampled in memory but only recorded again after at least 5 minutes and a signal change of at least 3 dBm, avoiding repeated SD-card writes while the mower is stationary.
+- Samples outside the current `map.json` bounds (plus a size-aware safety margin) are rejected, so an unlocalized start-up pose cannot pollute the heatmap.
 - The backend merges readings into configurable spatial cells (`0.75 m` by default), keeps at most 2,000 cells, and evicts the oldest cell when the limit is reached. A full default survey is typically well below 200 KB.
 - In-memory changes are written atomically to `/data/ros/wifi-signal-map.json` no more than once every 30 seconds. A graceful container stop forces the final pending write. Ownership and mode follow the mower map directory (`openmower:openmower`, mode `664` on a standard deployment).
 - Clearing the survey first copies the current file to `/data/ros/wifi-signal-map.json.bak-clear`. The single backup is overwritten on the next clear, so this safety net has a fixed storage cost.
@@ -130,11 +130,11 @@ The WiFi heatmap is shared mower-side state, not map geometry and not browser da
 
 ### Vanilla OpenMower compatibility
 
-The autonomous collector does not depend on `rpi-monitor`, `jq`, the Docker CLI, host Python, or any other package installed directly on the Raspberry Pi. It talks to Docker through the mounted Engine socket and runs its small probe inside the official `open_mower_ros` container, where ROS, Bash, Python 3, and the standard command-line utilities already exist.
+The autonomous collector does not depend on `rpi-monitor`, `jq`, the Docker CLI, host Python, or any other package installed directly on the Raspberry Pi. It talks to Docker through the mounted Engine socket and runs its small subscriber inside the official `open_mower_ros` container, where ROS, Bash, Python 3, and the standard command-line utilities already exist.
 
-The standard OpenMower OS v2 setup is sufficient: `open_mower_ros` must use host networking so `/proc/net/wireless` reflects the mower's WiFi interface, and the map editor needs the Docker socket plus the `/home/openmower/ros` bind mount shown above. Missing ROS transforms, WiFi data, or in-container commands are reported in `storage.collector.lastError`; the editor and normal map operations continue working if collection is unavailable.
+The standard OpenMower OS v2 setup is sufficient: `open_mower_ros` must use host networking so `/proc/net/wireless` reflects the mower's WiFi interface, and the map editor needs the Docker socket plus the `/home/openmower/ros` bind mount shown above. Missing fused pose, map bounds, WiFi data, or in-container commands are reported in `storage.collector.lastError`; the editor and normal map operations continue working if collection is unavailable.
 
-Resource use is bounded: one short Docker exec runs at the configured interval (10 seconds by default), memory is capped at 2,000 grid cells, and disk writes are coalesced to at most one every 30 seconds. No survey data or SSID is uploaded to GitHub or any external service.
+Resource use is bounded: one sleeping ROS subscriber remains active and emits at the configured interval (10 seconds by default), memory is capped at 2,000 grid cells, and disk writes are coalesced to at most one every 30 seconds. Restarting the editor replaces the fixed-name collector instead of accumulating processes. No survey data or SSID is uploaded to GitHub or any external service.
 
 API endpoints:
 
@@ -232,7 +232,6 @@ Project layout:
 | `WIFI_MAP_MAX_POINTS` | `2000` | Hard upper bound for stored survey cells |
 | `WIFI_MAP_FLUSH_MS` | `30000` | Minimum delay between atomic disk writes |
 | `WIFI_MAP_COLLECTOR_INTERVAL_MS` | `10000` | Delay between autonomous WiFi samples (minimum 5 seconds) |
-| `WIFI_MAP_COLLECTOR_TF_TIMEOUT_SEC` | `2` | Timeout per TF frame attempted by the collector |
 | `WIFI_MAP_COLLECTOR_CELL_REVISIT_MS` | `300000` | Minimum age before a known cell may be recorded again |
 | `WIFI_MAP_COLLECTOR_DISABLE` | `0` | Set `1` to disable autonomous collection and use browser fallback |
 
@@ -259,5 +258,5 @@ This repository should not contain real mower coordinates, passwords, or API key
 - Zone names are stored under `properties.name` (editor convenience metadata). OpenMower's firmware selects zones by order/index, not by name, so naming doesn't change robot behavior.
 - Smooth live pose runs a **persistent `rospy` subscriber** (`/xbot_positioning/xb_pose` + `/xbot_monitoring/robot_state`) inside the ROS container via a **long-lived streamed `docker exec`**, so there's no per-poll exec overhead; samples are pushed to the browser over **SSE** and interpolated client-side. When `xbot_msgs` isn't present (ROS 2 / other setups) the server falls back to **`ros2 run tf2_ros tf2_echo`** / **`rosrun tf tf_echo`** and topic sampling (`rostopic echo` before `ros2 topic echo`), parsed with **stdlib-only `python3`**. If no pose is published yet, the HUD shows the probe error.
 - The **exact mowing path** calls `/slic3r_coverage_planner/plan_path` inside the ROS container (via a one-shot `rospy` `docker exec`), replicating `MowingBehavior.cpp`'s request exactly (angle incl. global `mow_angle_offset`, `outline_count`/`overlap`/`offset`, `tool_width` spacing, obstacles as holes, linear fill). It plans only — it never commands motion — and results are cached briefly per request.
-- WiFi signal is read from `/proc/net/wireless` inside the ROS container, which must share the host network namespace. The compact survey is stored separately from `map.json`, written atomically at most once per flush interval, owned like the mower map files, and never sent to GitHub.
+- WiFi signal is read from `/proc/net/wireless` by a persistent, fixed-name `rospy` collector inside the ROS container, which must share the host network namespace. The compact survey is stored separately from `map.json`, written atomically at most once per flush interval, owned like the mower map files, and never sent to GitHub.
 - Always validate edited borders before deploying to a mower in production.

@@ -29,10 +29,6 @@ const wifiCollectorIntervalMs = Math.max(
   5000,
   Math.min(300000, Math.floor(Number(process.env.WIFI_MAP_COLLECTOR_INTERVAL_MS) || 10000))
 );
-const wifiCollectorTfTimeoutSec = Math.max(
-  1,
-  Math.min(5, Math.floor(Number(process.env.WIFI_MAP_COLLECTOR_TF_TIMEOUT_SEC) || 2))
-);
 const wifiCollectorCellRevisitMs = Math.max(
   60000,
   Math.min(
@@ -93,6 +89,10 @@ let wifiSurveyRevision = 0;
 let wifiSurveyUpdatedAt = null;
 let wifiSurveyLastBytes = 0;
 let wifiCollectorTimer = null;
+let wifiCollectorHandle = null;
+let wifiCollectorStarting = false;
+let wifiCollectorLineBuffer = "";
+let wifiCollectorReconnectDelayMs = 1000;
 let wifiCollectorInFlight = false;
 let wifiCollectorStopped = false;
 let wifiCollectorSuccessCount = 0;
@@ -104,9 +104,48 @@ let wifiCollectorLastSignalDbm = null;
 let wifiCollectorLastInterface = null;
 let wifiCollectorLastDurationMs = null;
 let wifiCollectorLastError = null;
+let wifiMapBoundsCache = { expiresAt: 0, bounds: null };
 
 function wifiCellKey(x, y) {
   return `${Math.round(x / wifiCellSizeM)},${Math.round(y / wifiCellSizeM)}`;
+}
+
+async function getWifiMapBounds() {
+  if (wifiMapBoundsCache.expiresAt > Date.now()) return wifiMapBoundsCache.bounds;
+  try {
+    const map = JSON.parse(await fs.readFile(mapPath, "utf8"));
+    const points = [];
+    for (const area of Array.isArray(map?.areas) ? map.areas : []) {
+      for (const point of Array.isArray(area?.outline) ? area.outline : []) {
+        if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) points.push(point);
+      }
+    }
+    for (const dock of Array.isArray(map?.docking_stations) ? map.docking_stations : []) {
+      if (Number.isFinite(dock?.position?.x) && Number.isFinite(dock?.position?.y)) {
+        points.push(dock.position);
+      }
+    }
+    if (points.length === 0) throw new Error("map contains no coordinate points");
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const margin = Math.max(5, Math.min(100, Math.max(maxX - minX, maxY - minY) * 0.25));
+    wifiMapBoundsCache = {
+      expiresAt: Date.now() + 60000,
+      bounds: {
+        minX: minX - margin,
+        maxX: maxX + margin,
+        minY: minY - margin,
+        maxY: maxY + margin,
+      },
+    };
+  } catch (_error) {
+    wifiMapBoundsCache = { expiresAt: Date.now() + 10000, bounds: null };
+  }
+  return wifiMapBoundsCache.bounds;
 }
 
 function normalizeWifiSample(sample) {
@@ -312,7 +351,6 @@ function wifiSurveyMeta() {
       collector: {
         enabled: !wifiCollectorDisabled && !poseDisabled,
         intervalMs: wifiCollectorIntervalMs,
-        tfTimeoutSec: wifiCollectorTfTimeoutSec,
         cellRevisitMs: wifiCollectorCellRevisitMs,
         inFlight: wifiCollectorInFlight,
         successCount: wifiCollectorSuccessCount,
@@ -468,9 +506,9 @@ function buildRobotPoseProbeBash() {
     "  break",
     "done",
     "if command -v ros2 >/dev/null 2>&1; then",
-    `  run_tf() { timeout ${tfEchoTimeoutSec} ros2 run tf2_ros tf2_echo "$1" "$2" 2>/dev/null; }`,
+    `  run_tf() { timeout -k 1 ${tfEchoTimeoutSec} ros2 run tf2_ros tf2_echo "$1" "$2" 2>/dev/null; }`,
     "elif command -v rosrun >/dev/null 2>&1; then",
-    `  run_tf() { timeout ${tfEchoTimeoutSec} rosrun tf tf_echo "$1" "$2" 2>/dev/null; }`,
+    `  run_tf() { timeout -k 1 ${tfEchoTimeoutSec} rosrun tf tf_echo "$1" "$2" 2>/dev/null; }`,
     "else",
     '  echo "ERR no ros2 or rosrun in PATH after sourcing /opt/ros"',
     "  exit 1",
@@ -478,7 +516,7 @@ function buildRobotPoseProbeBash() {
     "sample_extra() {",
     "  local out t",
     "  t=$1",
-    `  out=$(timeout ${rosTopicSampleTimeoutSec} ros2 topic echo -n 1 "$t" 2>/dev/null | head -n 48)`,
+    `  out=$(timeout -k 1 ${rosTopicSampleTimeoutSec} ros2 topic echo -n 1 "$t" 2>/dev/null | head -n 48)`,
     '  [ -z "$out" ] && return 1',
     '  case "$t" in *emergency*)',
     '    echo "$out" | grep -qi "active_emergency: false" && echo "$out" | grep -qi "latched_emergency: false" && return 1',
@@ -493,7 +531,7 @@ function buildRobotPoseProbeBash() {
     "sample_extra_ros1() {",
     "  local out t",
     "  t=$1",
-    `  out=$(timeout ${rosTopicSampleTimeoutSec} rostopic echo -n 1 "$t" 2>/dev/null | head -n 48)`,
+    `  out=$(timeout -k 1 ${rosTopicSampleTimeoutSec} rostopic echo -n 1 "$t" 2>/dev/null | head -n 48)`,
     '  [ -z "$out" ] && return 1',
     '  case "$t" in *emergency*)',
     '    echo "$out" | grep -qi "active_emergency: false" && echo "$out" | grep -qi "latched_emergency: false" && return 1',
@@ -516,7 +554,7 @@ function buildRobotPoseProbeBash() {
     "      done",
     "    fi",
     "    if [ \"$ros_extra_sampled\" != 1 ] && command -v rostopic >/dev/null 2>&1; then",
-    `      out=$(timeout ${rosTopicFallbackTimeoutSec} rostopic echo -n 1 /mower_logic/current_state 2>/dev/null | head -n 48)`,
+    `      out=$(timeout -k 1 ${rosTopicFallbackTimeoutSec} rostopic echo -n 1 /mower_logic/current_state 2>/dev/null | head -n 48)`,
     '      if [ -n "$out" ]; then',
     "        echo EXTRA_BEGIN",
     '        echo "topic:mower_logic/current_state"',
@@ -542,43 +580,48 @@ function buildRobotPoseProbeBash() {
   ].join("\n");
 }
 
-function buildWifiCollectorProbeBash() {
-  const b64 = Buffer.from(ROBOT_TF_PARSE_PY, "utf8").toString("base64");
-  return [
-    "set +e",
-    "for CMD in timeout head cat python3 base64; do",
-    '  command -v "$CMD" >/dev/null 2>&1 || { echo "ERR missing required command in ROS container: $CMD"; exit 1; }',
-    "done",
-    "for SETUP in /opt/ros/humble/setup.bash /opt/ros/jazzy/setup.bash /opt/ros/iron/setup.bash /opt/ros/noetic/setup.bash; do",
-    '  [ -f "$SETUP" ] || continue',
-    '  . "$SETUP"',
-    "  break",
-    "done",
-    "for WS in /opt/open_mower_ros/devel/setup.bash /ros_ws/install/setup.bash /workspace/install/setup.bash /colcon_ws/install/setup.bash /catkin_ws/devel/setup.bash /open_mower/install/setup.bash; do",
-    '  [ -f "$WS" ] || continue',
-    '  . "$WS"',
-    "  break",
-    "done",
-    "if command -v ros2 >/dev/null 2>&1; then",
-    `  run_tf() { timeout ${wifiCollectorTfTimeoutSec} ros2 run tf2_ros tf2_echo map "$1" 2>/dev/null; }`,
-    "elif command -v rosrun >/dev/null 2>&1; then",
-    `  run_tf() { timeout ${wifiCollectorTfTimeoutSec} rosrun tf tf_echo map "$1" 2>/dev/null; }`,
-    "else",
-    '  echo "ERR no ros2 or rosrun in PATH after sourcing /opt/ros"',
-    "  exit 1",
-    "fi",
-    "for child in base_link base_footprint; do",
-    `  parsed=$(run_tf "$child" | head -n 20 | python3 <(echo '${b64}' | base64 -d)) || continue`,
-    '  echo "OK $parsed map $child"',
-    "  echo WIFI_BEGIN",
-    "  cat /proc/net/wireless 2>/dev/null",
-    "  echo WIFI_END",
-    "  exit 0",
-    "done",
-    'echo "ERR no TF transform (tried map -> base_link/base_footprint)"',
-    "exit 1",
-  ].join("\n");
-}
+const WIFI_COLLECTOR_STREAM_PY = `import json
+import rospy
+from xbot_msgs.msg import AbsolutePose
+
+INTERVAL = ${Number((wifiCollectorIntervalMs / 1000).toFixed(3))}
+latest_pose = [None]
+
+
+def on_pose(msg):
+    p = msg.pose.pose.position
+    latest_pose[0] = (round(float(p.x), 3), round(float(p.y), 3))
+
+
+def read_wifi():
+    with open("/proc/net/wireless", "r") as src:
+        for line in src.readlines()[2:]:
+            fields = line.split()
+            if len(fields) < 4:
+                continue
+            return fields[0].rstrip(":"), float(fields[2].rstrip(".")), float(fields[3].rstrip("."))
+    return None
+
+
+def sample(_event):
+    try:
+        pose = latest_pose[0]
+        wifi = read_wifi()
+        if pose is None or wifi is None:
+            return
+        print(json.dumps({"t": "W", "x": pose[0], "y": pose[1],
+                          "interface": wifi[0], "quality": wifi[1],
+                          "signal": wifi[2]}), flush=True)
+    except Exception as error:
+        print(json.dumps({"t": "E", "error": str(error)[:200]}), flush=True)
+
+
+rospy.init_node("om_editor_wifi_collector", anonymous=False, disable_signals=True)
+rospy.Subscriber("/xbot_positioning/xb_pose", AbsolutePose, on_pose, queue_size=1)
+rospy.Timer(rospy.Duration(INTERVAL), sample)
+print(json.dumps({"t": "R"}), flush=True)
+rospy.spin()
+`;
 
 let robotPoseCache = {
   expiresAt: 0,
@@ -1167,6 +1210,19 @@ async function dockerExecInContainer(container, cmd, env = []) {
   return demuxDockerStream(start.body);
 }
 
+async function terminateRosHelper(scriptName) {
+  try {
+    await dockerExecInContainer(poseContainerName, [
+      "/usr/bin/pkill",
+      "-TERM",
+      "-f",
+      `^python3 -u /tmp/${scriptName}$`,
+    ]);
+  } catch (error) {
+    logWarn("Failed to stop ROS helper process", { scriptName, error: error.message });
+  }
+}
+
 function demuxDockerStream(raw) {
   if (!Buffer.isBuffer(raw)) {
     return { stdout: String(raw || ""), stderr: "" };
@@ -1352,31 +1408,32 @@ async function fetchRobotPoseFromRosContainer() {
   return parseRobotProbeOutput(stdout || stderr || "");
 }
 
-async function collectAutonomousWifiSample() {
+async function ingestAutonomousWifiSample(message) {
   const startedAt = Date.now();
-  const { stdout, stderr } = await dockerExecInContainer(poseContainerName, [
-    "/bin/bash",
-    "-lc",
-    buildWifiCollectorProbeBash(),
-  ]);
-  const probe = parseRobotProbeOutput(stdout || stderr || "");
-  if (
-    !probe.ok ||
-    probe.frameParent !== "map" ||
-    !Number.isFinite(probe.x) ||
-    !Number.isFinite(probe.y) ||
-    !Number.isFinite(probe.wifi?.signalDbm)
-  ) {
-    throw new Error(probe.error || "WiFi collector probe returned no map pose or signal");
+  const x = Number(message?.x);
+  const y = Number(message?.y);
+  const signalDbm = Number(message?.signal);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(signalDbm)) {
+    throw new Error("WiFi collector returned an invalid pose or signal");
   }
 
+  wifiCollectorInFlight = true;
+  const bounds = await getWifiMapBounds();
+  if (!bounds) {
+    throw new Error("WiFi collector is waiting for valid map bounds");
+  }
+  if (
+    (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y > bounds.maxY)
+  ) {
+    throw new Error("WiFi collector pose is outside map bounds; waiting for localization");
+  }
   await ensureWifiSurveyLoaded();
   const now = Date.now();
-  const key = wifiCellKey(probe.x, probe.y);
+  const key = wifiCellKey(x, y);
   const previous = wifiSurvey.get(key);
   const previousAgeMs = previous ? now - Number(previous.timestamp || 0) : Infinity;
   const signalChangeDbm = previous
-    ? Math.abs(Number(previous.signalDbm) - probe.wifi.signalDbm)
+    ? Math.abs(Number(previous.signalDbm) - signalDbm)
     : Infinity;
   const shouldStore =
     !previous ||
@@ -1384,79 +1441,152 @@ async function collectAutonomousWifiSample() {
 
   wifiCollectorSuccessCount += 1;
   wifiCollectorLastCollectedAt = now;
-  wifiCollectorLastSignalDbm = probe.wifi.signalDbm;
-  wifiCollectorLastInterface = probe.wifi.interface || null;
+  wifiCollectorLastSignalDbm = signalDbm;
+  wifiCollectorLastInterface = message.interface || null;
   wifiCollectorLastDurationMs = now - startedAt;
   wifiCollectorLastError = null;
 
   if (
     shouldStore &&
     mergeWifiSurveySample({
-      x: probe.x,
-      y: probe.y,
-      signalDbm: probe.wifi.signalDbm,
+      x,
+      y,
+      signalDbm,
     })
   ) {
     wifiCollectorStoredCount += 1;
     wifiCollectorLastStoredAt = Date.now();
-    return true;
   }
-  return false;
+  wifiCollectorInFlight = false;
 }
 
-function scheduleAutonomousWifiCollector(delayMs = wifiCollectorIntervalMs) {
-  if (wifiCollectorDisabled || poseDisabled || wifiCollectorStopped || wifiCollectorTimer) return;
-  wifiCollectorTimer = setTimeout(async () => {
-    wifiCollectorTimer = null;
-    if (wifiCollectorInFlight) {
-      scheduleAutonomousWifiCollector();
-      return;
-    }
-    wifiCollectorInFlight = true;
-    const startedAt = Date.now();
+function feedWifiCollectorChunk(chunk) {
+  wifiCollectorLineBuffer += chunk.toString("utf8");
+  if (wifiCollectorLineBuffer.length > 16384) {
+    wifiCollectorLineBuffer = wifiCollectorLineBuffer.slice(-2048);
+  }
+  let newline;
+  while ((newline = wifiCollectorLineBuffer.indexOf("\n")) >= 0) {
+    const line = wifiCollectorLineBuffer.slice(0, newline).trim();
+    wifiCollectorLineBuffer = wifiCollectorLineBuffer.slice(newline + 1);
+    if (!line.startsWith("{")) continue;
+    let message;
     try {
-      await collectAutonomousWifiSample();
-    } catch (error) {
+      message = JSON.parse(line);
+    } catch (_error) {
+      continue;
+    }
+    if (message.t === "R") {
+      wifiCollectorLastError = null;
+      continue;
+    }
+    if (message.t === "E") {
       wifiCollectorFailureCount += 1;
-      wifiCollectorLastDurationMs = Date.now() - startedAt;
+      wifiCollectorLastError = message.error || "WiFi collector failed";
+      continue;
+    }
+    if (message.t !== "W" || wifiCollectorInFlight) continue;
+    ingestAutonomousWifiSample(message).catch((error) => {
+      wifiCollectorInFlight = false;
+      wifiCollectorFailureCount += 1;
       wifiCollectorLastError = error.message || "WiFi collector failed";
       if (wifiCollectorFailureCount === 1 || wifiCollectorFailureCount % 30 === 0) {
-        logWarn("Autonomous WiFi collector failed", {
+        logWarn("Autonomous WiFi sample rejected", {
           failures: wifiCollectorFailureCount,
           error: wifiCollectorLastError,
         });
       }
-    } finally {
-      wifiCollectorInFlight = false;
-      const elapsedMs = Date.now() - startedAt;
-      scheduleAutonomousWifiCollector(Math.max(1000, wifiCollectorIntervalMs - elapsedMs));
-    }
+    });
+  }
+}
+
+function scheduleAutonomousWifiCollector(delayMs = wifiCollectorReconnectDelayMs) {
+  if (wifiCollectorDisabled || poseDisabled || wifiCollectorStopped || wifiCollectorTimer) return;
+  wifiCollectorTimer = setTimeout(() => {
+    wifiCollectorTimer = null;
+    ensureAutonomousWifiCollector();
   }, delayMs);
   wifiCollectorTimer.unref?.();
 }
 
+async function ensureAutonomousWifiCollector() {
+  if (
+    wifiCollectorDisabled ||
+    poseDisabled ||
+    wifiCollectorStopped ||
+    wifiCollectorHandle ||
+    wifiCollectorStarting
+  ) return;
+  wifiCollectorStarting = true;
+  try {
+    const inspect = await inspectPoseContainer();
+    if (!inspect.ok || !inspect.container.running) {
+      throw new Error(inspect.ok ? `Container '${poseContainerName}' is not running` : inspect.error);
+    }
+    const handle = await startDockerExecStream(
+      poseContainerName,
+      ["/bin/bash", "-lc", buildRosPythonBash(WIFI_COLLECTOR_STREAM_PY, {
+        tmpName: "om_wifi_collector.py",
+        exec: "python3 -u",
+      })],
+      {
+        onStdout: (chunk) => feedWifiCollectorChunk(chunk),
+        onStderr: (chunk) => {
+          const error = chunk.toString("utf8").trim();
+          if (error) wifiCollectorLastError = error.slice(0, 200);
+        },
+        onExit: (error) => {
+          wifiCollectorHandle = null;
+          if (wifiCollectorStopped) return;
+          wifiCollectorFailureCount += 1;
+          wifiCollectorLastError = error?.message || wifiCollectorLastError || "collector stream ended";
+          wifiCollectorReconnectDelayMs = Math.min(wifiCollectorReconnectDelayMs * 2, 30000);
+          logWarn("Autonomous WiFi collector stream ended", {
+            error: wifiCollectorLastError,
+          });
+          scheduleAutonomousWifiCollector();
+        },
+      }
+    );
+    wifiCollectorHandle = handle;
+    wifiCollectorReconnectDelayMs = 1000;
+    logInfo("Autonomous WiFi collector stream started", { container: poseContainerName });
+  } catch (error) {
+    wifiCollectorFailureCount += 1;
+    wifiCollectorLastError = error.message || "WiFi collector start failed";
+    wifiCollectorReconnectDelayMs = Math.min(wifiCollectorReconnectDelayMs * 2, 30000);
+    logWarn("Autonomous WiFi collector start failed", { error: wifiCollectorLastError });
+    scheduleAutonomousWifiCollector();
+  } finally {
+    wifiCollectorStarting = false;
+  }
+}
+
 function startAutonomousWifiCollector() {
   if (wifiCollectorDisabled || poseDisabled) {
-    logInfo("Autonomous WiFi collector disabled", {
-      wifiCollectorDisabled,
-      poseDisabled,
-    });
+    logInfo("Autonomous WiFi collector disabled", { wifiCollectorDisabled, poseDisabled });
     return;
   }
   wifiCollectorStopped = false;
   logInfo("Autonomous WiFi collector enabled", {
     intervalMs: wifiCollectorIntervalMs,
-    tfTimeoutSec: wifiCollectorTfTimeoutSec,
     cellRevisitMs: wifiCollectorCellRevisitMs,
   });
-  scheduleAutonomousWifiCollector(1500);
+  ensureAutonomousWifiCollector();
 }
 
-function stopAutonomousWifiCollector() {
+async function stopAutonomousWifiCollector() {
   wifiCollectorStopped = true;
-  if (!wifiCollectorTimer) return;
-  clearTimeout(wifiCollectorTimer);
-  wifiCollectorTimer = null;
+  if (wifiCollectorTimer) {
+    clearTimeout(wifiCollectorTimer);
+    wifiCollectorTimer = null;
+  }
+  if (wifiCollectorHandle) {
+    wifiCollectorHandle.kill();
+    wifiCollectorHandle = null;
+  }
+  wifiCollectorLineBuffer = "";
+  await terminateRosHelper("om_wifi_collector.py");
 }
 
 async function getRobotPoseCached() {
@@ -1783,7 +1913,7 @@ async function ensureRobotStream() {
   }
 }
 
-function stopRobotStream() {
+async function stopRobotStream() {
   if (robotStream.reconnectTimer) {
     clearTimeout(robotStream.reconnectTimer);
     robotStream.reconnectTimer = null;
@@ -1794,6 +1924,7 @@ function stopRobotStream() {
   }
   robotStream.ready = false;
   robotStream.lineBuf = "";
+  await terminateRosHelper("om_pose_stream.py");
 }
 
 async function restartOpenMowerContainer() {
@@ -2327,6 +2458,7 @@ app.post("/api/map", async (req, res) => {
     }
 
     await fs.writeFile(mapPath, mapJson, "utf8");
+    wifiMapBoundsCache.expiresAt = 0;
     logInfo("Saved map file", { file: mapPath, bytes: Buffer.byteLength(mapJson, "utf8") });
 
     if (!restartRequested) {
@@ -2411,7 +2543,6 @@ const server = app.listen(port, () => {
     wifiMaxPoints,
     wifiFlushMs,
     wifiCollectorIntervalMs,
-    wifiCollectorTfTimeoutSec,
     wifiCollectorCellRevisitMs,
     wifiCollectorDisabled,
   });
@@ -2423,7 +2554,7 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   logInfo("Shutting down", { signal });
-  stopAutonomousWifiCollector();
+  await Promise.all([stopAutonomousWifiCollector(), stopRobotStream()]);
   server.close();
   try {
     await flushWifiSurvey(true);
