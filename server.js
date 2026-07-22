@@ -12,6 +12,32 @@ const port = process.env.PORT || 80;
 const paramsPath = process.env.PARAMS_PATH || "/data/params/mower_params.yaml";
 const mapPath = process.env.MAP_PATH || "/data/ros/map.json";
 const mapDirectory = path.dirname(mapPath);
+const wifiMapPath = process.env.WIFI_MAP_PATH || path.join(mapDirectory, "wifi-signal-map.json");
+const wifiCellSizeM = Math.max(
+  0.25,
+  Math.min(5, Number(process.env.WIFI_MAP_CELL_SIZE_M) || 0.75)
+);
+const wifiMaxPoints = Math.max(
+  100,
+  Math.min(10000, Math.floor(Number(process.env.WIFI_MAP_MAX_POINTS) || 2000))
+);
+const wifiFlushMs = Math.max(
+  10000,
+  Math.min(300000, Math.floor(Number(process.env.WIFI_MAP_FLUSH_MS) || 30000))
+);
+const wifiCollectorIntervalMs = Math.max(
+  5000,
+  Math.min(300000, Math.floor(Number(process.env.WIFI_MAP_COLLECTOR_INTERVAL_MS) || 10000))
+);
+const wifiCollectorCellRevisitMs = Math.max(
+  60000,
+  Math.min(
+    3600000,
+    Math.floor(Number(process.env.WIFI_MAP_COLLECTOR_CELL_REVISIT_MS) || 300000)
+  )
+);
+const wifiCollectorDisabled =
+  String(process.env.WIFI_MAP_COLLECTOR_DISABLE || "").trim() === "1";
 const distDir = path.join(__dirname, "dist");
 const dockerSocketPath = process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock";
 const restartContainerName = process.env.OPENMOWER_CONTAINER_NAME || "open_mower_ros";
@@ -51,6 +77,294 @@ function logWarn(message, meta = {}) {
 
 function logError(message, meta = {}) {
   console.error(`[${nowIso()}] [ERROR] ${message}`, meta);
+}
+
+const wifiSurvey = new Map();
+let wifiSurveyLoaded = false;
+let wifiSurveyLoadPromise = null;
+let wifiSurveyDirty = false;
+let wifiSurveyFlushTimer = null;
+let wifiSurveyFlushPromise = null;
+let wifiSurveyRevision = 0;
+let wifiSurveyUpdatedAt = null;
+let wifiSurveyLastBytes = 0;
+let wifiCollectorTimer = null;
+let wifiCollectorHandle = null;
+let wifiCollectorStarting = false;
+let wifiCollectorLineBuffer = "";
+let wifiCollectorReconnectDelayMs = 1000;
+let wifiCollectorInFlight = false;
+let wifiCollectorStopped = false;
+let wifiCollectorSuccessCount = 0;
+let wifiCollectorFailureCount = 0;
+let wifiCollectorStoredCount = 0;
+let wifiCollectorLastCollectedAt = null;
+let wifiCollectorLastStoredAt = null;
+let wifiCollectorLastSignalDbm = null;
+let wifiCollectorLastInterface = null;
+let wifiCollectorLastDurationMs = null;
+let wifiCollectorLastError = null;
+let wifiMapBoundsCache = { expiresAt: 0, bounds: null };
+
+function wifiCellKey(x, y) {
+  return `${Math.round(x / wifiCellSizeM)},${Math.round(y / wifiCellSizeM)}`;
+}
+
+async function getWifiMapBounds() {
+  if (wifiMapBoundsCache.expiresAt > Date.now()) return wifiMapBoundsCache.bounds;
+  try {
+    const map = JSON.parse(await fs.readFile(mapPath, "utf8"));
+    const points = [];
+    for (const area of Array.isArray(map?.areas) ? map.areas : []) {
+      for (const point of Array.isArray(area?.outline) ? area.outline : []) {
+        if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) points.push(point);
+      }
+    }
+    for (const dock of Array.isArray(map?.docking_stations) ? map.docking_stations : []) {
+      if (Number.isFinite(dock?.position?.x) && Number.isFinite(dock?.position?.y)) {
+        points.push(dock.position);
+      }
+    }
+    if (points.length === 0) throw new Error("map contains no coordinate points");
+    const xs = points.map((point) => point.x);
+    const ys = points.map((point) => point.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const margin = Math.max(5, Math.min(100, Math.max(maxX - minX, maxY - minY) * 0.25));
+    wifiMapBoundsCache = {
+      expiresAt: Date.now() + 60000,
+      bounds: {
+        minX: minX - margin,
+        maxX: maxX + margin,
+        minY: minY - margin,
+        maxY: maxY + margin,
+      },
+    };
+  } catch (_error) {
+    wifiMapBoundsCache = { expiresAt: Date.now() + 10000, bounds: null };
+  }
+  return wifiMapBoundsCache.bounds;
+}
+
+function normalizeWifiSample(sample) {
+  const x = Number(sample?.x);
+  const y = Number(sample?.y);
+  const signalDbm = Number(sample?.signalDbm);
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(signalDbm) ||
+    Math.abs(x) > 100000 ||
+    Math.abs(y) > 100000 ||
+    signalDbm < -120 ||
+    signalDbm > 0
+  ) {
+    return null;
+  }
+  const key = wifiCellKey(x, y);
+  const [cellX, cellY] = key.split(",").map(Number);
+  return {
+    key,
+    x: Number((cellX * wifiCellSizeM).toFixed(3)),
+    y: Number((cellY * wifiCellSizeM).toFixed(3)),
+    signalDbm,
+    timestamp: Date.now(),
+  };
+}
+
+function evictOldestWifiSample() {
+  let oldestKey = null;
+  let oldestTimestamp = Infinity;
+  for (const [key, sample] of wifiSurvey) {
+    if (sample.timestamp < oldestTimestamp) {
+      oldestKey = key;
+      oldestTimestamp = sample.timestamp;
+    }
+  }
+  if (oldestKey != null) wifiSurvey.delete(oldestKey);
+}
+
+function mergeWifiSurveySample(input, markDirty = true) {
+  const sample = normalizeWifiSample(input);
+  if (!sample) return false;
+  const previous = wifiSurvey.get(sample.key);
+  if (previous) {
+    const weight = Math.min(Math.max(previous.samples || 1, 1), 9);
+    previous.signalDbm = Number(
+      ((previous.signalDbm * weight + sample.signalDbm) / (weight + 1)).toFixed(1)
+    );
+    previous.samples = Math.min((previous.samples || 1) + 1, 1000000);
+    previous.timestamp = sample.timestamp;
+  } else {
+    if (wifiSurvey.size >= wifiMaxPoints) evictOldestWifiSample();
+    wifiSurvey.set(sample.key, {
+      x: sample.x,
+      y: sample.y,
+      signalDbm: Number(sample.signalDbm.toFixed(1)),
+      samples: 1,
+      timestamp: sample.timestamp,
+    });
+  }
+  if (markDirty) {
+    wifiSurveyDirty = true;
+    wifiSurveyRevision += 1;
+    wifiSurveyUpdatedAt = Date.now();
+    scheduleWifiSurveyFlush();
+  }
+  return true;
+}
+
+async function ensureWifiSurveyLoaded() {
+  if (wifiSurveyLoaded) return;
+  if (wifiSurveyLoadPromise) return wifiSurveyLoadPromise;
+  wifiSurveyLoadPromise = (async () => {
+    try {
+      const content = await fs.readFile(wifiMapPath, "utf8");
+      wifiSurveyLastBytes = Buffer.byteLength(content, "utf8");
+      const parsed = JSON.parse(content);
+      const samples = Array.isArray(parsed?.samples) ? parsed.samples.slice(-wifiMaxPoints) : [];
+      for (const sample of samples) {
+        const normalized = normalizeWifiSample(sample);
+        if (!normalized) continue;
+        const timestamp = Number(sample.timestamp);
+        const sampleCount = Number(sample.samples);
+        wifiSurvey.set(normalized.key, {
+          x: normalized.x,
+          y: normalized.y,
+          signalDbm: Number(normalized.signalDbm.toFixed(1)),
+          samples: Number.isFinite(sampleCount)
+            ? Math.max(1, Math.min(1000000, Math.floor(sampleCount)))
+            : 1,
+          timestamp: Number.isFinite(timestamp) ? timestamp : normalized.timestamp,
+        });
+      }
+      wifiSurveyUpdatedAt = Number(parsed?.updatedAt) || null;
+      wifiSurveyRevision = 1;
+      logInfo("Loaded central WiFi survey", {
+        file: wifiMapPath,
+        points: wifiSurvey.size,
+        bytes: wifiSurveyLastBytes,
+      });
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        logWarn("Failed to load central WiFi survey; starting empty", {
+          file: wifiMapPath,
+          error: error.message,
+        });
+      }
+    } finally {
+      wifiSurveyLoaded = true;
+      wifiSurveyLoadPromise = null;
+    }
+  })();
+  return wifiSurveyLoadPromise;
+}
+
+function wifiSurveyPayload() {
+  return {
+    version: 1,
+    cellSizeM: wifiCellSizeM,
+    maxPoints: wifiMaxPoints,
+    updatedAt: wifiSurveyUpdatedAt,
+    samples: [...wifiSurvey.values()],
+  };
+}
+
+async function applyMowerFileOwnership(filePath) {
+  for (const ownerPath of [wifiMapPath, mapPath, mapDirectory]) {
+    try {
+      const owner = await fs.stat(ownerPath);
+      await fs.chown(filePath, owner.uid, owner.gid);
+      break;
+    } catch (error) {
+      if (error.code !== "ENOENT" && error.code !== "EPERM") throw error;
+    }
+  }
+  await fs.chmod(filePath, 0o664);
+}
+
+async function flushWifiSurvey(forceAll = false) {
+  if (wifiSurveyFlushTimer) {
+    clearTimeout(wifiSurveyFlushTimer);
+    wifiSurveyFlushTimer = null;
+  }
+  if (wifiSurveyFlushPromise) {
+    await wifiSurveyFlushPromise;
+    if (forceAll && wifiSurveyDirty) return flushWifiSurvey(true);
+    return;
+  }
+  if (!wifiSurveyLoaded || !wifiSurveyDirty) return;
+  const flushRevision = wifiSurveyRevision;
+  wifiSurveyFlushPromise = (async () => {
+    const payload = JSON.stringify(wifiSurveyPayload());
+    const temporaryPath = `${wifiMapPath}.tmp`;
+    await fs.mkdir(path.dirname(wifiMapPath), { recursive: true });
+    await fs.writeFile(temporaryPath, payload, "utf8");
+    await applyMowerFileOwnership(temporaryPath);
+    await fs.rename(temporaryPath, wifiMapPath);
+    wifiSurveyLastBytes = Buffer.byteLength(payload, "utf8");
+    wifiSurveyDirty = wifiSurveyRevision !== flushRevision;
+    logInfo("Flushed central WiFi survey", {
+      file: wifiMapPath,
+      points: wifiSurvey.size,
+      bytes: wifiSurveyLastBytes,
+    });
+  })();
+  try {
+    await wifiSurveyFlushPromise;
+  } finally {
+    wifiSurveyFlushPromise = null;
+  }
+  if (wifiSurveyDirty) {
+    if (forceAll) return flushWifiSurvey(true);
+    scheduleWifiSurveyFlush();
+  }
+}
+
+function scheduleWifiSurveyFlush() {
+  if (wifiSurveyFlushTimer) return;
+  wifiSurveyFlushTimer = setTimeout(() => {
+    flushWifiSurvey().catch((error) => {
+      logError("Failed to flush central WiFi survey", {
+        file: wifiMapPath,
+        error: error.message,
+      });
+      if (wifiSurveyDirty) scheduleWifiSurveyFlush();
+    });
+  }, wifiFlushMs);
+  wifiSurveyFlushTimer.unref?.();
+}
+
+function wifiSurveyMeta() {
+  return {
+    revision: wifiSurveyRevision,
+    sampleCount: wifiSurvey.size,
+    updatedAt: wifiSurveyUpdatedAt,
+    storage: {
+      central: true,
+      cellSizeM: wifiCellSizeM,
+      maxPoints: wifiMaxPoints,
+      flushIntervalMs: wifiFlushMs,
+      fileBytes: wifiSurveyLastBytes,
+      collector: {
+        enabled: !wifiCollectorDisabled && !poseDisabled,
+        intervalMs: wifiCollectorIntervalMs,
+        cellRevisitMs: wifiCollectorCellRevisitMs,
+        inFlight: wifiCollectorInFlight,
+        successCount: wifiCollectorSuccessCount,
+        failureCount: wifiCollectorFailureCount,
+        storedCount: wifiCollectorStoredCount,
+        lastCollectedAt: wifiCollectorLastCollectedAt,
+        lastStoredAt: wifiCollectorLastStoredAt,
+        lastSignalDbm: wifiCollectorLastSignalDbm,
+        lastInterface: wifiCollectorLastInterface,
+        lastDurationMs: wifiCollectorLastDurationMs,
+        lastError: wifiCollectorLastError,
+      },
+    },
+  };
 }
 
 app.use(express.json({ limit: "20mb" }));
@@ -192,9 +506,9 @@ function buildRobotPoseProbeBash() {
     "  break",
     "done",
     "if command -v ros2 >/dev/null 2>&1; then",
-    `  run_tf() { timeout ${tfEchoTimeoutSec} ros2 run tf2_ros tf2_echo "$1" "$2" 2>/dev/null; }`,
+    `  run_tf() { timeout -k 1 ${tfEchoTimeoutSec} ros2 run tf2_ros tf2_echo "$1" "$2" 2>/dev/null; }`,
     "elif command -v rosrun >/dev/null 2>&1; then",
-    `  run_tf() { timeout ${tfEchoTimeoutSec} rosrun tf tf_echo "$1" "$2" 2>/dev/null; }`,
+    `  run_tf() { timeout -k 1 ${tfEchoTimeoutSec} rosrun tf tf_echo "$1" "$2" 2>/dev/null; }`,
     "else",
     '  echo "ERR no ros2 or rosrun in PATH after sourcing /opt/ros"',
     "  exit 1",
@@ -202,7 +516,7 @@ function buildRobotPoseProbeBash() {
     "sample_extra() {",
     "  local out t",
     "  t=$1",
-    `  out=$(timeout ${rosTopicSampleTimeoutSec} ros2 topic echo -n 1 "$t" 2>/dev/null | head -n 48)`,
+    `  out=$(timeout -k 1 ${rosTopicSampleTimeoutSec} ros2 topic echo -n 1 "$t" 2>/dev/null | head -n 48)`,
     '  [ -z "$out" ] && return 1',
     '  case "$t" in *emergency*)',
     '    echo "$out" | grep -qi "active_emergency: false" && echo "$out" | grep -qi "latched_emergency: false" && return 1',
@@ -217,7 +531,7 @@ function buildRobotPoseProbeBash() {
     "sample_extra_ros1() {",
     "  local out t",
     "  t=$1",
-    `  out=$(timeout ${rosTopicSampleTimeoutSec} rostopic echo -n 1 "$t" 2>/dev/null | head -n 48)`,
+    `  out=$(timeout -k 1 ${rosTopicSampleTimeoutSec} rostopic echo -n 1 "$t" 2>/dev/null | head -n 48)`,
     '  [ -z "$out" ] && return 1',
     '  case "$t" in *emergency*)',
     '    echo "$out" | grep -qi "active_emergency: false" && echo "$out" | grep -qi "latched_emergency: false" && return 1',
@@ -240,7 +554,7 @@ function buildRobotPoseProbeBash() {
     "      done",
     "    fi",
     "    if [ \"$ros_extra_sampled\" != 1 ] && command -v rostopic >/dev/null 2>&1; then",
-    `      out=$(timeout ${rosTopicFallbackTimeoutSec} rostopic echo -n 1 /mower_logic/current_state 2>/dev/null | head -n 48)`,
+    `      out=$(timeout -k 1 ${rosTopicFallbackTimeoutSec} rostopic echo -n 1 /mower_logic/current_state 2>/dev/null | head -n 48)`,
     '      if [ -n "$out" ]; then',
     "        echo EXTRA_BEGIN",
     '        echo "topic:mower_logic/current_state"',
@@ -255,6 +569,9 @@ function buildRobotPoseProbeBash() {
     "        if sample_extra \"$t\"; then break; fi",
     "      done",
     "    fi",
+    "    echo WIFI_BEGIN",
+    "    cat /proc/net/wireless 2>/dev/null",
+    "    echo WIFI_END",
     "    exit 0",
     "  done",
     "done",
@@ -262,6 +579,49 @@ function buildRobotPoseProbeBash() {
     "exit 1",
   ].join("\n");
 }
+
+const WIFI_COLLECTOR_STREAM_PY = `import json
+import rospy
+from xbot_msgs.msg import AbsolutePose
+
+INTERVAL = ${Number((wifiCollectorIntervalMs / 1000).toFixed(3))}
+latest_pose = [None]
+
+
+def on_pose(msg):
+    p = msg.pose.pose.position
+    latest_pose[0] = (round(float(p.x), 3), round(float(p.y), 3))
+
+
+def read_wifi():
+    with open("/proc/net/wireless", "r") as src:
+        for line in src.readlines()[2:]:
+            fields = line.split()
+            if len(fields) < 4:
+                continue
+            return fields[0].rstrip(":"), float(fields[2].rstrip(".")), float(fields[3].rstrip("."))
+    return None
+
+
+def sample(_event):
+    try:
+        pose = latest_pose[0]
+        wifi = read_wifi()
+        if pose is None or wifi is None:
+            return
+        print(json.dumps({"t": "W", "x": pose[0], "y": pose[1],
+                          "interface": wifi[0], "quality": wifi[1],
+                          "signal": wifi[2]}), flush=True)
+    except Exception as error:
+        print(json.dumps({"t": "E", "error": str(error)[:200]}), flush=True)
+
+
+rospy.init_node("om_editor_wifi_collector", anonymous=False, disable_signals=True)
+rospy.Subscriber("/xbot_positioning/xb_pose", AbsolutePose, on_pose, queue_size=1)
+rospy.Timer(rospy.Duration(INTERVAL), sample)
+print(json.dumps({"t": "R"}), flush=True)
+rospy.spin()
+`;
 
 let robotPoseCache = {
   expiresAt: 0,
@@ -721,6 +1081,28 @@ function parseRobotProbeOutput(text) {
     }
   }
 
+  let wifi = null;
+  const wifiBegin = lines.indexOf("WIFI_BEGIN");
+  const wifiEnd = lines.indexOf("WIFI_END", wifiBegin + 1);
+  if (wifiBegin >= 0 && wifiEnd > wifiBegin) {
+    for (const line of lines.slice(wifiBegin + 1, wifiEnd)) {
+      const match = line.match(/^([^:\s]+):\s+\S+\s+([-+\d.]+)\s+([-+\d.]+)/);
+      if (!match) continue;
+      const linkQuality = Number(match[2]);
+      const signalDbm = Number(match[3]);
+      if (!Number.isFinite(signalDbm)) continue;
+      const percent = Math.max(0, Math.min(100, Math.round((signalDbm + 100) * 2)));
+      wifi = {
+        interface: match[1],
+        signalDbm,
+        linkQuality: Number.isFinite(linkQuality) ? linkQuality : null,
+        linkQualityMax: 70,
+        percent,
+      };
+      break;
+    }
+  }
+
   const okLine = [...lines].reverse().find((l) => l.startsWith("OK "));
   const errLine = lines.find((l) => l.startsWith("ERR "));
 
@@ -756,6 +1138,7 @@ function parseRobotProbeOutput(text) {
       frameChild: childFrame,
       units: "meters_map_frame",
       ros,
+      wifi,
       liveRobotFatal: false,
     };
   }
@@ -825,6 +1208,19 @@ async function dockerExecInContainer(container, cmd, env = []) {
   }
 
   return demuxDockerStream(start.body);
+}
+
+async function terminateRosHelper(scriptName) {
+  try {
+    await dockerExecInContainer(poseContainerName, [
+      "/usr/bin/pkill",
+      "-TERM",
+      "-f",
+      `^python3 -u /tmp/${scriptName}$`,
+    ]);
+  } catch (error) {
+    logWarn("Failed to stop ROS helper process", { scriptName, error: error.message });
+  }
 }
 
 function demuxDockerStream(raw) {
@@ -1010,6 +1406,187 @@ async function fetchRobotPoseFromRosContainer() {
     logWarn("Robot pose stderr", { container: poseContainerName, stderr: trimmedErr });
   }
   return parseRobotProbeOutput(stdout || stderr || "");
+}
+
+async function ingestAutonomousWifiSample(message) {
+  const startedAt = Date.now();
+  const x = Number(message?.x);
+  const y = Number(message?.y);
+  const signalDbm = Number(message?.signal);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(signalDbm)) {
+    throw new Error("WiFi collector returned an invalid pose or signal");
+  }
+
+  wifiCollectorInFlight = true;
+  const bounds = await getWifiMapBounds();
+  if (!bounds) {
+    throw new Error("WiFi collector is waiting for valid map bounds");
+  }
+  if (
+    (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y > bounds.maxY)
+  ) {
+    throw new Error("WiFi collector pose is outside map bounds; waiting for localization");
+  }
+  await ensureWifiSurveyLoaded();
+  const now = Date.now();
+  const key = wifiCellKey(x, y);
+  const previous = wifiSurvey.get(key);
+  const previousAgeMs = previous ? now - Number(previous.timestamp || 0) : Infinity;
+  const signalChangeDbm = previous
+    ? Math.abs(Number(previous.signalDbm) - signalDbm)
+    : Infinity;
+  const shouldStore =
+    !previous ||
+    (previousAgeMs >= wifiCollectorCellRevisitMs && signalChangeDbm >= 3);
+
+  wifiCollectorSuccessCount += 1;
+  wifiCollectorLastCollectedAt = now;
+  wifiCollectorLastSignalDbm = signalDbm;
+  wifiCollectorLastInterface = message.interface || null;
+  wifiCollectorLastDurationMs = now - startedAt;
+  wifiCollectorLastError = null;
+
+  if (
+    shouldStore &&
+    mergeWifiSurveySample({
+      x,
+      y,
+      signalDbm,
+    })
+  ) {
+    wifiCollectorStoredCount += 1;
+    wifiCollectorLastStoredAt = Date.now();
+  }
+  wifiCollectorInFlight = false;
+}
+
+function feedWifiCollectorChunk(chunk) {
+  wifiCollectorLineBuffer += chunk.toString("utf8");
+  if (wifiCollectorLineBuffer.length > 16384) {
+    wifiCollectorLineBuffer = wifiCollectorLineBuffer.slice(-2048);
+  }
+  let newline;
+  while ((newline = wifiCollectorLineBuffer.indexOf("\n")) >= 0) {
+    const line = wifiCollectorLineBuffer.slice(0, newline).trim();
+    wifiCollectorLineBuffer = wifiCollectorLineBuffer.slice(newline + 1);
+    if (!line.startsWith("{")) continue;
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch (_error) {
+      continue;
+    }
+    if (message.t === "R") {
+      wifiCollectorLastError = null;
+      continue;
+    }
+    if (message.t === "E") {
+      wifiCollectorFailureCount += 1;
+      wifiCollectorLastError = message.error || "WiFi collector failed";
+      continue;
+    }
+    if (message.t !== "W" || wifiCollectorInFlight) continue;
+    ingestAutonomousWifiSample(message).catch((error) => {
+      wifiCollectorInFlight = false;
+      wifiCollectorFailureCount += 1;
+      wifiCollectorLastError = error.message || "WiFi collector failed";
+      if (wifiCollectorFailureCount === 1 || wifiCollectorFailureCount % 30 === 0) {
+        logWarn("Autonomous WiFi sample rejected", {
+          failures: wifiCollectorFailureCount,
+          error: wifiCollectorLastError,
+        });
+      }
+    });
+  }
+}
+
+function scheduleAutonomousWifiCollector(delayMs = wifiCollectorReconnectDelayMs) {
+  if (wifiCollectorDisabled || poseDisabled || wifiCollectorStopped || wifiCollectorTimer) return;
+  wifiCollectorTimer = setTimeout(() => {
+    wifiCollectorTimer = null;
+    ensureAutonomousWifiCollector();
+  }, delayMs);
+  wifiCollectorTimer.unref?.();
+}
+
+async function ensureAutonomousWifiCollector() {
+  if (
+    wifiCollectorDisabled ||
+    poseDisabled ||
+    wifiCollectorStopped ||
+    wifiCollectorHandle ||
+    wifiCollectorStarting
+  ) return;
+  wifiCollectorStarting = true;
+  try {
+    const inspect = await inspectPoseContainer();
+    if (!inspect.ok || !inspect.container.running) {
+      throw new Error(inspect.ok ? `Container '${poseContainerName}' is not running` : inspect.error);
+    }
+    const handle = await startDockerExecStream(
+      poseContainerName,
+      ["/bin/bash", "-lc", buildRosPythonBash(WIFI_COLLECTOR_STREAM_PY, {
+        tmpName: "om_wifi_collector.py",
+        exec: "python3 -u",
+      })],
+      {
+        onStdout: (chunk) => feedWifiCollectorChunk(chunk),
+        onStderr: (chunk) => {
+          const error = chunk.toString("utf8").trim();
+          if (error) wifiCollectorLastError = error.slice(0, 200);
+        },
+        onExit: (error) => {
+          wifiCollectorHandle = null;
+          if (wifiCollectorStopped) return;
+          wifiCollectorFailureCount += 1;
+          wifiCollectorLastError = error?.message || wifiCollectorLastError || "collector stream ended";
+          wifiCollectorReconnectDelayMs = Math.min(wifiCollectorReconnectDelayMs * 2, 30000);
+          logWarn("Autonomous WiFi collector stream ended", {
+            error: wifiCollectorLastError,
+          });
+          scheduleAutonomousWifiCollector();
+        },
+      }
+    );
+    wifiCollectorHandle = handle;
+    wifiCollectorReconnectDelayMs = 1000;
+    logInfo("Autonomous WiFi collector stream started", { container: poseContainerName });
+  } catch (error) {
+    wifiCollectorFailureCount += 1;
+    wifiCollectorLastError = error.message || "WiFi collector start failed";
+    wifiCollectorReconnectDelayMs = Math.min(wifiCollectorReconnectDelayMs * 2, 30000);
+    logWarn("Autonomous WiFi collector start failed", { error: wifiCollectorLastError });
+    scheduleAutonomousWifiCollector();
+  } finally {
+    wifiCollectorStarting = false;
+  }
+}
+
+function startAutonomousWifiCollector() {
+  if (wifiCollectorDisabled || poseDisabled) {
+    logInfo("Autonomous WiFi collector disabled", { wifiCollectorDisabled, poseDisabled });
+    return;
+  }
+  wifiCollectorStopped = false;
+  logInfo("Autonomous WiFi collector enabled", {
+    intervalMs: wifiCollectorIntervalMs,
+    cellRevisitMs: wifiCollectorCellRevisitMs,
+  });
+  ensureAutonomousWifiCollector();
+}
+
+async function stopAutonomousWifiCollector() {
+  wifiCollectorStopped = true;
+  if (wifiCollectorTimer) {
+    clearTimeout(wifiCollectorTimer);
+    wifiCollectorTimer = null;
+  }
+  if (wifiCollectorHandle) {
+    wifiCollectorHandle.kill();
+    wifiCollectorHandle = null;
+  }
+  wifiCollectorLineBuffer = "";
+  await terminateRosHelper("om_wifi_collector.py");
 }
 
 async function getRobotPoseCached() {
@@ -1336,7 +1913,7 @@ async function ensureRobotStream() {
   }
 }
 
-function stopRobotStream() {
+async function stopRobotStream() {
   if (robotStream.reconnectTimer) {
     clearTimeout(robotStream.reconnectTimer);
     robotStream.reconnectTimer = null;
@@ -1347,6 +1924,7 @@ function stopRobotStream() {
   }
   robotStream.ready = false;
   robotStream.lineBuf = "";
+  await terminateRosHelper("om_pose_stream.py");
 }
 
 async function restartOpenMowerContainer() {
@@ -1729,6 +2307,76 @@ app.post("/api/control", async (req, res) => {
   }
 });
 
+app.get("/api/wifi-map", async (req, res) => {
+  try {
+    await ensureWifiSurveyLoaded();
+    const knownRevision = Number(req.query.revision);
+    res.setHeader("Cache-Control", "no-store");
+    if (Number.isFinite(knownRevision) && knownRevision === wifiSurveyRevision) {
+      return res.json({ ok: true, notModified: true, ...wifiSurveyMeta() });
+    }
+    return res.json({ ok: true, ...wifiSurveyMeta(), samples: [...wifiSurvey.values()] });
+  } catch (error) {
+    logError("Failed to read central WiFi survey", { error: error.message });
+    return res.status(500).json({ ok: false, error: "Failed to read WiFi survey" });
+  }
+});
+
+app.post("/api/wifi-map/samples", async (req, res) => {
+  try {
+    await ensureWifiSurveyLoaded();
+    const samples = Array.isArray(req.body?.samples)
+      ? req.body.samples
+      : req.body && typeof req.body === "object"
+        ? [req.body]
+        : [];
+    if (samples.length < 1 || samples.length > wifiMaxPoints) {
+      return res.status(400).json({
+        ok: false,
+        error: `Expected 1-${wifiMaxPoints} WiFi samples`,
+      });
+    }
+    let accepted = 0;
+    for (const sample of samples) {
+      if (mergeWifiSurveySample(sample)) accepted += 1;
+    }
+    if (!accepted) {
+      return res.status(422).json({ ok: false, error: "No valid WiFi samples" });
+    }
+    return res.json({ ok: true, accepted, ...wifiSurveyMeta() });
+  } catch (error) {
+    logError("Failed to record central WiFi samples", { error: error.message });
+    return res.status(500).json({ ok: false, error: "Failed to record WiFi samples" });
+  }
+});
+
+app.delete("/api/wifi-map", async (_req, res) => {
+  try {
+    await ensureWifiSurveyLoaded();
+    await flushWifiSurvey(true);
+    const clearBackupPath = `${wifiMapPath}.bak-clear`;
+    try {
+      await fs.copyFile(wifiMapPath, clearBackupPath);
+      await applyMowerFileOwnership(clearBackupPath);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    logWarn("Clearing central WiFi survey", {
+      points: wifiSurvey.size,
+      backup: clearBackupPath,
+    });
+    wifiSurvey.clear();
+    wifiSurveyDirty = true;
+    wifiSurveyRevision += 1;
+    wifiSurveyUpdatedAt = Date.now();
+    await flushWifiSurvey(true);
+    return res.json({ ok: true, ...wifiSurveyMeta() });
+  } catch (error) {
+    logError("Failed to clear central WiFi survey", { error: error.message });
+    return res.status(500).json({ ok: false, error: "Failed to clear WiFi survey" });
+  }
+});
+
 app.get("/api/map", async (_req, res) => {
   try {
     if (verboseLogs) logInfo("Reading active map file", { file: mapPath });
@@ -1810,6 +2458,7 @@ app.post("/api/map", async (req, res) => {
     }
 
     await fs.writeFile(mapPath, mapJson, "utf8");
+    wifiMapBoundsCache.expiresAt = 0;
     logInfo("Saved map file", { file: mapPath, bytes: Buffer.byteLength(mapJson, "utf8") });
 
     if (!restartRequested) {
@@ -1875,7 +2524,7 @@ process.on("unhandledRejection", (reason) => {
   logError("Unhandled promise rejection", { reason });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   logInfo("OpenMower Map Editor listening", {
     port,
     mapPath,
@@ -1889,5 +2538,31 @@ app.listen(port, () => {
     poseDisabled,
     verboseLogs,
     dockerSocketPath,
+    wifiMapPath,
+    wifiCellSizeM,
+    wifiMaxPoints,
+    wifiFlushMs,
+    wifiCollectorIntervalMs,
+    wifiCollectorCellRevisitMs,
+    wifiCollectorDisabled,
   });
+  startAutonomousWifiCollector();
 });
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logInfo("Shutting down", { signal });
+  await Promise.all([stopAutonomousWifiCollector(), stopRobotStream()]);
+  server.close();
+  try {
+    await flushWifiSurvey(true);
+  } catch (error) {
+    logError("Final WiFi survey flush failed", { error: error.message });
+  }
+  process.exit(0);
+}
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));

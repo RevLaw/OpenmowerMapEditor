@@ -44,6 +44,8 @@ import {
 import { mowParams } from "../lib/stores/mowParams.js";
 import { robotLive, robotPose } from "../lib/stores/robot.js";
 import { exactPath } from "../lib/stores/exactPath.js";
+import { wifiMapEnabled, wifiSamples } from "../lib/stores/wifi.js";
+import { wifiSignalColor } from "../lib/wifi/signal.js";
 import {
   resolveRobotVisualMode,
   robotVisualToMarkerStyle,
@@ -102,6 +104,12 @@ export function createMapController(container) {
     [52.52, 13.405],
     19
   );
+  map.createPane("wifiHeatPane");
+  const wifiPane = map.getPane("wifiHeatPane");
+  wifiPane.style.zIndex = "350";
+  wifiPane.style.pointerEvents = "none";
+  wifiPane.style.filter = "blur(5px) saturate(1.25)";
+  const wifiRenderer = L.canvas({ pane: "wifiHeatPane", padding: 0.5 });
 
   let baseLayer = null;
   function applyBasemap(cfg) {
@@ -125,6 +133,7 @@ export function createMapController(container) {
     dock: null,
     robot: null,
     exactPath: null,
+    wifiHeat: [],
   };
 
   // Local mirror of state read inside imperative handlers.
@@ -224,6 +233,34 @@ export function createMapController(container) {
     renderSnapGuide(pts);
     renderDock();
     if (tool === "brush" && brushCursorLatLng) updateBrushCursor(brushCursorLatLng);
+  }
+
+  function renderWifiHeatmap(enabled, samples) {
+    layers.wifiHeat.forEach((layer) => map.removeLayer(layer));
+    layers.wifiHeat = [];
+    if (!enabled || !s.origin || !Array.isArray(samples)) return;
+
+    for (const sample of samples) {
+      if (
+        !Number.isFinite(sample?.x) ||
+        !Number.isFinite(sample?.y) ||
+        !Number.isFinite(sample?.signalDbm)
+      ) {
+        continue;
+      }
+      layers.wifiHeat.push(
+        L.circle(metersToLatLng(sample, origin()), {
+          pane: "wifiHeatPane",
+          renderer: wifiRenderer,
+          radius: 2.2,
+          stroke: false,
+          fill: true,
+          fillColor: wifiSignalColor(sample.signalDbm),
+          fillOpacity: 0.52,
+          interactive: false,
+        }).addTo(map)
+      );
+    }
   }
 
   // Accurate mowing preview: uses the robot's real parameters — global params
@@ -950,6 +987,7 @@ export function createMapController(container) {
         prevOriginKey = key;
         renderExactPath(get(exactPath));
       }
+      renderWifiHeatmap(get(wifiMapEnabled), get(wifiSamples));
     })
   );
   unsubs.push(
@@ -987,6 +1025,12 @@ export function createMapController(container) {
     robotPose.subscribe((pose) => renderRobot(get(robotLive), pose))
   );
   unsubs.push(robotLive.subscribe((live) => renderRobot(live, get(robotPose))));
+  unsubs.push(
+    wifiSamples.subscribe((samples) => renderWifiHeatmap(get(wifiMapEnabled), samples))
+  );
+  unsubs.push(
+    wifiMapEnabled.subscribe((enabled) => renderWifiHeatmap(enabled, get(wifiSamples)))
+  );
   unsubs.push(coverageOn.subscribe(() => render()));
   unsubs.push(mowParams.subscribe(() => render()));
   unsubs.push(exactPath.subscribe((d) => renderExactPath(d)));
