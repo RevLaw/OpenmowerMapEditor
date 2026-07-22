@@ -546,6 +546,9 @@ function buildWifiCollectorProbeBash() {
   const b64 = Buffer.from(ROBOT_TF_PARSE_PY, "utf8").toString("base64");
   return [
     "set +e",
+    "for CMD in timeout head cat python3 base64; do",
+    '  command -v "$CMD" >/dev/null 2>&1 || { echo "ERR missing required command in ROS container: $CMD"; exit 1; }',
+    "done",
     "for SETUP in /opt/ros/humble/setup.bash /opt/ros/jazzy/setup.bash /opt/ros/iron/setup.bash /opt/ros/noetic/setup.bash; do",
     '  [ -f "$SETUP" ] || continue',
     '  . "$SETUP"',

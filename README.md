@@ -128,6 +128,14 @@ The WiFi heatmap is shared mower-side state, not map geometry and not browser da
 - Browsers refresh the shared survey every 15 seconds. Revision-aware requests return metadata without resending the point list when nothing changed.
 - Existing survey points from the earlier browser-local implementation are imported once and then removed from `localStorage`. Only the user's on/off preference remains browser-local. If the autonomous collector is explicitly disabled, an open browser with live pose can still record as a fallback.
 
+### Vanilla OpenMower compatibility
+
+The autonomous collector does not depend on `rpi-monitor`, `jq`, the Docker CLI, host Python, or any other package installed directly on the Raspberry Pi. It talks to Docker through the mounted Engine socket and runs its small probe inside the official `open_mower_ros` container, where ROS, Bash, Python 3, and the standard command-line utilities already exist.
+
+The standard OpenMower OS v2 setup is sufficient: `open_mower_ros` must use host networking so `/proc/net/wireless` reflects the mower's WiFi interface, and the map editor needs the Docker socket plus the `/home/openmower/ros` bind mount shown above. Missing ROS transforms, WiFi data, or in-container commands are reported in `storage.collector.lastError`; the editor and normal map operations continue working if collection is unavailable.
+
+Resource use is bounded: one short Docker exec runs at the configured interval (10 seconds by default), memory is capped at 2,000 grid cells, and disk writes are coalesced to at most one every 30 seconds. No survey data or SSID is uploaded to GitHub or any external service.
+
 API endpoints:
 
 - `GET /api/wifi-map?revision=<n>` returns the shared points, limits, file size, and revision. If `<n>` is current, the response contains `notModified: true` and omits the points.
