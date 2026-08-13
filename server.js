@@ -1554,8 +1554,16 @@ async function ensureAutonomousWifiCollector() {
   } catch (error) {
     wifiCollectorFailureCount += 1;
     wifiCollectorLastError = error.message || "WiFi collector start failed";
-    wifiCollectorReconnectDelayMs = Math.min(wifiCollectorReconnectDelayMs * 2, 30000);
-    logWarn("Autonomous WiFi collector start failed", { error: wifiCollectorLastError });
+    // The docker-events watcher (see watchPoseContainerEvents) retries immediately
+    // once the container actually starts, so this poll is just a slow fallback —
+    // back off further and log sparingly instead of warning on every attempt.
+    wifiCollectorReconnectDelayMs = Math.min(wifiCollectorReconnectDelayMs * 2, 120000);
+    if (wifiCollectorFailureCount === 1 || wifiCollectorFailureCount % 10 === 0) {
+      logWarn("Autonomous WiFi collector start failed", {
+        error: wifiCollectorLastError,
+        failures: wifiCollectorFailureCount,
+      });
+    }
     scheduleAutonomousWifiCollector();
   } finally {
     wifiCollectorStarting = false;
@@ -1587,6 +1595,125 @@ async function stopAutonomousWifiCollector() {
   }
   wifiCollectorLineBuffer = "";
   await terminateRosHelper("om_wifi_collector.py");
+}
+
+let dockerEventsRequest = null;
+let dockerEventsTimer = null;
+let dockerEventsReconnectDelayMs = 2000;
+let dockerEventsLineBuffer = "";
+let dockerEventsStopped = true;
+
+/**
+ * The pose container starting is the one thing that turns a "not running yet"
+ * failure into a real reconnect opportunity for both the WiFi collector and
+ * the pose stream — reset their backoff and retry right away instead of
+ * waiting out whatever delay they were on.
+ */
+function onPoseContainerStarted() {
+  wifiCollectorReconnectDelayMs = 1000;
+  if (wifiCollectorTimer) {
+    clearTimeout(wifiCollectorTimer);
+    wifiCollectorTimer = null;
+  }
+  ensureAutonomousWifiCollector();
+
+  robotStream.reconnectDelay = 1000;
+  if (robotStream.reconnectTimer) {
+    clearTimeout(robotStream.reconnectTimer);
+    robotStream.reconnectTimer = null;
+  }
+  ensureRobotStream();
+}
+
+function feedDockerEventsChunk(chunk) {
+  dockerEventsLineBuffer += chunk.toString("utf8");
+  if (dockerEventsLineBuffer.length > 8192) {
+    dockerEventsLineBuffer = dockerEventsLineBuffer.slice(-2048);
+  }
+  let newline;
+  while ((newline = dockerEventsLineBuffer.indexOf("\n")) >= 0) {
+    const line = dockerEventsLineBuffer.slice(0, newline).trim();
+    dockerEventsLineBuffer = dockerEventsLineBuffer.slice(newline + 1);
+    if (!line) continue;
+    try {
+      const event = JSON.parse(line);
+      if (event.status === "start" || event.Action === "start") onPoseContainerStarted();
+    } catch (_error) {
+      /* ignore malformed event line */
+    }
+  }
+}
+
+function scheduleDockerEventsReconnect() {
+  if (dockerEventsStopped || dockerEventsTimer) return;
+  const delay = dockerEventsReconnectDelayMs;
+  dockerEventsReconnectDelayMs = Math.min(delay * 2, 30000);
+  dockerEventsTimer = setTimeout(() => {
+    dockerEventsTimer = null;
+    watchPoseContainerEvents();
+  }, delay);
+  dockerEventsTimer.unref?.();
+}
+
+/**
+ * Long-lived subscription to Docker's `/events` stream, filtered to this
+ * container's start events. Lets the WiFi collector and pose stream react
+ * immediately when the ROS container (re)appears instead of relying solely
+ * on their own poll backoff — the poll loops stay as a slow fallback in case
+ * this connection itself drops.
+ */
+function watchPoseContainerEvents() {
+  if (dockerEventsStopped || dockerEventsRequest) return;
+  const filters = encodeURIComponent(
+    JSON.stringify({ container: [poseContainerName], event: ["start"] })
+  );
+  const req = http.request(
+    { socketPath: dockerSocketPath, path: `/events?filters=${filters}`, method: "GET" },
+    (res) => {
+      if ((res.statusCode || 0) < 200 || (res.statusCode || 0) >= 300) {
+        res.resume();
+        dockerEventsRequest = null;
+        scheduleDockerEventsReconnect();
+        return;
+      }
+      dockerEventsReconnectDelayMs = 2000;
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => feedDockerEventsChunk(chunk));
+      res.on("end", () => {
+        dockerEventsRequest = null;
+        if (!dockerEventsStopped) scheduleDockerEventsReconnect();
+      });
+      res.on("error", () => {
+        dockerEventsRequest = null;
+        if (!dockerEventsStopped) scheduleDockerEventsReconnect();
+      });
+    }
+  );
+  req.on("error", () => {
+    dockerEventsRequest = null;
+    if (!dockerEventsStopped) scheduleDockerEventsReconnect();
+  });
+  req.end();
+  dockerEventsRequest = req;
+}
+
+function startPoseContainerEventWatcher() {
+  if (poseDisabled && wifiCollectorDisabled) return;
+  dockerEventsStopped = false;
+  dockerEventsReconnectDelayMs = 2000;
+  watchPoseContainerEvents();
+}
+
+function stopPoseContainerEventWatcher() {
+  dockerEventsStopped = true;
+  if (dockerEventsTimer) {
+    clearTimeout(dockerEventsTimer);
+    dockerEventsTimer = null;
+  }
+  if (dockerEventsRequest) {
+    dockerEventsRequest.destroy();
+    dockerEventsRequest = null;
+  }
 }
 
 async function getRobotPoseCached() {
@@ -2547,6 +2674,7 @@ const server = app.listen(port, () => {
     wifiCollectorDisabled,
   });
   startAutonomousWifiCollector();
+  startPoseContainerEventWatcher();
 });
 
 let shuttingDown = false;
@@ -2554,6 +2682,7 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   logInfo("Shutting down", { signal });
+  stopPoseContainerEventWatcher();
   await Promise.all([stopAutonomousWifiCollector(), stopRobotStream()]);
   server.close();
   try {

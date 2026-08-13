@@ -1,6 +1,7 @@
 import { derived, get, writable } from "svelte/store";
 import { deleteWifiMap, fetchWifiMap, recordWifiSamples } from "../api.js";
 import { mergeWifiSample, wifiPercentFromDbm, wifiSignalLabel } from "../wifi/signal.js";
+import { notify } from "./toast.js";
 
 const ENABLED_KEY = "openmower-map-editor-wifi-map-enabled";
 const LEGACY_SAMPLES_KEY = "openmower-map-editor-wifi-map-v1";
@@ -103,6 +104,13 @@ async function migrateLegacySamples() {
 export function setWifiMapEnabled(enabled) {
   wifiMapEnabled.set(Boolean(enabled));
   if (enabled) syncWifiSamplesQuietly(true);
+}
+
+/** Mirrors the live robot's fatal handling: same unreachable ROS container, same UX. */
+export function handleLiveRobotFatal(error) {
+  if (!get(wifiMapEnabled)) return;
+  setWifiMapEnabled(false);
+  notify(`WiFi signal map: ${error || "live pose unavailable"}`, "warn");
 }
 
 export function ingestWifiPose(pose) {
