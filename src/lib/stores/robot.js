@@ -2,6 +2,7 @@ import { writable, derived, get } from "svelte/store";
 import { fetchRobotPose } from "../api.js";
 import { buildRobotHudLines } from "../robot/telemetry.js";
 import { notify, setStatus } from "./toast.js";
+import { handleLiveRobotFatal, ingestWifiPose } from "./wifi.js";
 
 const STORAGE_KEY = "openmower-map-editor-robot-live";
 const STREAM_URL = "/api/robot_pose/stream";
@@ -49,6 +50,7 @@ function handlePayload(data) {
     if (data && data.liveRobotFatal) {
       setRobotLive(false);
       notify(`Live robot: ${data.error || "unavailable"}`, "warn");
+      handleLiveRobotFatal(data.error);
       return;
     }
     failCount += 1;
@@ -59,6 +61,7 @@ function handlePayload(data) {
   }
   failCount = 0;
   robotPose.set(data);
+  ingestWifiPose(data);
 }
 
 // ---- SSE (primary) --------------------------------------------------------

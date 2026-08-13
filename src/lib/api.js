@@ -77,3 +77,29 @@ export async function sendControl(command) {
   });
   return res.json();
 }
+
+/** GET /api/wifi-map -> shared, mower-side survey. */
+export async function fetchWifiMap(revision = null) {
+  const query = Number.isFinite(revision) ? `?revision=${revision}` : "";
+  const res = await fetch(`/api/wifi-map${query}`);
+  if (!res.ok) throw new Error("Failed to load shared WiFi survey.");
+  return res.json();
+}
+
+/** POST /api/wifi-map/samples -> merge one or more readings into the shared survey. */
+export async function recordWifiSamples(samples) {
+  const res = await fetch("/api/wifi-map/samples", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ samples }),
+  });
+  if (!res.ok) throw new Error("Failed to record shared WiFi samples.");
+  return res.json();
+}
+
+/** DELETE /api/wifi-map -> clear the shared survey on the mower. */
+export async function deleteWifiMap() {
+  const res = await fetch("/api/wifi-map", { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to clear shared WiFi survey.");
+  return res.json();
+}

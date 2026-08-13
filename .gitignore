@@ -39,6 +39,7 @@ id_rsa*
 
 # Local map data (can include private property layout)
 map.json
+wifi-signal-map.json
 *.local.json
 params/
 ros/

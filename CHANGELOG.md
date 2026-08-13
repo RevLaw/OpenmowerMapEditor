@@ -1,5 +1,50 @@
 # Changelog
 
+## v2.2.0 — WiFi signal survey
+
+A shared, mower-side WiFi heatmap: the editor now records real radio signal strength
+alongside the live pose and paints it on the map, autonomously and without a browser
+open.
+
+### Added
+- **WiFi signal map** — an optional heatmap overlay showing WiFi dBm readings, toggled
+  from the **Live robot** panel. The server runs a persistent `rospy` collector inside
+  `open_mower_ros` that samples `/proc/net/wireless` alongside the fused pose every 10 s
+  (`WIFI_MAP_COLLECTOR_INTERVAL_MS`), merges readings into spatial cells (`0.75 m` by
+  default, `WIFI_MAP_CELL_SIZE_M`), and persists the survey centrally to
+  `/data/ros/wifi-signal-map.json` so every browser sees the same shared data — no open
+  browser required to keep recording.
+- **Browser fallback recording** — if the autonomous collector is disabled
+  (`WIFI_MAP_COLLECTOR_DISABLE=1`) or unreachable, an open browser with **Live robot**
+  on continues to record readings from the live pose stream.
+- New endpoints: `GET /api/wifi-map`, `POST /api/wifi-map/samples`,
+  `DELETE /api/wifi-map` (clears the shared survey, with an automatic backup first).
+
+### Changed
+- **Faster, quieter reconnects** — both the WiFi collector and the live pose stream now
+  react to Docker container-start events for `open_mower_ros` instead of relying only on
+  blind polling, so recovery after a ROS restart is near-instant. The poll loop remains
+  as a slow fallback and now logs its retry warning sparingly instead of on every
+  attempt.
+- The **WiFi signal map** toggle turns itself off — with the same toast pattern as
+  **Live robot** — when the live pose reports a fatal error (ROS container missing, not
+  running, or pose disabled), since the browser-fallback path depends on the same pose
+  stream.
+
+### Internal
+- Fixed a ROS helper process leak: stopping the pose stream or WiFi collector (including
+  on graceful shutdown via `SIGTERM`/`SIGINT`, now handled explicitly) terminates the
+  in-container Python process instead of only closing the local exec stream.
+- Multi-arch Docker build now compiles the (architecture-independent) frontend on
+  `BUILDPLATFORM`, avoiding QEMU emulation of npm's native helpers for `arm64` images.
+
+### Safety & requirements
+- The autonomous collector requires `open_mower_ros` to use host networking (the
+  standard OpenMower OS v2 default) so `/proc/net/wireless` reflects the mower's real
+  WiFi interface. Missing pose, map bounds, or in-container commands are reported in
+  `storage.collector.lastError`; normal map operations continue working if collection is
+  unavailable.
+
 ## v2.1.0 — OpenMower live integration
 
 Deep integration with the running robot: the mowing preview now uses your mower's
