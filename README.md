@@ -127,6 +127,7 @@ The WiFi heatmap is shared mower-side state, not map geometry and not browser da
 - Clearing the survey first copies the current file to `/data/ros/wifi-signal-map.json.bak-clear`. The single backup is overwritten on the next clear, so this safety net has a fixed storage cost.
 - Browsers refresh the shared survey every 15 seconds. Revision-aware requests return metadata without resending the point list when nothing changed.
 - Existing survey points from the earlier browser-local implementation are imported once and then removed from `localStorage`. Only the user's on/off preference remains browser-local. If the autonomous collector is explicitly disabled, an open browser with live pose can still record as a fallback.
+- The **WiFi signal map** toggle turns itself off automatically — with a matching toast — if the live robot pose reports a fatal error (ROS container missing, not running, or pose disabled via `OPENMOWER_POSE_DISABLE`). This mirrors how **Live robot** already handles the same failure, since the browser-fallback recording path depends on that same pose stream.
 
 ### Vanilla OpenMower compatibility
 
@@ -135,6 +136,8 @@ The autonomous collector does not depend on `rpi-monitor`, `jq`, the Docker CLI,
 The standard OpenMower OS v2 setup is sufficient: `open_mower_ros` must use host networking so `/proc/net/wireless` reflects the mower's WiFi interface, and the map editor needs the Docker socket plus the `/home/openmower/ros` bind mount shown above. Missing fused pose, map bounds, WiFi data, or in-container commands are reported in `storage.collector.lastError`; the editor and normal map operations continue working if collection is unavailable.
 
 Resource use is bounded: one sleeping ROS subscriber remains active and emits at the configured interval (10 seconds by default), memory is capped at 2,000 grid cells, and disk writes are coalesced to at most one every 30 seconds. Restarting the editor replaces the fixed-name collector instead of accumulating processes. No survey data or SSID is uploaded to GitHub or any external service.
+
+Reconnects react to Docker's container-start events for `open_mower_ros` rather than relying only on blind polling, so the collector resumes within moments of the ROS container coming back up. The poll loop still runs as a slow fallback in case the event stream itself drops, and logs its retry warning sparingly (first failure, then every 10th) instead of on every attempt — so a mower that's mid-boot or has the ROS stack stopped won't spam the logs.
 
 API endpoints:
 
