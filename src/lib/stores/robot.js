@@ -3,6 +3,7 @@ import { fetchRobotPose } from "../api.js";
 import { buildRobotHudLines } from "../robot/telemetry.js";
 import { notify, setStatus } from "./toast.js";
 import { handleLiveRobotFatal, ingestWifiPose } from "./wifi.js";
+import { clearRobotTrail, ingestRobotTrailPose } from "./robotTrail.js";
 
 const STORAGE_KEY = "openmower-map-editor-robot-live";
 const STREAM_URL = "/api/robot_pose/stream";
@@ -62,6 +63,7 @@ function handlePayload(data) {
   failCount = 0;
   robotPose.set(data);
   ingestWifiPose(data);
+  ingestRobotTrailPose(data);
 }
 
 // ---- SSE (primary) --------------------------------------------------------
@@ -160,6 +162,7 @@ export function setRobotLive(on) {
   } else {
     stop();
     robotPose.set(null);
+    clearRobotTrail();
     setStatus("Live robot overlay off.");
   }
 }

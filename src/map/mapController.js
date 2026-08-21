@@ -45,6 +45,7 @@ import { mowParams } from "../lib/stores/mowParams.js";
 import { robotLive, robotPose } from "../lib/stores/robot.js";
 import { exactPath } from "../lib/stores/exactPath.js";
 import { wifiMapEnabled, wifiSamples, wifiCellSizeM } from "../lib/stores/wifi.js";
+import { robotTrailEnabled, robotTrail } from "../lib/stores/robotTrail.js";
 import { wifiSignalColor } from "../lib/wifi/signal.js";
 import {
   resolveRobotVisualMode,
@@ -134,6 +135,7 @@ export function createMapController(container) {
     robot: null,
     exactPath: null,
     wifiHeat: [],
+    robotTrail: null,
   };
 
   // Local mirror of state read inside imperative handlers.
@@ -266,6 +268,27 @@ export function createMapController(container) {
         }).addTo(map)
       );
     }
+  }
+
+  /** Breadcrumb of recent live-robot positions — a lightweight "where has it been" trail. */
+  function renderRobotTrail(enabled, trail) {
+    if (layers.robotTrail) {
+      map.removeLayer(layers.robotTrail);
+      layers.robotTrail = null;
+    }
+    if (!enabled || !s.origin || !Array.isArray(trail) || trail.length < 2) return;
+
+    layers.robotTrail = L.polyline(
+      trail.map((p) => metersToLatLng(p, origin())),
+      {
+        color: cssVar("--accent-2", "#22d3ee"),
+        weight: 3,
+        opacity: 0.55,
+        lineCap: "round",
+        lineJoin: "round",
+        interactive: false,
+      }
+    ).addTo(map);
   }
 
   // Accurate mowing preview: uses the robot's real parameters — global params
@@ -993,6 +1016,7 @@ export function createMapController(container) {
         renderExactPath(get(exactPath));
       }
       renderWifiHeatmap(get(wifiMapEnabled), get(wifiSamples));
+      renderRobotTrail(get(robotTrailEnabled), get(robotTrail));
     })
   );
   unsubs.push(
@@ -1038,6 +1062,12 @@ export function createMapController(container) {
   );
   unsubs.push(
     wifiMapEnabled.subscribe((enabled) => renderWifiHeatmap(enabled, get(wifiSamples)))
+  );
+  unsubs.push(
+    robotTrail.subscribe((trail) => renderRobotTrail(get(robotTrailEnabled), trail))
+  );
+  unsubs.push(
+    robotTrailEnabled.subscribe((enabled) => renderRobotTrail(enabled, get(robotTrail)))
   );
   unsubs.push(coverageOn.subscribe(() => render()));
   unsubs.push(mowParams.subscribe(() => render()));
