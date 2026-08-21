@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.3.0 — Live movement trail
+
+A breadcrumb trail of the live robot's recent positions, so you can see where
+it's actually been, not just where it is right now — similar to the
+OpenMower app's live view.
+
+### Added
+- **Movement trail** — an optional overlay toggled from the **Live robot**
+  panel, drawn as a line on the map. Client-side only: points are kept while
+  **Live robot** is on, spaced at least 0.15 m apart (decoupling trail detail
+  from the ~48 Hz pose stream), and bounded to the last 10 minutes / 3,000
+  points regardless. Turning either **Live robot** or **Movement trail** off
+  clears it; a **Clear** button resets it manually. Shows a running point
+  count and elapsed span while active.
+
+### Changed
+- **Live robot's status dot removed** — its on/waiting/off color now lives on
+  the row's icon itself instead of a separate dot, matching how the WiFi
+  signal map and Movement trail rows already indicate state.
+
+### Internal
+- `src/lib/robot/trail.js` — pure, tested buffer helpers (`appendTrailPoint`,
+  `pruneTrail`) shared by the trail store; no server or API changes.
+
 ## v2.2.1 — WiFi heatmap cell-size fix
 
 The WiFi heatmap always rendered every sample dot at a hardcoded 2.2 m radius,

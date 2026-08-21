@@ -14,13 +14,28 @@
   } from "../lib/stores/wifi.js";
   import { wifiSignalColor } from "../lib/wifi/signal.js";
   import { notify } from "../lib/stores/toast.js";
+  import {
+    clearRobotTrail,
+    robotTrail,
+    robotTrailEnabled,
+    setRobotTrailEnabled,
+  } from "../lib/stores/robotTrail.js";
 
   $: ok = $robotLive && $robotPose?.ok;
   $: signalColor = wifiSignalColor($wifiSurveySummary.signalDbm);
+  $: trailSpanLabel = (() => {
+    if ($robotTrail.length < 2) return null;
+    const seconds = Math.round(($robotTrail[$robotTrail.length - 1].t - $robotTrail[0].t) / 1000);
+    return seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m`;
+  })();
 
   function toggleWifiMap() {
     const enabled = !$wifiMapEnabled;
     setWifiMapEnabled(enabled);
+  }
+
+  function toggleRobotTrail() {
+    setRobotTrailEnabled(!$robotTrailEnabled);
   }
 
   function formatBytes(bytes) {
@@ -44,10 +59,9 @@
   <div class="flex items-center justify-between gap-2">
     <div class="flex items-center gap-2 text-xs font-semibold">
       <span
-        class="inline-block h-2 w-2 rounded-full"
-        style="background:{ok ? 'var(--ok)' : $robotLive ? 'var(--warn)' : 'var(--subtle)'}"
-      ></span>
-      <span class="material-symbols-outlined" style="font-size:17px">radar</span>
+        class="material-symbols-outlined"
+        style="font-size:17px;color:{ok ? 'var(--ok)' : $robotLive ? 'var(--warn)' : 'var(--muted)'}"
+      >radar</span>
       Live robot
     </div>
     <button
@@ -132,6 +146,39 @@
           <button class="mt-2 text-[10px] text-subtle hover:text-ink" on:click={clearSurvey}>
             Clear shared survey
           </button>
+        {/if}
+      </div>
+    {/if}
+  </div>
+
+  <div class="mt-2 border-t pt-2" style="border-color:var(--glass-edge)">
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2 text-xs font-semibold">
+        <span
+          class="material-symbols-outlined"
+          style="font-size:17px;color:{$robotTrailEnabled ? 'var(--accent-2)' : 'var(--muted)'}"
+        >route</span>
+        Movement trail
+      </div>
+      <button
+        class="btn-icon !h-7 !w-7"
+        class:text-accent={$robotTrailEnabled}
+        title="Toggle movement trail"
+        on:click={toggleRobotTrail}
+      >
+        <span class="material-symbols-outlined" style="font-size:22px">
+          {$robotTrailEnabled ? "toggle_on" : "toggle_off"}
+        </span>
+      </button>
+    </div>
+
+    {#if $robotTrailEnabled}
+      <div transition:fade={{ duration: 140 }} class="mt-2 flex items-center justify-between text-[10px] text-subtle">
+        <span>
+          {$robotTrail.length} point{$robotTrail.length === 1 ? "" : "s"}{trailSpanLabel ? ` · last ${trailSpanLabel}` : ""}
+        </span>
+        {#if $robotTrail.length > 0}
+          <button class="hover:text-ink" on:click={() => clearRobotTrail()}>Clear</button>
         {/if}
       </div>
     {/if}
