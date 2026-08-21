@@ -231,14 +231,14 @@ Project layout:
 | `MAP_PATH` | `/data/ros/map.json` | Map file path (override for local dev) |
 | `PARAMS_PATH` | `/data/params/mower_params.yaml` | Params file path (override for local dev) |
 | `WIFI_MAP_PATH` | `/data/ros/wifi-signal-map.json` | Shared WiFi survey file |
-| `WIFI_MAP_CELL_SIZE_M` | `0.75` | Spatial cell size used to merge nearby readings |
-| `WIFI_MAP_MAX_POINTS` | `2000` | Hard upper bound for stored survey cells |
-| `WIFI_MAP_FLUSH_MS` | `30000` | Minimum delay between atomic disk writes |
-| `WIFI_MAP_COLLECTOR_INTERVAL_MS` | `10000` | Delay between autonomous WiFi samples (minimum 5 seconds) |
-| `WIFI_MAP_COLLECTOR_CELL_REVISIT_MS` | `300000` | Minimum age before a known cell may be recorded again |
+| `WIFI_MAP_CELL_SIZE_M` | `0.75` | Spatial cell size used to merge nearby readings (clamped to `0.25`–`5`) |
+| `WIFI_MAP_MAX_POINTS` | `2000` | Hard upper bound for stored survey cells (clamped to `100`–`10000`) |
+| `WIFI_MAP_FLUSH_MS` | `30000` | Minimum delay between atomic disk writes (clamped to `10000`–`300000`) |
+| `WIFI_MAP_COLLECTOR_INTERVAL_MS` | `10000` | Delay between autonomous WiFi samples (clamped to `5000`–`300000`) |
+| `WIFI_MAP_COLLECTOR_CELL_REVISIT_MS` | `300000` | Minimum age before a known cell may be recorded again (clamped to `60000`–`3600000`) |
 | `WIFI_MAP_COLLECTOR_DISABLE` | `0` | Set `1` to disable autonomous collection and use browser fallback |
 
-Inside the container the defaults match the bind mounts (`/data/ros`, `/data/params`); for local development point `MAP_PATH` / `PARAMS_PATH` at files in the repo.
+Inside the container the defaults match the bind mounts (`/data/ros`, `/data/params`); for local development point `MAP_PATH` / `PARAMS_PATH` at files in the repo. A `WIFI_MAP_*` value outside its clamped range is not silently ignored — the server logs a startup `WARN` naming the value it actually used instead.
 
 ## Security
 

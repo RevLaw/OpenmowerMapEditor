@@ -28,6 +28,13 @@ export const wifiSurveyStorage = writable({
     cellRevisitMs: 300000,
   },
 });
+/**
+ * Just the grid size, as its own store. wifiSurveyStorage gets a fresh object
+ * every sync (even on unchanged/notModified polls), so subscribing to it
+ * directly would re-render the heatmap every 15s for nothing; this derived
+ * store only notifies when the number itself actually changes.
+ */
+export const wifiCellSizeM = derived(wifiSurveyStorage, ($storage) => $storage?.cellSizeM || 0.75);
 
 wifiMapEnabled.subscribe((enabled) => {
   if (typeof localStorage !== "undefined") {

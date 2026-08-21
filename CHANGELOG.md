@@ -1,5 +1,35 @@
 # Changelog
 
+## v2.2.1 — WiFi heatmap cell-size fix
+
+The WiFi heatmap always rendered every sample dot at a hardcoded 2.2 m radius,
+so `WIFI_MAP_CELL_SIZE_M` had no visible effect no matter what it was set to
+— reported by a user who tried values from `0.75` down to `0.1` with zero
+visual change.
+
+### Fixed
+- **Heatmap dot size now follows the configured cell size** — the renderer
+  derives the dot radius from the server-reported `cellSizeM` instead of a
+  fixed constant (`radius = cellSizeM * 3`, chosen so the default `0.75 m`
+  setting still renders ~identically to the old hardcoded value — a no-op for
+  anyone who's never touched the setting).
+- **Out-of-range `WIFI_MAP_*` values are no longer silently clamped** — all
+  five numeric env vars (`WIFI_MAP_CELL_SIZE_M`, `WIFI_MAP_MAX_POINTS`,
+  `WIFI_MAP_FLUSH_MS`, `WIFI_MAP_COLLECTOR_INTERVAL_MS`,
+  `WIFI_MAP_COLLECTOR_CELL_REVISIT_MS`) now log a startup `WARN` naming the
+  value that was actually used when a setting falls outside its allowed
+  range — e.g. `WIFI_MAP_CELL_SIZE_M=0.1` now logs that it was clamped up to
+  the `0.25 m` minimum, instead of quietly doing nothing. Also fixes a latent
+  bug where explicitly setting a value to `0` was treated as "unset" and
+  silently replaced with the default, rather than being clamped to the
+  minimum like any other out-of-range value.
+
+### Internal
+- Heatmap re-renders are now triggered by a `cellSizeM`-specific derived
+  store instead of the whole `wifiSurveyStorage` object, so a routine 15s
+  survey poll no longer tears down and rebuilds every heatmap dot when
+  nothing about the grid actually changed.
+
 ## v2.2.0 — WiFi signal survey
 
 A shared, mower-side WiFi heatmap: the editor now records real radio signal strength
