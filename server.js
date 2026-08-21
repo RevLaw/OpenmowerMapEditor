@@ -13,29 +13,58 @@ const paramsPath = process.env.PARAMS_PATH || "/data/params/mower_params.yaml";
 const mapPath = process.env.MAP_PATH || "/data/ros/map.json";
 const mapDirectory = path.dirname(mapPath);
 const wifiMapPath = process.env.WIFI_MAP_PATH || path.join(mapDirectory, "wifi-signal-map.json");
-const wifiCellSizeM = Math.max(
-  0.25,
-  Math.min(5, Number(process.env.WIFI_MAP_CELL_SIZE_M) || 0.75)
-);
-const wifiMaxPoints = Math.max(
-  100,
-  Math.min(10000, Math.floor(Number(process.env.WIFI_MAP_MAX_POINTS) || 2000))
-);
-const wifiFlushMs = Math.max(
-  10000,
-  Math.min(300000, Math.floor(Number(process.env.WIFI_MAP_FLUSH_MS) || 30000))
-);
-const wifiCollectorIntervalMs = Math.max(
-  5000,
-  Math.min(300000, Math.floor(Number(process.env.WIFI_MAP_COLLECTOR_INTERVAL_MS) || 10000))
-);
-const wifiCollectorCellRevisitMs = Math.max(
-  60000,
-  Math.min(
-    3600000,
-    Math.floor(Number(process.env.WIFI_MAP_COLLECTOR_CELL_REVISIT_MS) || 300000)
-  )
-);
+
+/**
+ * Read a numeric env var, clamped to [min, max]. Unset/blank/invalid falls
+ * back to `fallback` silently; a value that parses but falls outside the
+ * allowed range is clamped and logged, so a mistaken setting (e.g. a cell
+ * size below the minimum) doesn't silently do nothing.
+ */
+function readClampedEnvNumber(envKey, { min, max, fallback, integer = false }) {
+  const raw = process.env[envKey];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    logWarn(`Ignoring invalid ${envKey}; using default`, { value: raw, default: fallback });
+    return fallback;
+  }
+  const requested = integer ? Math.floor(parsed) : parsed;
+  const clamped = Math.max(min, Math.min(max, requested));
+  if (clamped !== requested) {
+    logWarn(`${envKey} out of allowed range; clamped`, { requested, min, max, used: clamped });
+  }
+  return clamped;
+}
+
+const wifiCellSizeM = readClampedEnvNumber("WIFI_MAP_CELL_SIZE_M", {
+  min: 0.25,
+  max: 5,
+  fallback: 0.75,
+});
+const wifiMaxPoints = readClampedEnvNumber("WIFI_MAP_MAX_POINTS", {
+  min: 100,
+  max: 10000,
+  fallback: 2000,
+  integer: true,
+});
+const wifiFlushMs = readClampedEnvNumber("WIFI_MAP_FLUSH_MS", {
+  min: 10000,
+  max: 300000,
+  fallback: 30000,
+  integer: true,
+});
+const wifiCollectorIntervalMs = readClampedEnvNumber("WIFI_MAP_COLLECTOR_INTERVAL_MS", {
+  min: 5000,
+  max: 300000,
+  fallback: 10000,
+  integer: true,
+});
+const wifiCollectorCellRevisitMs = readClampedEnvNumber("WIFI_MAP_COLLECTOR_CELL_REVISIT_MS", {
+  min: 60000,
+  max: 3600000,
+  fallback: 300000,
+  integer: true,
+});
 const wifiCollectorDisabled =
   String(process.env.WIFI_MAP_COLLECTOR_DISABLE || "").trim() === "1";
 const distDir = path.join(__dirname, "dist");

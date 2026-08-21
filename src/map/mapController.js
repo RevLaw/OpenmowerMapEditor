@@ -44,7 +44,7 @@ import {
 import { mowParams } from "../lib/stores/mowParams.js";
 import { robotLive, robotPose } from "../lib/stores/robot.js";
 import { exactPath } from "../lib/stores/exactPath.js";
-import { wifiMapEnabled, wifiSamples } from "../lib/stores/wifi.js";
+import { wifiMapEnabled, wifiSamples, wifiCellSizeM } from "../lib/stores/wifi.js";
 import { wifiSignalColor } from "../lib/wifi/signal.js";
 import {
   resolveRobotVisualMode,
@@ -240,6 +240,11 @@ export function createMapController(container) {
     layers.wifiHeat = [];
     if (!enabled || !s.origin || !Array.isArray(samples)) return;
 
+    // Scaled off the server's configured grid cell (WIFI_MAP_CELL_SIZE_M) so a
+    // coarser/finer setting is actually visible; 3x keeps the default (0.75m)
+    // look identical to the old hardcoded 2.2 radius.
+    const radius = get(wifiCellSizeM) * 3;
+
     for (const sample of samples) {
       if (
         !Number.isFinite(sample?.x) ||
@@ -252,7 +257,7 @@ export function createMapController(container) {
         L.circle(metersToLatLng(sample, origin()), {
           pane: "wifiHeatPane",
           renderer: wifiRenderer,
-          radius: 2.2,
+          radius,
           stroke: false,
           fill: true,
           fillColor: wifiSignalColor(sample.signalDbm),
@@ -1027,6 +1032,9 @@ export function createMapController(container) {
   unsubs.push(robotLive.subscribe((live) => renderRobot(live, get(robotPose))));
   unsubs.push(
     wifiSamples.subscribe((samples) => renderWifiHeatmap(get(wifiMapEnabled), samples))
+  );
+  unsubs.push(
+    wifiCellSizeM.subscribe(() => renderWifiHeatmap(get(wifiMapEnabled), get(wifiSamples)))
   );
   unsubs.push(
     wifiMapEnabled.subscribe((enabled) => renderWifiHeatmap(enabled, get(wifiSamples)))
