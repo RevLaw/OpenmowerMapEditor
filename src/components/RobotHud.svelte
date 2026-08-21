@@ -59,10 +59,9 @@
   <div class="flex items-center justify-between gap-2">
     <div class="flex items-center gap-2 text-xs font-semibold">
       <span
-        class="inline-block h-2 w-2 rounded-full"
-        style="background:{ok ? 'var(--ok)' : $robotLive ? 'var(--warn)' : 'var(--subtle)'}"
-      ></span>
-      <span class="material-symbols-outlined" style="font-size:17px">radar</span>
+        class="material-symbols-outlined"
+        style="font-size:17px;color:{ok ? 'var(--ok)' : $robotLive ? 'var(--warn)' : 'var(--muted)'}"
+      >radar</span>
       Live robot
     </div>
     <button
