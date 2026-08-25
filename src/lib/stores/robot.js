@@ -2,7 +2,7 @@ import { writable, derived, get } from "svelte/store";
 import { fetchRobotPose } from "../api.js";
 import { buildRobotHudLines } from "../robot/telemetry.js";
 import { notify, setStatus } from "./toast.js";
-import { handleLiveRobotFatal, ingestWifiPose } from "./wifi.js";
+import { ingestWifiPose } from "./wifi.js";
 import { clearRobotTrail, ingestRobotTrailPose } from "./robotTrail.js";
 
 const STORAGE_KEY = "openmower-map-editor-robot-live";
@@ -47,11 +47,14 @@ function ready() {
 }
 
 function handlePayload(data) {
+  // A response can land after the user has already toggled Live robot off
+  // (in-flight poll/SSE frame racing the click) — ignore it rather than
+  // reprocessing a fatal error for a feed nobody wants anymore.
+  if (!get(robotLive)) return;
   if (!data || !data.ok) {
     if (data && data.liveRobotFatal) {
       setRobotLive(false);
       notify(`Live robot: ${data.error || "unavailable"}`, "warn");
-      handleLiveRobotFatal(data.error);
       return;
     }
     failCount += 1;

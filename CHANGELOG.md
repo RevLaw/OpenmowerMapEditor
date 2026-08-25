@@ -1,5 +1,64 @@
 # Changelog
 
+## v2.4.0 — Persisted movement trail & shared capture toggles
+
+The movement trail is now saved to the mower like the WiFi survey already
+was, and both features get the same on/off model: a main toggle that starts
+or stops recording (shared, persisted, affects every browser), and a nested
+toggle that only controls whether *this browser* draws the overlay.
+
+### Added
+- **Persisted movement trail** — the mower now records its own position
+  history to a shared file (`ROBOT_TRAIL_PATH`, default
+  `/data/ros/movement-trail.json`), autonomously and independent of any
+  single browser, mirroring the WiFi survey's collector. New
+  `GET/POST /api/robot-trail`, `POST /api/robot-trail/capture`, and
+  `DELETE /api/robot-trail` endpoints. Points are spaced at least
+  `ROBOT_TRAIL_MIN_DISTANCE_M` apart and capped at `ROBOT_TRAIL_MAX_POINTS`.
+  The saved history renders as a dashed line, with breaks shown wherever the
+  gap between consecutive points exceeds two minutes.
+- **Shared capture toggles for WiFi signal map and movement trail** — each
+  panel's main toggle now starts/stops that feature's server-side capture
+  (persists across restarts, shared by every browser) instead of being a
+  local display preference. A nested toggle, shown once capture is on,
+  independently controls whether this browser overlays it on the map. Both
+  panels get a matching **Clear** button under their overlay toggle.
+
+### Fixed
+- **Turning off Live robot no longer disables the WiFi signal map** —
+  Live robot's fatal-pose handler used to force the WiFi toggle off as a
+  side effect, back when that toggle was a harmless local preference; now
+  that it's a shared, persisted capture switch, a single browser's transient
+  pose failure was incorrectly shutting off WiFi capture for everyone. The
+  cascade is removed; a stale in-flight pose response can also no longer
+  clobber a more recent manual toggle.
+- **WiFi icon color now matches the on/off convention used everywhere else**
+  — it was reading a dynamic signal-strength color instead of the shared
+  on/off color, so it rendered a visibly different green than the Live robot
+  and Movement trail icons even when all three were "on."
+- **Zoom controls can no longer end up hidden behind the mower-control /
+  tool-dock stack** — that stack is now coordinated live with the robot HUD
+  above it: as the HUD grows, the stack is pushed down, then reflowed to two
+  columns, and only as a last resort does the HUD itself start scrolling —
+  in every case the zoom buttons' bottom-right position is treated as a hard
+  boundary the stack may never be pushed into.
+
+### Changed
+- **"Clear" buttons unified** — the WiFi survey's and movement trail's clear
+  buttons now share the same label, placement (directly under their overlay
+  toggle), and right-aligned style, instead of the WiFi one looking
+  different from the trail one.
+
+### Internal
+- `atomicWriteOwnedFile` / `backupBeforeClear` helpers extracted in
+  `server.js`, replacing byte-for-byte duplicated tmp-write/chown/rename and
+  copy-before-clear logic that the WiFi survey and movement-trail flush/clear
+  paths had each implemented separately.
+- New `ROBOT_TRAIL_PATH`, `ROBOT_TRAIL_MIN_DISTANCE_M`,
+  `ROBOT_TRAIL_MAX_POINTS`, `ROBOT_TRAIL_FLUSH_MS`,
+  `ROBOT_TRAIL_COLLECTOR_DISABLE` env vars, documented in the README
+  alongside the existing `WIFI_MAP_*` ones.
+
 ## v2.3.0 — Live movement trail
 
 A breadcrumb trail of the live robot's recent positions, so you can see where

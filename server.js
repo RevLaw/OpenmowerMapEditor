@@ -67,6 +67,29 @@ const wifiCollectorCellRevisitMs = readClampedEnvNumber("WIFI_MAP_COLLECTOR_CELL
 });
 const wifiCollectorDisabled =
   String(process.env.WIFI_MAP_COLLECTOR_DISABLE || "").trim() === "1";
+
+const robotTrailHistoryPath =
+  process.env.ROBOT_TRAIL_PATH || path.join(mapDirectory, "movement-trail.json");
+const robotTrailMinDistanceM = readClampedEnvNumber("ROBOT_TRAIL_MIN_DISTANCE_M", {
+  min: 0.05,
+  max: 5,
+  fallback: 0.15,
+});
+const robotTrailMaxPoints = readClampedEnvNumber("ROBOT_TRAIL_MAX_POINTS", {
+  min: 1000,
+  max: 200000,
+  fallback: 20000,
+  integer: true,
+});
+const robotTrailFlushMs = readClampedEnvNumber("ROBOT_TRAIL_FLUSH_MS", {
+  min: 10000,
+  max: 300000,
+  fallback: 30000,
+  integer: true,
+});
+const robotTrailCollectorDisabled =
+  String(process.env.ROBOT_TRAIL_COLLECTOR_DISABLE || "").trim() === "1";
+
 const distDir = path.join(__dirname, "dist");
 const dockerSocketPath = process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock";
 const restartContainerName = process.env.OPENMOWER_CONTAINER_NAME || "open_mower_ros";
@@ -124,6 +147,10 @@ let wifiCollectorLineBuffer = "";
 let wifiCollectorReconnectDelayMs = 1000;
 let wifiCollectorInFlight = false;
 let wifiCollectorStopped = false;
+/** Runtime on/off, distinct from WIFI_MAP_COLLECTOR_DISABLE (a hard config kill-switch
+ * with no override). Persisted; defaults to true so upgrading an existing deployment
+ * doesn't silently stop a collector that was already running autonomously. */
+let wifiCaptureEnabled = true;
 let wifiCollectorSuccessCount = 0;
 let wifiCollectorFailureCount = 0;
 let wifiCollectorStoredCount = 0;
@@ -134,6 +161,20 @@ let wifiCollectorLastInterface = null;
 let wifiCollectorLastDurationMs = null;
 let wifiCollectorLastError = null;
 let wifiMapBoundsCache = { expiresAt: 0, bounds: null };
+
+const robotTrailHistory = []; // ordered [{x, y, t}], oldest first
+let robotTrailHistoryLoaded = false;
+let robotTrailHistoryLoadPromise = null;
+let robotTrailHistoryDirty = false;
+let robotTrailHistoryFlushTimer = null;
+let robotTrailHistoryFlushPromise = null;
+let robotTrailHistoryRevision = 0;
+let robotTrailHistoryUpdatedAt = null;
+let robotTrailHistoryLastBytes = 0;
+/** Runtime on/off, distinct from ROBOT_TRAIL_COLLECTOR_DISABLE (a hard config kill-switch
+ * with no override). This is the shared, persisted state the "Movement trail" toggle
+ * controls from any browser — off by default until a user explicitly starts it. */
+let robotTrailCaptureEnabled = false;
 
 function wifiCellKey(x, y) {
   return `${Math.round(x / wifiCellSizeM)},${Math.round(y / wifiCellSizeM)}`;
@@ -270,6 +311,7 @@ async function ensureWifiSurveyLoaded() {
         });
       }
       wifiSurveyUpdatedAt = Number(parsed?.updatedAt) || null;
+      wifiCaptureEnabled = parsed?.captureEnabled !== false;
       wifiSurveyRevision = 1;
       logInfo("Loaded central WiFi survey", {
         file: wifiMapPath,
@@ -297,6 +339,7 @@ function wifiSurveyPayload() {
     cellSizeM: wifiCellSizeM,
     maxPoints: wifiMaxPoints,
     updatedAt: wifiSurveyUpdatedAt,
+    captureEnabled: wifiCaptureEnabled,
     samples: [...wifiSurvey.values()],
   };
 }
@@ -314,6 +357,30 @@ async function applyMowerFileOwnership(filePath) {
   await fs.chmod(filePath, 0o664);
 }
 
+/** Write-tmp-then-rename, owned like the mower map files. Shared by every
+ * persisted store (WiFi survey, trail history) so a crash mid-write never
+ * leaves a half-written file at the real path. */
+async function atomicWriteOwnedFile(targetPath, payload) {
+  const temporaryPath = `${targetPath}.tmp`;
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.writeFile(temporaryPath, payload, "utf8");
+  await applyMowerFileOwnership(temporaryPath);
+  await fs.rename(temporaryPath, targetPath);
+}
+
+/** Copy a persisted store to `<path>.bak-clear` before wiping it, so a clear
+ * has a one-shot undo. Missing source (nothing persisted yet) is fine. */
+async function backupBeforeClear(targetPath) {
+  const backupPath = `${targetPath}.bak-clear`;
+  try {
+    await fs.copyFile(targetPath, backupPath);
+    await applyMowerFileOwnership(backupPath);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return backupPath;
+}
+
 async function flushWifiSurvey(forceAll = false) {
   if (wifiSurveyFlushTimer) {
     clearTimeout(wifiSurveyFlushTimer);
@@ -328,11 +395,7 @@ async function flushWifiSurvey(forceAll = false) {
   const flushRevision = wifiSurveyRevision;
   wifiSurveyFlushPromise = (async () => {
     const payload = JSON.stringify(wifiSurveyPayload());
-    const temporaryPath = `${wifiMapPath}.tmp`;
-    await fs.mkdir(path.dirname(wifiMapPath), { recursive: true });
-    await fs.writeFile(temporaryPath, payload, "utf8");
-    await applyMowerFileOwnership(temporaryPath);
-    await fs.rename(temporaryPath, wifiMapPath);
+    await atomicWriteOwnedFile(wifiMapPath, payload);
     wifiSurveyLastBytes = Buffer.byteLength(payload, "utf8");
     wifiSurveyDirty = wifiSurveyRevision !== flushRevision;
     logInfo("Flushed central WiFi survey", {
@@ -379,6 +442,7 @@ function wifiSurveyMeta() {
       fileBytes: wifiSurveyLastBytes,
       collector: {
         enabled: !wifiCollectorDisabled && !poseDisabled,
+        capturing: wifiCaptureEnabled && !wifiCollectorDisabled && !poseDisabled,
         intervalMs: wifiCollectorIntervalMs,
         cellRevisitMs: wifiCollectorCellRevisitMs,
         inFlight: wifiCollectorInFlight,
@@ -391,6 +455,174 @@ function wifiSurveyMeta() {
         lastInterface: wifiCollectorLastInterface,
         lastDurationMs: wifiCollectorLastDurationMs,
         lastError: wifiCollectorLastError,
+      },
+    },
+  };
+}
+
+/**
+ * Append a live pose to the persisted trail history if it's moved far enough
+ * from the last kept point. Order matters here (unlike the WiFi survey's
+ * spatial cell merge) — this is a path, not a set of location samples, so
+ * points are never merged or averaged, only throttled by distance and capped
+ * by count (oldest dropped first).
+ */
+function appendRobotTrailPoint(x, y, timestamp = Date.now(), markDirty = true) {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || Math.abs(x) > 100000 || Math.abs(y) > 100000) {
+    return false;
+  }
+  const last = robotTrailHistory[robotTrailHistory.length - 1];
+  if (last) {
+    const dx = x - last.x;
+    const dy = y - last.y;
+    if (Math.sqrt(dx * dx + dy * dy) < robotTrailMinDistanceM) return false;
+  }
+  robotTrailHistory.push({ x: Number(x.toFixed(3)), y: Number(y.toFixed(3)), t: timestamp });
+  if (robotTrailHistory.length > robotTrailMaxPoints) {
+    robotTrailHistory.splice(0, robotTrailHistory.length - robotTrailMaxPoints);
+  }
+  if (markDirty) {
+    robotTrailHistoryDirty = true;
+    robotTrailHistoryRevision += 1;
+    robotTrailHistoryUpdatedAt = timestamp;
+    scheduleRobotTrailHistoryFlush();
+  }
+  return true;
+}
+
+/** Fed by the persistent live-pose subscriber; no-op unless capture is actually on. */
+function ingestLiveTrailPoint(x, y) {
+  if (robotTrailCollectorDisabled || !robotTrailCaptureEnabled || !robotTrailHistoryLoaded) return;
+  appendRobotTrailPoint(x, y);
+}
+
+/** Starts/stops capture (shared across every browser); resumes the pose subscriber
+ * immediately if turning on, and releases it immediately if nothing else needs it. */
+function setRobotTrailCaptureEnabled(enabled) {
+  robotTrailCaptureEnabled = Boolean(enabled);
+  robotTrailHistoryDirty = true;
+  robotTrailHistoryRevision += 1;
+  robotTrailHistoryUpdatedAt = Date.now();
+  scheduleRobotTrailHistoryFlush();
+  if (robotTrailCaptureEnabled) {
+    ensureRobotStream().catch(() => {});
+  } else if (!streamStillWanted()) {
+    stopRobotStream().catch(() => {});
+  }
+}
+
+async function ensureRobotTrailHistoryLoaded() {
+  if (robotTrailHistoryLoaded) return;
+  if (robotTrailHistoryLoadPromise) return robotTrailHistoryLoadPromise;
+  robotTrailHistoryLoadPromise = (async () => {
+    try {
+      const content = await fs.readFile(robotTrailHistoryPath, "utf8");
+      robotTrailHistoryLastBytes = Buffer.byteLength(content, "utf8");
+      const parsed = JSON.parse(content);
+      const points = Array.isArray(parsed?.points) ? parsed.points.slice(-robotTrailMaxPoints) : [];
+      for (const point of points) {
+        const x = Number(point?.x);
+        const y = Number(point?.y);
+        const t = Number(point?.t);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        robotTrailHistory.push({ x, y, t: Number.isFinite(t) ? t : Date.now() });
+      }
+      robotTrailHistoryUpdatedAt = Number(parsed?.updatedAt) || null;
+      robotTrailCaptureEnabled = parsed?.captureEnabled === true;
+      robotTrailHistoryRevision = 1;
+      logInfo("Loaded robot movement trail history", {
+        file: robotTrailHistoryPath,
+        points: robotTrailHistory.length,
+        bytes: robotTrailHistoryLastBytes,
+      });
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        logWarn("Failed to load robot movement trail history; starting empty", {
+          file: robotTrailHistoryPath,
+          error: error.message,
+        });
+      }
+    } finally {
+      robotTrailHistoryLoaded = true;
+      robotTrailHistoryLoadPromise = null;
+    }
+  })();
+  return robotTrailHistoryLoadPromise;
+}
+
+function robotTrailHistoryPayload() {
+  return {
+    version: 1,
+    minDistanceM: robotTrailMinDistanceM,
+    maxPoints: robotTrailMaxPoints,
+    updatedAt: robotTrailHistoryUpdatedAt,
+    captureEnabled: robotTrailCaptureEnabled,
+    points: robotTrailHistory,
+  };
+}
+
+async function flushRobotTrailHistory(forceAll = false) {
+  if (robotTrailHistoryFlushTimer) {
+    clearTimeout(robotTrailHistoryFlushTimer);
+    robotTrailHistoryFlushTimer = null;
+  }
+  if (robotTrailHistoryFlushPromise) {
+    await robotTrailHistoryFlushPromise;
+    if (forceAll && robotTrailHistoryDirty) return flushRobotTrailHistory(true);
+    return;
+  }
+  if (!robotTrailHistoryLoaded || !robotTrailHistoryDirty) return;
+  const flushRevision = robotTrailHistoryRevision;
+  robotTrailHistoryFlushPromise = (async () => {
+    const payload = JSON.stringify(robotTrailHistoryPayload());
+    await atomicWriteOwnedFile(robotTrailHistoryPath, payload);
+    robotTrailHistoryLastBytes = Buffer.byteLength(payload, "utf8");
+    robotTrailHistoryDirty = robotTrailHistoryRevision !== flushRevision;
+    logInfo("Flushed robot movement trail history", {
+      file: robotTrailHistoryPath,
+      points: robotTrailHistory.length,
+      bytes: robotTrailHistoryLastBytes,
+    });
+  })();
+  try {
+    await robotTrailHistoryFlushPromise;
+  } finally {
+    robotTrailHistoryFlushPromise = null;
+  }
+  if (robotTrailHistoryDirty) {
+    if (forceAll) return flushRobotTrailHistory(true);
+    scheduleRobotTrailHistoryFlush();
+  }
+}
+
+function scheduleRobotTrailHistoryFlush() {
+  if (robotTrailHistoryFlushTimer) return;
+  robotTrailHistoryFlushTimer = setTimeout(() => {
+    flushRobotTrailHistory().catch((error) => {
+      logError("Failed to flush robot movement trail history", {
+        file: robotTrailHistoryPath,
+        error: error.message,
+      });
+      if (robotTrailHistoryDirty) scheduleRobotTrailHistoryFlush();
+    });
+  }, robotTrailFlushMs);
+  robotTrailHistoryFlushTimer.unref?.();
+}
+
+function robotTrailHistoryMeta() {
+  return {
+    revision: robotTrailHistoryRevision,
+    pointCount: robotTrailHistory.length,
+    updatedAt: robotTrailHistoryUpdatedAt,
+    storage: {
+      central: true,
+      minDistanceM: robotTrailMinDistanceM,
+      maxPoints: robotTrailMaxPoints,
+      flushIntervalMs: robotTrailFlushMs,
+      fileBytes: robotTrailHistoryLastBytes,
+      collector: {
+        enabled: !robotTrailCollectorDisabled && !poseDisabled,
+        capturing: robotTrailCaptureEnabled && !robotTrailCollectorDisabled && !poseDisabled,
       },
     },
   };
@@ -1599,17 +1831,41 @@ async function ensureAutonomousWifiCollector() {
   }
 }
 
+/** Loads the persisted survey (for its captureEnabled flag), then resumes
+ * the collector if it was left on before restart. */
 function startAutonomousWifiCollector() {
   if (wifiCollectorDisabled || poseDisabled) {
-    logInfo("Autonomous WiFi collector disabled", { wifiCollectorDisabled, poseDisabled });
+    logInfo("Autonomous WiFi collector unavailable", { wifiCollectorDisabled, poseDisabled });
     return;
   }
-  wifiCollectorStopped = false;
-  logInfo("Autonomous WiFi collector enabled", {
-    intervalMs: wifiCollectorIntervalMs,
-    cellRevisitMs: wifiCollectorCellRevisitMs,
-  });
-  ensureAutonomousWifiCollector();
+  ensureWifiSurveyLoaded()
+    .then(() => {
+      wifiCollectorStopped = !wifiCaptureEnabled;
+      logInfo("Autonomous WiFi collector ready", {
+        capturing: wifiCaptureEnabled,
+        intervalMs: wifiCollectorIntervalMs,
+        cellRevisitMs: wifiCollectorCellRevisitMs,
+      });
+      if (wifiCaptureEnabled) ensureAutonomousWifiCollector();
+    })
+    .catch((error) => {
+      logWarn("Failed to prepare autonomous WiFi collector", { error: error.message });
+    });
+}
+
+/** Starts/stops WiFi capture (shared across every browser). */
+function setWifiCaptureEnabled(enabled) {
+  wifiCaptureEnabled = Boolean(enabled);
+  wifiSurveyDirty = true;
+  wifiSurveyRevision += 1;
+  wifiSurveyUpdatedAt = Date.now();
+  scheduleWifiSurveyFlush();
+  if (wifiCaptureEnabled) {
+    wifiCollectorStopped = false;
+    ensureAutonomousWifiCollector();
+  } else {
+    stopAutonomousWifiCollector().catch(() => {});
+  }
 }
 
 async function stopAutonomousWifiCollector() {
@@ -1727,10 +1983,33 @@ function watchPoseContainerEvents() {
 }
 
 function startPoseContainerEventWatcher() {
-  if (poseDisabled && wifiCollectorDisabled) return;
+  if (poseDisabled && wifiCollectorDisabled && robotTrailCollectorDisabled) return;
   dockerEventsStopped = false;
   dockerEventsReconnectDelayMs = 2000;
   watchPoseContainerEvents();
+}
+
+/** Loads persisted trail history and resumes capture if it was left on before restart. */
+function startAutonomousTrailCapture() {
+  if (robotTrailCollectorDisabled || poseDisabled) {
+    logInfo("Movement-trail capture unavailable", {
+      robotTrailCollectorDisabled,
+      poseDisabled,
+    });
+    return;
+  }
+  ensureRobotTrailHistoryLoaded()
+    .then(() => {
+      logInfo("Movement-trail capture ready", {
+        capturing: robotTrailCaptureEnabled,
+        minDistanceM: robotTrailMinDistanceM,
+        maxPoints: robotTrailMaxPoints,
+      });
+      if (robotTrailCaptureEnabled) return ensureRobotStream();
+    })
+    .catch((error) => {
+      logWarn("Failed to prepare movement-trail capture", { error: error.message });
+    });
 }
 
 function stopPoseContainerEventWatcher() {
@@ -1982,6 +2261,7 @@ function handleStreamLine(line) {
       robotStream.pose = { x: msg.x, y: msg.y, yaw: msg.yaw, acc: msg.acc, flags: msg.flags };
       robotStream.poseAt = Date.now();
       broadcastLivePose();
+      ingestLiveTrailPoint(msg.x, msg.y);
     }
     return;
   }
@@ -2016,10 +2296,12 @@ function scheduleStreamReconnect() {
   }, delay);
 }
 
-/** Do we still need the subscriber running (SSE clients, or a recent poller)? */
+/** Do we still need the subscriber running (SSE clients, a recent poller, or autonomous trail capture)? */
 function streamStillWanted() {
   return (
-    robotStream.clients.size > 0 || Date.now() - robotStream.lastPollAt < liveStreamFreshMs * 3
+    robotStream.clients.size > 0 ||
+    Date.now() - robotStream.lastPollAt < liveStreamFreshMs * 3 ||
+    (robotTrailCaptureEnabled && !robotTrailCollectorDisabled && !poseDisabled)
   );
 }
 
@@ -2478,6 +2760,28 @@ app.get("/api/wifi-map", async (req, res) => {
   }
 });
 
+app.post("/api/wifi-map/capture", async (req, res) => {
+  try {
+    await ensureWifiSurveyLoaded();
+    if (wifiCollectorDisabled || poseDisabled) {
+      return res.status(409).json({
+        ok: false,
+        error: wifiCollectorDisabled
+          ? "WiFi capture is disabled (WIFI_MAP_COLLECTOR_DISABLE=1)"
+          : "Live robot pose is disabled (OPENMOWER_POSE_DISABLE=1)",
+      });
+    }
+    const enabled = req.body?.enabled === true;
+    setWifiCaptureEnabled(enabled);
+    await flushWifiSurvey(true);
+    logInfo(enabled ? "WiFi capture started" : "WiFi capture stopped", {});
+    return res.json({ ok: true, ...wifiSurveyMeta() });
+  } catch (error) {
+    logError("Failed to toggle WiFi capture", { error: error.message });
+    return res.status(500).json({ ok: false, error: "Failed to toggle WiFi capture" });
+  }
+});
+
 app.post("/api/wifi-map/samples", async (req, res) => {
   try {
     await ensureWifiSurveyLoaded();
@@ -2510,13 +2814,7 @@ app.delete("/api/wifi-map", async (_req, res) => {
   try {
     await ensureWifiSurveyLoaded();
     await flushWifiSurvey(true);
-    const clearBackupPath = `${wifiMapPath}.bak-clear`;
-    try {
-      await fs.copyFile(wifiMapPath, clearBackupPath);
-      await applyMowerFileOwnership(clearBackupPath);
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
+    const clearBackupPath = await backupBeforeClear(wifiMapPath);
     logWarn("Clearing central WiFi survey", {
       points: wifiSurvey.size,
       backup: clearBackupPath,
@@ -2530,6 +2828,64 @@ app.delete("/api/wifi-map", async (_req, res) => {
   } catch (error) {
     logError("Failed to clear central WiFi survey", { error: error.message });
     return res.status(500).json({ ok: false, error: "Failed to clear WiFi survey" });
+  }
+});
+
+app.get("/api/robot-trail", async (req, res) => {
+  try {
+    await ensureRobotTrailHistoryLoaded();
+    const knownRevision = Number(req.query.revision);
+    res.setHeader("Cache-Control", "no-store");
+    if (Number.isFinite(knownRevision) && knownRevision === robotTrailHistoryRevision) {
+      return res.json({ ok: true, notModified: true, ...robotTrailHistoryMeta() });
+    }
+    return res.json({ ok: true, ...robotTrailHistoryMeta(), points: robotTrailHistory });
+  } catch (error) {
+    logError("Failed to read robot movement trail history", { error: error.message });
+    return res.status(500).json({ ok: false, error: "Failed to read movement trail history" });
+  }
+});
+
+app.post("/api/robot-trail/capture", async (req, res) => {
+  try {
+    await ensureRobotTrailHistoryLoaded();
+    if (robotTrailCollectorDisabled || poseDisabled) {
+      return res.status(409).json({
+        ok: false,
+        error: robotTrailCollectorDisabled
+          ? "Movement-trail capture is disabled (ROBOT_TRAIL_COLLECTOR_DISABLE=1)"
+          : "Live robot pose is disabled (OPENMOWER_POSE_DISABLE=1)",
+      });
+    }
+    const enabled = req.body?.enabled === true;
+    setRobotTrailCaptureEnabled(enabled);
+    await flushRobotTrailHistory(true);
+    logInfo(enabled ? "Movement-trail capture started" : "Movement-trail capture stopped", {});
+    return res.json({ ok: true, ...robotTrailHistoryMeta() });
+  } catch (error) {
+    logError("Failed to toggle movement-trail capture", { error: error.message });
+    return res.status(500).json({ ok: false, error: "Failed to toggle movement-trail capture" });
+  }
+});
+
+app.delete("/api/robot-trail", async (_req, res) => {
+  try {
+    await ensureRobotTrailHistoryLoaded();
+    await flushRobotTrailHistory(true);
+    const clearBackupPath = await backupBeforeClear(robotTrailHistoryPath);
+    logWarn("Clearing robot movement trail history", {
+      points: robotTrailHistory.length,
+      backup: clearBackupPath,
+    });
+    robotTrailHistory.length = 0;
+    robotTrailHistoryDirty = true;
+    robotTrailHistoryRevision += 1;
+    robotTrailHistoryUpdatedAt = Date.now();
+    await flushRobotTrailHistory(true);
+    return res.json({ ok: true, ...robotTrailHistoryMeta() });
+  } catch (error) {
+    logError("Failed to clear robot movement trail history", { error: error.message });
+    return res.status(500).json({ ok: false, error: "Failed to clear movement trail history" });
   }
 });
 
@@ -2701,9 +3057,15 @@ const server = app.listen(port, () => {
     wifiCollectorIntervalMs,
     wifiCollectorCellRevisitMs,
     wifiCollectorDisabled,
+    robotTrailHistoryPath,
+    robotTrailMinDistanceM,
+    robotTrailMaxPoints,
+    robotTrailFlushMs,
+    robotTrailCollectorDisabled,
   });
   startAutonomousWifiCollector();
   startPoseContainerEventWatcher();
+  startAutonomousTrailCapture();
 });
 
 let shuttingDown = false;
@@ -2718,6 +3080,11 @@ async function shutdown(signal) {
     await flushWifiSurvey(true);
   } catch (error) {
     logError("Final WiFi survey flush failed", { error: error.message });
+  }
+  try {
+    await flushRobotTrailHistory(true);
+  } catch (error) {
+    logError("Final movement trail history flush failed", { error: error.message });
   }
   process.exit(0);
 }

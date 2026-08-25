@@ -44,8 +44,13 @@ import {
 import { mowParams } from "../lib/stores/mowParams.js";
 import { robotLive, robotPose } from "../lib/stores/robot.js";
 import { exactPath } from "../lib/stores/exactPath.js";
-import { wifiMapEnabled, wifiSamples, wifiCellSizeM } from "../lib/stores/wifi.js";
-import { robotTrailEnabled, robotTrail } from "../lib/stores/robotTrail.js";
+import { wifiOverlayEnabled, wifiSamples, wifiCellSizeM } from "../lib/stores/wifi.js";
+import {
+  robotTrailEnabled,
+  robotTrail,
+  robotTrailHistoryEnabled,
+  robotTrailHistoryPoints,
+} from "../lib/stores/robotTrail.js";
 import { wifiSignalColor } from "../lib/wifi/signal.js";
 import {
   resolveRobotVisualMode,
@@ -136,6 +141,7 @@ export function createMapController(container) {
     exactPath: null,
     wifiHeat: [],
     robotTrail: null,
+    robotTrailHistory: [],
   };
 
   // Local mirror of state read inside imperative handlers.
@@ -289,6 +295,42 @@ export function createMapController(container) {
         interactive: false,
       }
     ).addTo(map);
+  }
+
+  // Persisted, mower-side trail history: breaks into separate segments across
+  // large time gaps (e.g. the mower was picked up/transported between
+  // sessions) instead of drawing a straight teleport line between them.
+  const TRAIL_HISTORY_SEGMENT_GAP_MS = 120000;
+
+  function drawTrailHistorySegment(segment) {
+    return L.polyline(
+      segment.map((p) => metersToLatLng(p, origin())),
+      {
+        color: cssVar("--subtle", "#94a3b8"),
+        weight: 2,
+        opacity: 0.45,
+        dashArray: "1,6",
+        lineCap: "round",
+        interactive: false,
+      }
+    ).addTo(map);
+  }
+
+  function renderRobotTrailHistory(enabled, points) {
+    layers.robotTrailHistory.forEach((layer) => map.removeLayer(layer));
+    layers.robotTrailHistory = [];
+    if (!enabled || !s.origin || !Array.isArray(points) || points.length < 2) return;
+
+    let segment = [points[0]];
+    for (let i = 1; i < points.length; i += 1) {
+      const gap = (points[i]?.t ?? 0) - (points[i - 1]?.t ?? 0);
+      if (gap > TRAIL_HISTORY_SEGMENT_GAP_MS) {
+        if (segment.length >= 2) layers.robotTrailHistory.push(drawTrailHistorySegment(segment));
+        segment = [];
+      }
+      segment.push(points[i]);
+    }
+    if (segment.length >= 2) layers.robotTrailHistory.push(drawTrailHistorySegment(segment));
   }
 
   // Accurate mowing preview: uses the robot's real parameters — global params
@@ -1015,8 +1057,9 @@ export function createMapController(container) {
         prevOriginKey = key;
         renderExactPath(get(exactPath));
       }
-      renderWifiHeatmap(get(wifiMapEnabled), get(wifiSamples));
+      renderWifiHeatmap(get(wifiOverlayEnabled), get(wifiSamples));
       renderRobotTrail(get(robotTrailEnabled), get(robotTrail));
+      renderRobotTrailHistory(get(robotTrailHistoryEnabled), get(robotTrailHistoryPoints));
     })
   );
   unsubs.push(
@@ -1055,19 +1098,29 @@ export function createMapController(container) {
   );
   unsubs.push(robotLive.subscribe((live) => renderRobot(live, get(robotPose))));
   unsubs.push(
-    wifiSamples.subscribe((samples) => renderWifiHeatmap(get(wifiMapEnabled), samples))
+    wifiSamples.subscribe((samples) => renderWifiHeatmap(get(wifiOverlayEnabled), samples))
   );
   unsubs.push(
-    wifiCellSizeM.subscribe(() => renderWifiHeatmap(get(wifiMapEnabled), get(wifiSamples)))
+    wifiCellSizeM.subscribe(() => renderWifiHeatmap(get(wifiOverlayEnabled), get(wifiSamples)))
   );
   unsubs.push(
-    wifiMapEnabled.subscribe((enabled) => renderWifiHeatmap(enabled, get(wifiSamples)))
+    wifiOverlayEnabled.subscribe((enabled) => renderWifiHeatmap(enabled, get(wifiSamples)))
   );
   unsubs.push(
     robotTrail.subscribe((trail) => renderRobotTrail(get(robotTrailEnabled), trail))
   );
   unsubs.push(
     robotTrailEnabled.subscribe((enabled) => renderRobotTrail(enabled, get(robotTrail)))
+  );
+  unsubs.push(
+    robotTrailHistoryPoints.subscribe((points) =>
+      renderRobotTrailHistory(get(robotTrailHistoryEnabled), points)
+    )
+  );
+  unsubs.push(
+    robotTrailHistoryEnabled.subscribe((enabled) =>
+      renderRobotTrailHistory(enabled, get(robotTrailHistoryPoints))
+    )
   );
   unsubs.push(coverageOn.subscribe(() => render()));
   unsubs.push(mowParams.subscribe(() => render()));
