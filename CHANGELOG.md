@@ -1,5 +1,28 @@
 # Changelog
 
+## v2.4.1 — Trail phase coloring & auto-clear on new mow
+
+### Added
+- **Movement trail colored by phase** — both the saved trail and the live
+  session breadcrumb now color each point by what the mower was doing:
+  dark blue while docking/undocking, light blue while mowing (a neutral
+  color otherwise). Segments stay visually connected across a color change.
+- **Saved trail auto-clears when a new mow starts** — the moment the mower
+  transitions into mowing from anything else, the previous saved history is
+  cleared (backed up first, like the manual **Clear** button) so re-mowing
+  the same area starts a fresh, readable trail instead of piling passes on
+  top of each other.
+
+### Fixed
+- **Saved trail phases now survive a server restart** — the history loader
+  was rebuilding each point from disk without its `phase` field, silently
+  dropping the phase coloring data on every reload.
+
+### Changed
+- **Saved trail line is thicker, more opaque, and more visible** —
+  previously a muted 1px-dot gray line that barely showed up against
+  satellite imagery.
+
 ## v2.4.0 — Persisted movement trail & shared capture toggles
 
 The movement trail is now saved to the mower like the WiFi survey already

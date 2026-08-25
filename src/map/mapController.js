@@ -140,7 +140,7 @@ export function createMapController(container) {
     robot: null,
     exactPath: null,
     wifiHeat: [],
-    robotTrail: null,
+    robotTrail: [],
     robotTrailHistory: [],
   };
 
@@ -276,25 +276,66 @@ export function createMapController(container) {
     }
   }
 
+  // Trail points carry an optional `phase` ("docking" covers both docking and
+  // undocking, "mowing" covers active mowing) so the line can show what the
+  // robot was doing, not just where it went. Colors are fixed regardless of
+  // light/dark theme, like the rest of the map's overlays.
+  const TRAIL_PHASE_COLORS = {
+    docking: "#1e3a8a",
+    mowing: "#38bdf8",
+  };
+  const TRAIL_FALLBACK_COLOR = "#fbbf24";
+
+  function trailPhaseColor(phase) {
+    return TRAIL_PHASE_COLORS[phase] || TRAIL_FALLBACK_COLOR;
+  }
+
+  /**
+   * Split a point list into runs of constant `phase`, duplicating the
+   * boundary point into both runs so adjacent, differently-colored polylines
+   * still connect visually instead of leaving a gap.
+   */
+  function splitTrailByPhase(points) {
+    if (!Array.isArray(points) || points.length < 2) return [];
+    const runs = [];
+    let run = [points[0]];
+    let runPhase = points[0]?.phase || null;
+    for (let i = 1; i < points.length; i += 1) {
+      const phase = points[i]?.phase || null;
+      if (phase !== runPhase) {
+        run.push(points[i]);
+        runs.push({ phase: runPhase, points: run });
+        run = [points[i]];
+        runPhase = phase;
+      } else {
+        run.push(points[i]);
+      }
+    }
+    if (run.length >= 2) runs.push({ phase: runPhase, points: run });
+    return runs;
+  }
+
   /** Breadcrumb of recent live-robot positions — a lightweight "where has it been" trail. */
   function renderRobotTrail(enabled, trail) {
-    if (layers.robotTrail) {
-      map.removeLayer(layers.robotTrail);
-      layers.robotTrail = null;
-    }
+    layers.robotTrail.forEach((layer) => map.removeLayer(layer));
+    layers.robotTrail = [];
     if (!enabled || !s.origin || !Array.isArray(trail) || trail.length < 2) return;
 
-    layers.robotTrail = L.polyline(
-      trail.map((p) => metersToLatLng(p, origin())),
-      {
-        color: cssVar("--accent-2", "#22d3ee"),
-        weight: 3,
-        opacity: 0.55,
-        lineCap: "round",
-        lineJoin: "round",
-        interactive: false,
-      }
-    ).addTo(map);
+    for (const run of splitTrailByPhase(trail)) {
+      layers.robotTrail.push(
+        L.polyline(
+          run.points.map((p) => metersToLatLng(p, origin())),
+          {
+            color: trailPhaseColor(run.phase),
+            weight: 3,
+            opacity: 0.65,
+            lineCap: "round",
+            lineJoin: "round",
+            interactive: false,
+          }
+        ).addTo(map)
+      );
+    }
   }
 
   // Persisted, mower-side trail history: breaks into separate segments across
@@ -302,18 +343,22 @@ export function createMapController(container) {
   // sessions) instead of drawing a straight teleport line between them.
   const TRAIL_HISTORY_SEGMENT_GAP_MS = 120000;
 
-  function drawTrailHistorySegment(segment) {
-    return L.polyline(
-      segment.map((p) => metersToLatLng(p, origin())),
-      {
-        color: cssVar("--subtle", "#94a3b8"),
-        weight: 2,
-        opacity: 0.45,
-        dashArray: "1,6",
-        lineCap: "round",
-        interactive: false,
-      }
-    ).addTo(map);
+  function drawTrailHistorySegment(segment, out) {
+    for (const run of splitTrailByPhase(segment)) {
+      out.push(
+        L.polyline(
+          run.points.map((p) => metersToLatLng(p, origin())),
+          {
+            color: trailPhaseColor(run.phase),
+            weight: 4,
+            opacity: 0.85,
+            dashArray: "8,8",
+            lineCap: "round",
+            interactive: false,
+          }
+        ).addTo(map)
+      );
+    }
   }
 
   function renderRobotTrailHistory(enabled, points) {
@@ -325,12 +370,12 @@ export function createMapController(container) {
     for (let i = 1; i < points.length; i += 1) {
       const gap = (points[i]?.t ?? 0) - (points[i - 1]?.t ?? 0);
       if (gap > TRAIL_HISTORY_SEGMENT_GAP_MS) {
-        if (segment.length >= 2) layers.robotTrailHistory.push(drawTrailHistorySegment(segment));
+        if (segment.length >= 2) drawTrailHistorySegment(segment, layers.robotTrailHistory);
         segment = [];
       }
       segment.push(points[i]);
     }
-    if (segment.length >= 2) layers.robotTrailHistory.push(drawTrailHistorySegment(segment));
+    if (segment.length >= 2) drawTrailHistorySegment(segment, layers.robotTrailHistory);
   }
 
   // Accurate mowing preview: uses the robot's real parameters — global params

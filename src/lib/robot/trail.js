@@ -31,5 +31,7 @@ export function appendTrailPoint(trail, point, now = Date.now()) {
   const list = Array.isArray(trail) ? trail : [];
   const last = list[list.length - 1];
   if (last && distance(last, point) < MIN_TRAIL_DISTANCE_M) return list;
-  return pruneTrail([...list, { x: point.x, y: point.y, t: now }], now);
+  const entry = { x: point.x, y: point.y, t: now };
+  if (point.phase) entry.phase = point.phase;
+  return pruneTrail([...list, entry], now);
 }
