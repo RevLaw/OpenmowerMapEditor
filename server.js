@@ -461,13 +461,30 @@ function wifiSurveyMeta() {
 }
 
 /**
+ * Classify a raw mower state name into the trail phase used to color the
+ * saved history: "docking" covers both DOCKING and UNDOCKING (any name
+ * containing DOCK), "mowing" covers active mowing. Anything else (idle,
+ * paused, error, unknown) is null and falls back to a neutral color.
+ */
+function classifyTrailPhase(stateName) {
+  const raw = String(stateName || "");
+  if (!raw) return null;
+  if (/DOCK/i.test(raw)) return "docking";
+  if (/MOW/i.test(raw)) return "mowing";
+  return null;
+}
+
+/** Phase of the most recently appended trail point, to detect the start of a new mow. */
+let robotTrailLastPhase = null;
+
+/**
  * Append a live pose to the persisted trail history if it's moved far enough
  * from the last kept point. Order matters here (unlike the WiFi survey's
  * spatial cell merge) — this is a path, not a set of location samples, so
  * points are never merged or averaged, only throttled by distance and capped
  * by count (oldest dropped first).
  */
-function appendRobotTrailPoint(x, y, timestamp = Date.now(), markDirty = true) {
+function appendRobotTrailPoint(x, y, timestamp = Date.now(), markDirty = true, phase = null) {
   if (!Number.isFinite(x) || !Number.isFinite(y) || Math.abs(x) > 100000 || Math.abs(y) > 100000) {
     return false;
   }
@@ -477,7 +494,9 @@ function appendRobotTrailPoint(x, y, timestamp = Date.now(), markDirty = true) {
     const dy = y - last.y;
     if (Math.sqrt(dx * dx + dy * dy) < robotTrailMinDistanceM) return false;
   }
-  robotTrailHistory.push({ x: Number(x.toFixed(3)), y: Number(y.toFixed(3)), t: timestamp });
+  const point = { x: Number(x.toFixed(3)), y: Number(y.toFixed(3)), t: timestamp };
+  if (phase) point.phase = phase;
+  robotTrailHistory.push(point);
   if (robotTrailHistory.length > robotTrailMaxPoints) {
     robotTrailHistory.splice(0, robotTrailHistory.length - robotTrailMaxPoints);
   }
@@ -490,10 +509,26 @@ function appendRobotTrailPoint(x, y, timestamp = Date.now(), markDirty = true) {
   return true;
 }
 
-/** Fed by the persistent live-pose subscriber; no-op unless capture is actually on. */
+/**
+ * Fed by the persistent live-pose subscriber; no-op unless capture is
+ * actually on. Clears the saved history right as a new mow begins (rising
+ * edge into the "mowing" phase), so re-mowing the same area starts a fresh,
+ * readable trail instead of piling up on top of previous passes — the prior
+ * history stays on disk as a `.bak-clear` backup either way.
+ */
 function ingestLiveTrailPoint(x, y) {
   if (robotTrailCollectorDisabled || !robotTrailCaptureEnabled || !robotTrailHistoryLoaded) return;
-  appendRobotTrailPoint(x, y);
+  const phase = classifyTrailPhase(robotStream.telemetry?.stateName);
+  if (phase === "mowing" && robotTrailLastPhase !== "mowing" && robotTrailHistory.length) {
+    backupBeforeClear(robotTrailHistoryPath).catch(() => {});
+    robotTrailHistory.length = 0;
+    robotTrailHistoryDirty = true;
+    robotTrailHistoryRevision += 1;
+    robotTrailHistoryUpdatedAt = Date.now();
+    scheduleRobotTrailHistoryFlush();
+  }
+  robotTrailLastPhase = phase;
+  appendRobotTrailPoint(x, y, Date.now(), true, phase);
 }
 
 /** Starts/stops capture (shared across every browser); resumes the pose subscriber
@@ -525,11 +560,17 @@ async function ensureRobotTrailHistoryLoaded() {
         const y = Number(point?.y);
         const t = Number(point?.t);
         if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-        robotTrailHistory.push({ x, y, t: Number.isFinite(t) ? t : Date.now() });
+        const entry = { x, y, t: Number.isFinite(t) ? t : Date.now() };
+        if (typeof point?.phase === "string" && point.phase) entry.phase = point.phase;
+        robotTrailHistory.push(entry);
       }
       robotTrailHistoryUpdatedAt = Number(parsed?.updatedAt) || null;
       robotTrailCaptureEnabled = parsed?.captureEnabled === true;
       robotTrailHistoryRevision = 1;
+      // Otherwise a restart mid-mow would reset this to null and the very
+      // next point would look like a rising edge into "mowing", wiping the
+      // history it just loaded.
+      robotTrailLastPhase = robotTrailHistory[robotTrailHistory.length - 1]?.phase || null;
       logInfo("Loaded robot movement trail history", {
         file: robotTrailHistoryPath,
         points: robotTrailHistory.length,

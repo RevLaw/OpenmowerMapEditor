@@ -30,6 +30,13 @@ describe("appendTrailPoint", () => {
     const trail = appendTrailPoint([], { x: NaN, y: 0 }, 1000);
     expect(trail).toEqual([]);
   });
+
+  it("carries an optional phase through, omitting it when absent", () => {
+    const withPhase = appendTrailPoint([], { x: 0, y: 0, phase: "mowing" }, 1000);
+    expect(withPhase).toEqual([{ x: 0, y: 0, t: 1000, phase: "mowing" }]);
+    const withoutPhase = appendTrailPoint([], { x: 0, y: 0 }, 1000);
+    expect(withoutPhase).toEqual([{ x: 0, y: 0, t: 1000 }]);
+  });
 });
 
 describe("pruneTrail", () => {

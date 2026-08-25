@@ -15,6 +15,20 @@ const ENABLED_KEY = "openmower-map-editor-robot-trail-enabled";
 const HISTORY_ENABLED_KEY = "openmower-map-editor-robot-trail-history-enabled";
 const SYNC_MS = 15000;
 
+/**
+ * Classify a raw mower state name into the trail phase used to color it:
+ * "docking" covers both DOCKING and UNDOCKING (any name containing DOCK),
+ * "mowing" covers active mowing. Mirrors the same classification server.js
+ * applies when appending points to the saved history.
+ */
+function classifyTrailPhase(stateName) {
+  const raw = String(stateName || "");
+  if (!raw) return null;
+  if (/DOCK/i.test(raw)) return "docking";
+  if (/MOW/i.test(raw)) return "mowing";
+  return null;
+}
+
 function loadEnabled() {
   return typeof localStorage !== "undefined" && localStorage.getItem(ENABLED_KEY) === "1";
 }
@@ -118,7 +132,8 @@ export async function setRobotTrailEnabled(enabled) {
 /** Feed a live pose into this session's breadcrumb buffer; no-op unless capture is on. */
 export function ingestRobotTrailPose(pose) {
   if (!get(robotTrailEnabled) || !pose?.ok) return;
-  robotTrail.update((trail) => appendTrailPoint(trail, pose, Date.now()));
+  const phase = classifyTrailPhase(pose?.ros?.telemetry?.stateName);
+  robotTrail.update((trail) => appendTrailPoint(trail, { x: pose.x, y: pose.y, phase }, Date.now()));
 }
 
 export function clearRobotTrail() {
