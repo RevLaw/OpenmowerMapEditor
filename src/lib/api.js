@@ -103,3 +103,40 @@ export async function deleteWifiMap() {
   if (!res.ok) throw new Error("Failed to clear shared WiFi survey.");
   return res.json();
 }
+
+/** POST /api/wifi-map/capture -> start or stop the mower's shared WiFi capture. */
+export async function setWifiCapture(enabled) {
+  const res = await fetch("/api/wifi-map/capture", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: Boolean(enabled) }),
+  });
+  if (!res.ok) throw new Error("Failed to update WiFi capture.");
+  return res.json();
+}
+
+/** GET /api/robot-trail -> shared, mower-side movement trail history. */
+export async function fetchRobotTrailHistory(revision = null) {
+  const query = Number.isFinite(revision) ? `?revision=${revision}` : "";
+  const res = await fetch(`/api/robot-trail${query}`);
+  if (!res.ok) throw new Error("Failed to load the saved movement trail.");
+  return res.json();
+}
+
+/** DELETE /api/robot-trail -> clear the saved movement trail on the mower. */
+export async function deleteRobotTrailHistory() {
+  const res = await fetch("/api/robot-trail", { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to clear the saved movement trail.");
+  return res.json();
+}
+
+/** POST /api/robot-trail/capture -> start or stop the mower's shared trail capture. */
+export async function setRobotTrailCapture(enabled) {
+  const res = await fetch("/api/robot-trail/capture", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: Boolean(enabled) }),
+  });
+  if (!res.ok) throw new Error("Failed to update movement trail capture.");
+  return res.json();
+}

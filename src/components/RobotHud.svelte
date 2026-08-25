@@ -9,17 +9,28 @@
   import {
     clearWifiSamples,
     setWifiMapEnabled,
+    setWifiOverlayEnabled,
     wifiMapEnabled,
+    wifiOverlayEnabled,
     wifiSurveySummary,
   } from "../lib/stores/wifi.js";
   import { wifiSignalColor } from "../lib/wifi/signal.js";
   import { notify } from "../lib/stores/toast.js";
   import {
-    clearRobotTrail,
+    clearRobotTrailHistory,
     robotTrail,
     robotTrailEnabled,
+    robotTrailHistoryEnabled,
+    robotTrailHistoryPoints,
+    robotTrailHistoryStorage,
     setRobotTrailEnabled,
+    setRobotTrailHistoryEnabled,
   } from "../lib/stores/robotTrail.js";
+
+  // Shared on/off colors so the Live robot, WiFi, and Movement trail icons
+  // read as one consistent language: green once toggled on, muted when off.
+  const ICON_ON_COLOR = "var(--ok)";
+  const ICON_OFF_COLOR = "var(--muted)";
 
   $: ok = $robotLive && $robotPose?.ok;
   $: signalColor = wifiSignalColor($wifiSurveySummary.signalDbm);
@@ -30,12 +41,19 @@
   })();
 
   function toggleWifiMap() {
-    const enabled = !$wifiMapEnabled;
-    setWifiMapEnabled(enabled);
+    setWifiMapEnabled(!$wifiMapEnabled);
+  }
+
+  function toggleWifiOverlay() {
+    setWifiOverlayEnabled(!$wifiOverlayEnabled);
   }
 
   function toggleRobotTrail() {
     setRobotTrailEnabled(!$robotTrailEnabled);
+  }
+
+  function toggleRobotTrailHistory() {
+    setRobotTrailHistoryEnabled(!$robotTrailHistoryEnabled);
   }
 
   function formatBytes(bytes) {
@@ -53,6 +71,16 @@
       notify("Could not clear the shared WiFi survey.", "warn");
     }
   }
+
+  async function clearSavedTrail() {
+    if (!window.confirm("Clear the mower's saved movement trail for all devices?")) return;
+    try {
+      await clearRobotTrailHistory();
+      notify("Saved movement trail cleared.", "success");
+    } catch (_error) {
+      notify("Could not clear the saved movement trail.", "warn");
+    }
+  }
 </script>
 
 <div class="glass w-[260px] rounded-2xl px-3 py-2.5">
@@ -60,7 +88,7 @@
     <div class="flex items-center gap-2 text-xs font-semibold">
       <span
         class="material-symbols-outlined"
-        style="font-size:17px;color:{ok ? 'var(--ok)' : $robotLive ? 'var(--warn)' : 'var(--muted)'}"
+        style="font-size:17px;color:{ok ? ICON_ON_COLOR : $robotLive ? 'var(--warn)' : ICON_OFF_COLOR}"
       >radar</span>
       Live robot
     </div>
@@ -91,14 +119,14 @@
       <div class="flex items-center gap-2 text-xs font-semibold">
         <span
           class="material-symbols-outlined"
-          style="font-size:17px;color:{$wifiMapEnabled ? signalColor : 'var(--muted)'}"
+          style="font-size:17px;color:{$wifiMapEnabled ? ICON_ON_COLOR : ICON_OFF_COLOR}"
         >signal_cellular_alt</span>
         WiFi signal map
       </div>
       <button
         class="btn-icon !h-7 !w-7"
         class:text-accent={$wifiMapEnabled}
-        title="Toggle WiFi heatmap"
+        title="Start/stop capturing the WiFi signal to a file"
         on:click={toggleWifiMap}
       >
         <span class="material-symbols-outlined" style="font-size:22px">
@@ -126,26 +154,45 @@
             {$wifiSurveySummary.sampleCount} map points
           </div>
         </div>
-        <div
-          class="mt-2 h-2 rounded-full"
-          style="background:linear-gradient(90deg,#ef4444 0%,#f97316 28%,#facc15 55%,#84cc16 76%,#22c55e 100%)"
-          title="red: very weak · green: excellent"
-        ></div>
-        <div class="mt-1 flex justify-between text-[9px] text-subtle">
-          <span>≤ -80 dBm</span>
-          <span>≥ -55 dBm</span>
-        </div>
-        <div class="mt-2 text-[9px] leading-relaxed text-subtle">
-          {$wifiSurveySummary.storage.collector?.enabled ? "Autonomous on mower" : "Browser fallback"} ·
-          {Math.round(($wifiSurveySummary.storage.collector?.intervalMs || 10000) / 1000)} s sample ·
-          {$wifiSurveySummary.storage.cellSizeM} m grid ·
-          {Math.round($wifiSurveySummary.storage.flushIntervalMs / 1000)} s disk flush ·
-          {formatBytes($wifiSurveySummary.storage.fileBytes)}
-        </div>
-        {#if $wifiSurveySummary.sampleCount > 0}
-          <button class="mt-2 text-[10px] text-subtle hover:text-ink" on:click={clearSurvey}>
-            Clear shared survey
+
+        <div class="mt-2 flex items-center justify-between gap-2 border-t pt-2" style="border-color:var(--glass-edge)">
+          <span class="text-[10px] text-subtle">Overlay heatmap</span>
+          <button
+            class="btn-icon !h-6 !w-6"
+            class:text-accent={$wifiOverlayEnabled}
+            title="Overlay the WiFi signal heatmap on the map"
+            on:click={toggleWifiOverlay}
+          >
+            <span class="material-symbols-outlined" style="font-size:18px">
+              {$wifiOverlayEnabled ? "toggle_on" : "toggle_off"}
+            </span>
           </button>
+        </div>
+
+        {#if $wifiOverlayEnabled}
+          <div transition:fade={{ duration: 140 }} class="mt-1">
+            {#if $wifiSurveySummary.sampleCount > 0}
+              <button class="ml-auto block text-[10px] text-subtle hover:text-ink" on:click={clearSurvey}>
+                Clear
+              </button>
+            {/if}
+            <div
+              class="mt-2 h-2 rounded-full"
+              style="background:linear-gradient(90deg,#ef4444 0%,#f97316 28%,#facc15 55%,#84cc16 76%,#22c55e 100%)"
+              title="red: very weak · green: excellent"
+            ></div>
+            <div class="mt-1 flex justify-between text-[9px] text-subtle">
+              <span>≤ -80 dBm</span>
+              <span>≥ -55 dBm</span>
+            </div>
+            <div class="mt-1 text-[9px] leading-relaxed text-subtle">
+              {$wifiSurveySummary.storage.collector?.capturing ? "Capturing now" : "Not capturing"} ·
+              {Math.round(($wifiSurveySummary.storage.collector?.intervalMs || 10000) / 1000)} s sample ·
+              {$wifiSurveySummary.storage.cellSizeM} m grid ·
+              {Math.round($wifiSurveySummary.storage.flushIntervalMs / 1000)} s disk flush ·
+              {formatBytes($wifiSurveySummary.storage.fileBytes)}
+            </div>
+          </div>
         {/if}
       </div>
     {/if}
@@ -156,14 +203,14 @@
       <div class="flex items-center gap-2 text-xs font-semibold">
         <span
           class="material-symbols-outlined"
-          style="font-size:17px;color:{$robotTrailEnabled ? 'var(--accent-2)' : 'var(--muted)'}"
+          style="font-size:17px;color:{$robotTrailEnabled ? ICON_ON_COLOR : ICON_OFF_COLOR}"
         >route</span>
         Movement trail
       </div>
       <button
         class="btn-icon !h-7 !w-7"
         class:text-accent={$robotTrailEnabled}
-        title="Toggle movement trail"
+        title="Start/stop recording the mower's movement trail"
         on:click={toggleRobotTrail}
       >
         <span class="material-symbols-outlined" style="font-size:22px">
@@ -173,12 +220,40 @@
     </div>
 
     {#if $robotTrailEnabled}
-      <div transition:fade={{ duration: 140 }} class="mt-2 flex items-center justify-between text-[10px] text-subtle">
-        <span>
+      <div transition:fade={{ duration: 140 }}>
+        <div class="text-[10px] text-subtle">
           {$robotTrail.length} point{$robotTrail.length === 1 ? "" : "s"}{trailSpanLabel ? ` · last ${trailSpanLabel}` : ""}
-        </span>
-        {#if $robotTrail.length > 0}
-          <button class="hover:text-ink" on:click={() => clearRobotTrail()}>Clear</button>
+        </div>
+
+        <div class="mt-2 flex items-center justify-between gap-2 border-t pt-2" style="border-color:var(--glass-edge)">
+          <span class="text-[10px] text-subtle">Overlay saved history</span>
+          <button
+            class="btn-icon !h-6 !w-6"
+            class:text-accent={$robotTrailHistoryEnabled}
+            title="Overlay the mower's saved movement trail"
+            on:click={toggleRobotTrailHistory}
+          >
+            <span class="material-symbols-outlined" style="font-size:18px">
+              {$robotTrailHistoryEnabled ? "toggle_on" : "toggle_off"}
+            </span>
+          </button>
+        </div>
+
+        {#if $robotTrailHistoryEnabled}
+          <div transition:fade={{ duration: 140 }} class="mt-1">
+            {#if $robotTrailHistoryPoints.length > 0}
+              <button class="ml-auto block text-[10px] text-subtle hover:text-ink" on:click={clearSavedTrail}>
+                Clear
+              </button>
+            {/if}
+            <div class="mt-2 text-[9px] text-subtle">{$robotTrailHistoryPoints.length} saved points</div>
+            <div class="mt-1 text-[9px] leading-relaxed text-subtle">
+              {$robotTrailHistoryStorage.collector?.capturing ? "Capturing now" : "Not capturing"} ·
+              {$robotTrailHistoryStorage.minDistanceM} m spacing ·
+              {Math.round($robotTrailHistoryStorage.flushIntervalMs / 1000)} s disk flush ·
+              {formatBytes($robotTrailHistoryStorage.fileBytes)}
+            </div>
+          </div>
         {/if}
       </div>
     {/if}
