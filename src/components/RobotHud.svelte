@@ -19,12 +19,17 @@
   import {
     clearRobotTrailHistory,
     robotTrail,
+    robotTrailDisplayPoints,
     robotTrailEnabled,
     robotTrailHistoryEnabled,
     robotTrailHistoryPoints,
     robotTrailHistoryStorage,
+    robotTrailSelectedDate,
+    selectRobotTrailDate,
     setRobotTrailEnabled,
     setRobotTrailHistoryEnabled,
+    shiftRobotTrailDate,
+    todayDateKey,
   } from "../lib/stores/robotTrail.js";
 
   // Shared on/off colors so the Live robot, WiFi, and Movement trail icons
@@ -34,6 +39,8 @@
 
   $: ok = $robotLive && $robotPose?.ok;
   $: signalColor = wifiSignalColor($wifiSurveySummary.signalDbm);
+  $: today = todayDateKey();
+  $: isViewingToday = $robotTrailSelectedDate === today;
   $: trailSpanLabel = (() => {
     if ($robotTrail.length < 2) return null;
     const seconds = Math.round(($robotTrail[$robotTrail.length - 1].t - $robotTrail[0].t) / 1000);
@@ -56,30 +63,42 @@
     setRobotTrailHistoryEnabled(!$robotTrailHistoryEnabled);
   }
 
+  function onDateInput(event) {
+    if (event.target.value) selectRobotTrailDate(event.target.value);
+  }
+
   function formatBytes(bytes) {
     if (!Number.isFinite(bytes) || bytes <= 0) return "not flushed yet";
     if (bytes < 1024) return `${bytes} B`;
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
 
-  async function clearSurvey() {
-    if (!window.confirm("Clear the shared WiFi signal map for all devices?")) return;
+  async function confirmAndClear(confirmMessage, action, successMessage, failureMessage) {
+    if (!window.confirm(confirmMessage)) return;
     try {
-      await clearWifiSamples();
-      notify("Shared WiFi survey cleared.", "success");
+      await action();
+      notify(successMessage, "success");
     } catch (_error) {
-      notify("Could not clear the shared WiFi survey.", "warn");
+      notify(failureMessage, "warn");
     }
   }
 
-  async function clearSavedTrail() {
-    if (!window.confirm("Clear the mower's saved movement trail for all devices?")) return;
-    try {
-      await clearRobotTrailHistory();
-      notify("Saved movement trail cleared.", "success");
-    } catch (_error) {
-      notify("Could not clear the saved movement trail.", "warn");
-    }
+  function clearSurvey() {
+    return confirmAndClear(
+      "Clear the shared WiFi signal map for all devices?",
+      clearWifiSamples,
+      "Shared WiFi survey cleared.",
+      "Could not clear the shared WiFi survey."
+    );
+  }
+
+  function clearSavedTrail() {
+    return confirmAndClear(
+      "Clear the mower's saved movement trail for all devices?",
+      clearRobotTrailHistory,
+      "Saved movement trail cleared.",
+      "Could not clear the saved movement trail."
+    );
   }
 </script>
 
@@ -157,25 +176,30 @@
 
         <div class="mt-2 flex items-center justify-between gap-2 border-t pt-2" style="border-color:var(--glass-edge)">
           <span class="text-[10px] text-subtle">Overlay heatmap</span>
-          <button
-            class="btn-icon !h-6 !w-6"
-            class:text-accent={$wifiOverlayEnabled}
-            title="Overlay the WiFi signal heatmap on the map"
-            on:click={toggleWifiOverlay}
-          >
-            <span class="material-symbols-outlined" style="font-size:18px">
-              {$wifiOverlayEnabled ? "toggle_on" : "toggle_off"}
-            </span>
-          </button>
+          <div class="flex items-center gap-1">
+            <button
+              class="btn-icon !h-6 !w-6"
+              title="Clear the shared WiFi signal map"
+              disabled={$wifiSurveySummary.sampleCount === 0}
+              on:click={clearSurvey}
+            >
+              <span class="material-symbols-outlined" style="font-size:16px">delete</span>
+            </button>
+            <button
+              class="btn-icon !h-6 !w-6"
+              class:text-accent={$wifiOverlayEnabled}
+              title="Overlay the WiFi signal heatmap on the map"
+              on:click={toggleWifiOverlay}
+            >
+              <span class="material-symbols-outlined" style="font-size:18px">
+                {$wifiOverlayEnabled ? "toggle_on" : "toggle_off"}
+              </span>
+            </button>
+          </div>
         </div>
 
         {#if $wifiOverlayEnabled}
           <div transition:fade={{ duration: 140 }} class="mt-1">
-            {#if $wifiSurveySummary.sampleCount > 0}
-              <button class="ml-auto block text-[10px] text-subtle hover:text-ink" on:click={clearSurvey}>
-                Clear
-              </button>
-            {/if}
             <div
               class="mt-2 h-2 rounded-full"
               style="background:linear-gradient(90deg,#ef4444 0%,#f97316 28%,#facc15 55%,#84cc16 76%,#22c55e 100%)"
@@ -227,26 +251,71 @@
 
         <div class="mt-2 flex items-center justify-between gap-2 border-t pt-2" style="border-color:var(--glass-edge)">
           <span class="text-[10px] text-subtle">Overlay saved history</span>
-          <button
-            class="btn-icon !h-6 !w-6"
-            class:text-accent={$robotTrailHistoryEnabled}
-            title="Overlay the mower's saved movement trail"
-            on:click={toggleRobotTrailHistory}
-          >
-            <span class="material-symbols-outlined" style="font-size:18px">
-              {$robotTrailHistoryEnabled ? "toggle_on" : "toggle_off"}
-            </span>
-          </button>
+          <div class="flex items-center gap-1">
+            <button
+              class="btn-icon !h-6 !w-6"
+              title="Clear the saved movement trail"
+              disabled={!isViewingToday || $robotTrailHistoryPoints.length === 0}
+              on:click={clearSavedTrail}
+            >
+              <span class="material-symbols-outlined" style="font-size:16px">delete</span>
+            </button>
+            <button
+              class="btn-icon !h-6 !w-6"
+              class:text-accent={$robotTrailHistoryEnabled}
+              title="Overlay the mower's saved movement trail"
+              on:click={toggleRobotTrailHistory}
+            >
+              <span class="material-symbols-outlined" style="font-size:18px">
+                {$robotTrailHistoryEnabled ? "toggle_on" : "toggle_off"}
+              </span>
+            </button>
+          </div>
         </div>
 
         {#if $robotTrailHistoryEnabled}
           <div transition:fade={{ duration: 140 }} class="mt-1">
-            {#if $robotTrailHistoryPoints.length > 0}
-              <button class="ml-auto block text-[10px] text-subtle hover:text-ink" on:click={clearSavedTrail}>
-                Clear
+            <div class="flex items-center gap-1">
+              <button
+                class="btn-icon !h-6 !w-6"
+                title="Previous day"
+                on:click={() => shiftRobotTrailDate(-1)}
+              >
+                <span class="material-symbols-outlined" style="font-size:16px">chevron_left</span>
               </button>
-            {/if}
-            <div class="mt-2 text-[9px] text-subtle">{$robotTrailHistoryPoints.length} saved points</div>
+              <input
+                type="date"
+                class="min-w-0 flex-1 rounded bg-transparent text-center text-[10px] text-ink"
+                style="border-color:var(--glass-edge)"
+                max={today}
+                value={$robotTrailSelectedDate}
+                on:change={onDateInput}
+              />
+              <button
+                class="btn-icon !h-6 !w-6"
+                title="Next day"
+                disabled={isViewingToday}
+                on:click={() => shiftRobotTrailDate(1)}
+              >
+                <span class="material-symbols-outlined" style="font-size:16px">chevron_right</span>
+              </button>
+              <button
+                class="btn-icon !h-6 !w-6"
+                title="Jump to today"
+                disabled={isViewingToday}
+                on:click={() => selectRobotTrailDate(today)}
+              >
+                <span class="material-symbols-outlined" style="font-size:16px">home</span>
+              </button>
+            </div>
+
+            <div class="mt-2 text-[9px] text-subtle">
+              {#if $robotTrailDisplayPoints.length > 0}
+                {$robotTrailDisplayPoints.length} points
+              {:else}
+                No mow recorded this day
+              {/if}
+            </div>
             <div class="mt-1 text-[9px] leading-relaxed text-subtle">
               {$robotTrailHistoryStorage.collector?.capturing ? "Capturing now" : "Not capturing"} ·
               {$robotTrailHistoryStorage.minDistanceM} m spacing ·
