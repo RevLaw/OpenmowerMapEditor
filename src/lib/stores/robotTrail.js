@@ -1,7 +1,9 @@
-import { get, writable } from "svelte/store";
+import { derived, get, writable } from "svelte/store";
 import { appendTrailPoint } from "../robot/trail.js";
 import {
   deleteRobotTrailHistory,
+  fetchRobotTrailArchiveList,
+  fetchRobotTrailArchiveSession,
   fetchRobotTrailHistory,
   setRobotTrailCapture,
 } from "../api.js";
@@ -53,6 +55,30 @@ export const robotTrailHistoryStorage = writable({
   collector: { enabled: true, capturing: false },
 });
 
+/** Local "YYYY-MM-DD" calendar-day key for a timestamp — the unit the date picker navigates by. */
+function dateKeyOf(timestamp) {
+  const d = new Date(timestamp);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export function todayDateKey() {
+  return dateKeyOf(Date.now());
+}
+
+function byTime(a, b) {
+  return (a.t ?? 0) - (b.t ?? 0);
+}
+
+/** Past mow sessions available to browse: [{id, startedAt, endedAt, pointCount}]. */
+export const robotTrailArchiveList = writable([]);
+/** The calendar day currently shown in the date picker; defaults to today. */
+export const robotTrailSelectedDate = writable(todayDateKey());
+/** Merged, time-sorted points from every archived session on robotTrailSelectedDate. */
+export const robotTrailArchivePoints = writable([]);
+
 robotTrailEnabled.subscribe((enabled) => {
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(ENABLED_KEY, enabled ? "1" : "0");
@@ -70,7 +96,28 @@ robotTrailHistoryEnabled.subscribe((enabled) => {
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(HISTORY_ENABLED_KEY, enabled ? "1" : "0");
   }
+  // Always come back to viewing today, not a stale past pick.
+  if (!enabled) {
+    robotTrailSelectedDate.set(todayDateKey());
+    robotTrailArchivePoints.set([]);
+  }
 });
+
+/**
+ * What the overlay should actually draw. On today, that's the live synced
+ * history plus any already-archived sessions from earlier today (e.g. a
+ * finished mow followed by a new one still running) — merged and
+ * time-sorted so mapController's gap-based segmenting still makes sense. On
+ * any other day, it's just that day's archived sessions.
+ */
+export const robotTrailDisplayPoints = derived(
+  [robotTrailSelectedDate, robotTrailArchivePoints, robotTrailHistoryPoints],
+  ([$selectedDate, $archivePoints, $historyPoints]) => {
+    if ($selectedDate !== todayDateKey()) return $archivePoints;
+    if (!$archivePoints.length) return $historyPoints;
+    return [...$archivePoints, ...$historyPoints].sort(byTime);
+  }
+);
 
 let historyKnownRevision = null;
 let historySyncPromise = null;
@@ -142,13 +189,56 @@ export function clearRobotTrail() {
 
 export function setRobotTrailHistoryEnabled(enabled) {
   robotTrailHistoryEnabled.set(Boolean(enabled));
-  if (enabled) syncRobotTrailHistoryQuietly(true);
+  if (enabled) {
+    syncRobotTrailHistoryQuietly(true);
+    loadRobotTrailArchiveListQuietly();
+  }
 }
 
 export async function clearRobotTrailHistory() {
   const requestEpoch = captureIntentEpoch;
   const data = await deleteRobotTrailHistory();
   applyHistoryServerPayload({ ...data, points: [] }, requestEpoch);
+  // The just-cleared session is now archived server-side; reflect that in the picker.
+  loadRobotTrailArchiveListQuietly();
+}
+
+/** Refresh the list of past mow sessions, then re-resolve whichever day is currently selected. */
+export async function loadRobotTrailArchiveList() {
+  const data = await fetchRobotTrailArchiveList();
+  robotTrailArchiveList.set(Array.isArray(data?.sessions) ? data.sessions : []);
+  await selectRobotTrailDate(get(robotTrailSelectedDate));
+  return data;
+}
+
+function loadRobotTrailArchiveListQuietly() {
+  loadRobotTrailArchiveList().catch(() => {});
+}
+
+/** Switch the date picker to `dateKey` ("YYYY-MM-DD") and load that day's archived sessions, if any. */
+export async function selectRobotTrailDate(dateKey) {
+  robotTrailSelectedDate.set(dateKey);
+  const sessionsThatDay = get(robotTrailArchiveList).filter((s) => dateKeyOf(s.startedAt) === dateKey);
+  if (!sessionsThatDay.length) {
+    robotTrailArchivePoints.set([]);
+    return;
+  }
+  try {
+    const sessions = await Promise.all(sessionsThatDay.map((s) => fetchRobotTrailArchiveSession(s.id)));
+    const points = sessions.flatMap((s) => (Array.isArray(s?.points) ? s.points : []));
+    points.sort(byTime);
+    robotTrailArchivePoints.set(points);
+  } catch (_error) {
+    notify("Could not load the movement trail for that day.", "warn");
+  }
+}
+
+/** Move the date picker by `deltaDays` (e.g. -1/+1 for the prev/next arrows); never past today. */
+export function shiftRobotTrailDate(deltaDays) {
+  const [y, m, d] = get(robotTrailSelectedDate).split("-").map(Number);
+  const nextKey = dateKeyOf(new Date(y, m - 1, d + deltaDays).getTime());
+  if (nextKey > todayDateKey()) return;
+  selectRobotTrailDate(nextKey).catch(() => {});
 }
 
 /**

@@ -140,3 +140,17 @@ export async function setRobotTrailCapture(enabled) {
   if (!res.ok) throw new Error("Failed to update movement trail capture.");
   return res.json();
 }
+
+/** GET /api/robot-trail/archive -> past mow sessions (each ended by a new mow starting or a manual Clear). */
+export async function fetchRobotTrailArchiveList() {
+  const res = await fetch("/api/robot-trail/archive");
+  if (!res.ok) throw new Error("Failed to load the movement trail archive.");
+  return res.json();
+}
+
+/** GET /api/robot-trail/archive/:id -> one archived session's points. */
+export async function fetchRobotTrailArchiveSession(id) {
+  const res = await fetch(`/api/robot-trail/archive/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error("Failed to load the archived movement trail.");
+  return res.json();
+}

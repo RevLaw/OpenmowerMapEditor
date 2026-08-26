@@ -49,7 +49,7 @@ import {
   robotTrailEnabled,
   robotTrail,
   robotTrailHistoryEnabled,
-  robotTrailHistoryPoints,
+  robotTrailDisplayPoints,
 } from "../lib/stores/robotTrail.js";
 import { wifiSignalColor } from "../lib/wifi/signal.js";
 import {
@@ -291,6 +291,20 @@ export function createMapController(container) {
   }
 
   /**
+   * Mowing draws as a solid, fully-opaque line; anything else (docking,
+   * undocking, or an unclassified drive) draws dashed and a bit fainter, so
+   * the line itself — not just its color — reads as "this is where it
+   * actually cut" vs. "this is just how it got there."
+   */
+  function trailPhaseStyle(phase, mowingOpacity) {
+    const mowing = phase === "mowing";
+    return {
+      dashArray: mowing ? undefined : "8,8",
+      opacity: mowing ? mowingOpacity : Math.max(0.3, mowingOpacity - 0.25),
+    };
+  }
+
+  /**
    * Split a point list into runs of constant `phase`, duplicating the
    * boundary point into both runs so adjacent, differently-colored polylines
    * still connect visually instead of leaving a gap.
@@ -322,13 +336,15 @@ export function createMapController(container) {
     if (!enabled || !s.origin || !Array.isArray(trail) || trail.length < 2) return;
 
     for (const run of splitTrailByPhase(trail)) {
+      const style = trailPhaseStyle(run.phase, 0.75);
       layers.robotTrail.push(
         L.polyline(
           run.points.map((p) => metersToLatLng(p, origin())),
           {
             color: trailPhaseColor(run.phase),
             weight: 3,
-            opacity: 0.65,
+            opacity: style.opacity,
+            dashArray: style.dashArray,
             lineCap: "round",
             lineJoin: "round",
             interactive: false,
@@ -345,14 +361,15 @@ export function createMapController(container) {
 
   function drawTrailHistorySegment(segment, out) {
     for (const run of splitTrailByPhase(segment)) {
+      const style = trailPhaseStyle(run.phase, 0.9);
       out.push(
         L.polyline(
           run.points.map((p) => metersToLatLng(p, origin())),
           {
             color: trailPhaseColor(run.phase),
             weight: 4,
-            opacity: 0.85,
-            dashArray: "8,8",
+            opacity: style.opacity,
+            dashArray: style.dashArray,
             lineCap: "round",
             interactive: false,
           }
@@ -1104,7 +1121,7 @@ export function createMapController(container) {
       }
       renderWifiHeatmap(get(wifiOverlayEnabled), get(wifiSamples));
       renderRobotTrail(get(robotTrailEnabled), get(robotTrail));
-      renderRobotTrailHistory(get(robotTrailHistoryEnabled), get(robotTrailHistoryPoints));
+      renderRobotTrailHistory(get(robotTrailHistoryEnabled), get(robotTrailDisplayPoints));
     })
   );
   unsubs.push(
@@ -1158,13 +1175,13 @@ export function createMapController(container) {
     robotTrailEnabled.subscribe((enabled) => renderRobotTrail(enabled, get(robotTrail)))
   );
   unsubs.push(
-    robotTrailHistoryPoints.subscribe((points) =>
+    robotTrailDisplayPoints.subscribe((points) =>
       renderRobotTrailHistory(get(robotTrailHistoryEnabled), points)
     )
   );
   unsubs.push(
     robotTrailHistoryEnabled.subscribe((enabled) =>
-      renderRobotTrailHistory(enabled, get(robotTrailHistoryPoints))
+      renderRobotTrailHistory(enabled, get(robotTrailDisplayPoints))
     )
   );
   unsubs.push(coverageOn.subscribe(() => render()));

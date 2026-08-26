@@ -89,6 +89,13 @@ const robotTrailFlushMs = readClampedEnvNumber("ROBOT_TRAIL_FLUSH_MS", {
 });
 const robotTrailCollectorDisabled =
   String(process.env.ROBOT_TRAIL_COLLECTOR_DISABLE || "").trim() === "1";
+const robotTrailArchiveDir = path.join(mapDirectory, "movement-trail-archive");
+const robotTrailArchiveMaxSessions = readClampedEnvNumber("ROBOT_TRAIL_ARCHIVE_MAX_SESSIONS", {
+  min: 1,
+  max: 365,
+  fallback: 30,
+  integer: true,
+});
 
 const distDir = path.join(__dirname, "dist");
 const dockerSocketPath = process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock";
@@ -477,6 +484,71 @@ function classifyTrailPhase(stateName) {
 /** Phase of the most recently appended trail point, to detect the start of a new mow. */
 let robotTrailLastPhase = null;
 
+/** Matches the id format `archiveRobotTrailSession` generates (an ISO timestamp, `:`/`.` swapped for `-`). */
+const ROBOT_TRAIL_ARCHIVE_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
+
+/**
+ * Archives a finished session's points to a dated file instead of discarding
+ * them, so past mows stay browsable (see GET /api/robot-trail/archive).
+ * `points` must be a snapshot (e.g. `.slice()`), not the live array — this
+ * writes asynchronously, and the caller clears/reuses the live array right
+ * after calling this.
+ */
+async function archiveRobotTrailSession(points) {
+  if (!Array.isArray(points) || points.length < 2) return;
+  const startedAt = Number(points[0]?.t) || Date.now();
+  const endedAt = Number(points[points.length - 1]?.t) || startedAt;
+  const id = new Date(startedAt).toISOString().replace(/[:.]/g, "-");
+  const payload = JSON.stringify({ version: 1, id, startedAt, endedAt, points });
+  await atomicWriteOwnedFile(path.join(robotTrailArchiveDir, `${id}.json`), payload);
+  await pruneRobotTrailArchive();
+}
+
+/** Keeps at most `robotTrailArchiveMaxSessions` archived sessions, oldest first (filenames sort chronologically). */
+async function pruneRobotTrailArchive() {
+  let files;
+  try {
+    files = await fs.readdir(robotTrailArchiveDir);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  const sessionFiles = files.filter((f) => ROBOT_TRAIL_ARCHIVE_ID_RE.test(f.slice(0, -".json".length))).sort();
+  const excess = sessionFiles.length - robotTrailArchiveMaxSessions;
+  for (let i = 0; i < excess; i += 1) {
+    await fs.unlink(path.join(robotTrailArchiveDir, sessionFiles[i])).catch(() => {});
+  }
+}
+
+/** Lists archived sessions (newest first) with just enough metadata for a picker — not the points themselves. */
+async function listRobotTrailArchiveSessions() {
+  let files;
+  try {
+    files = await fs.readdir(robotTrailArchiveDir);
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+  const sessions = [];
+  for (const file of files) {
+    const id = file.slice(0, -".json".length);
+    if (!file.endsWith(".json") || !ROBOT_TRAIL_ARCHIVE_ID_RE.test(id)) continue;
+    try {
+      const parsed = JSON.parse(await fs.readFile(path.join(robotTrailArchiveDir, file), "utf8"));
+      sessions.push({
+        id,
+        startedAt: Number(parsed?.startedAt) || null,
+        endedAt: Number(parsed?.endedAt) || null,
+        pointCount: Array.isArray(parsed?.points) ? parsed.points.length : 0,
+      });
+    } catch (_error) {
+      // Skip an unreadable/corrupt archive file rather than failing the whole list.
+    }
+  }
+  sessions.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+  return sessions;
+}
+
 /**
  * Append a live pose to the persisted trail history if it's moved far enough
  * from the last kept point. Order matters here (unlike the WiFi survey's
@@ -513,14 +585,17 @@ function appendRobotTrailPoint(x, y, timestamp = Date.now(), markDirty = true, p
  * Fed by the persistent live-pose subscriber; no-op unless capture is
  * actually on. Clears the saved history right as a new mow begins (rising
  * edge into the "mowing" phase), so re-mowing the same area starts a fresh,
- * readable trail instead of piling up on top of previous passes — the prior
- * history stays on disk as a `.bak-clear` backup either way.
+ * readable trail instead of piling up on top of previous passes — the
+ * outgoing session is archived first (see GET /api/robot-trail/archive), not
+ * just discarded.
  */
 function ingestLiveTrailPoint(x, y) {
   if (robotTrailCollectorDisabled || !robotTrailCaptureEnabled || !robotTrailHistoryLoaded) return;
   const phase = classifyTrailPhase(robotStream.telemetry?.stateName);
   if (phase === "mowing" && robotTrailLastPhase !== "mowing" && robotTrailHistory.length) {
-    backupBeforeClear(robotTrailHistoryPath).catch(() => {});
+    archiveRobotTrailSession(robotTrailHistory.slice()).catch((error) => {
+      logWarn("Failed to archive movement-trail session", { error: error.message });
+    });
     robotTrailHistory.length = 0;
     robotTrailHistoryDirty = true;
     robotTrailHistoryRevision += 1;
@@ -2913,11 +2988,8 @@ app.delete("/api/robot-trail", async (_req, res) => {
   try {
     await ensureRobotTrailHistoryLoaded();
     await flushRobotTrailHistory(true);
-    const clearBackupPath = await backupBeforeClear(robotTrailHistoryPath);
-    logWarn("Clearing robot movement trail history", {
-      points: robotTrailHistory.length,
-      backup: clearBackupPath,
-    });
+    await archiveRobotTrailSession(robotTrailHistory.slice());
+    logWarn("Clearing robot movement trail history", { points: robotTrailHistory.length });
     robotTrailHistory.length = 0;
     robotTrailHistoryDirty = true;
     robotTrailHistoryRevision += 1;
@@ -2927,6 +2999,39 @@ app.delete("/api/robot-trail", async (_req, res) => {
   } catch (error) {
     logError("Failed to clear robot movement trail history", { error: error.message });
     return res.status(500).json({ ok: false, error: "Failed to clear movement trail history" });
+  }
+});
+
+app.get("/api/robot-trail/archive", async (_req, res) => {
+  try {
+    const sessions = await listRobotTrailArchiveSessions();
+    return res.json({ ok: true, sessions });
+  } catch (error) {
+    logError("Failed to list movement-trail archive", { error: error.message });
+    return res.status(500).json({ ok: false, error: "Failed to list movement-trail archive" });
+  }
+});
+
+app.get("/api/robot-trail/archive/:id", async (req, res) => {
+  if (!ROBOT_TRAIL_ARCHIVE_ID_RE.test(req.params.id)) {
+    return res.status(400).json({ ok: false, error: "Invalid archive id" });
+  }
+  try {
+    const content = await fs.readFile(path.join(robotTrailArchiveDir, `${req.params.id}.json`), "utf8");
+    const parsed = JSON.parse(content);
+    return res.json({
+      ok: true,
+      id: req.params.id,
+      startedAt: Number(parsed?.startedAt) || null,
+      endedAt: Number(parsed?.endedAt) || null,
+      points: Array.isArray(parsed?.points) ? parsed.points : [],
+    });
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return res.status(404).json({ ok: false, error: "Archived session not found" });
+    }
+    logError("Failed to read archived movement-trail session", { id: req.params.id, error: error.message });
+    return res.status(500).json({ ok: false, error: "Failed to read archived session" });
   }
 });
 

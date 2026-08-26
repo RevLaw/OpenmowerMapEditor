@@ -1,5 +1,36 @@
 # Changelog
 
+## v2.5.0 — Mow history archive & date picker
+
+Every finished mow session is now kept, not just the current one, and the
+line style makes cutting vs. driving obvious at a glance.
+
+### Added
+- **Movement trail history archive** — each finished session (a new mow
+  starting, or clearing the trail) is archived to a dated file instead of
+  being discarded. A **date picker** in the Movement trail panel — ‹/›
+  day-step buttons, a native date input, and a home button to jump back to
+  today — lets you step the overlay back to any past day; multiple sessions
+  on the same day are merged into one view. Retention is capped by the new
+  `ROBOT_TRAIL_ARCHIVE_MAX_SESSIONS` env var (default 30 sessions, oldest
+  pruned first). New endpoints: `GET /api/robot-trail/archive` (list) and
+  `GET /api/robot-trail/archive/:id` (one session's points).
+- **Solid line while mowing, dashed while docking/navigating** — on both the
+  saved and live trail, so the line's style (not just its color) shows
+  cutting apart from transit.
+
+### Changed
+- **Clear controls are now trash icons beside their overlay toggle** — for
+  both the WiFi signal map and the movement trail, replacing the separate
+  "Clear" text link and matching the streamlined density elsewhere in the
+  panel. Disabled (greyed out) whenever there's nothing to clear.
+
+### Internal
+- Extracted `byTime`, `confirmAndClear`, and a shared `today`/`isViewingToday`
+  reactive pair in the frontend, removing several duplicated sort callbacks,
+  confirm/notify blocks, and repeated date comparisons picked up while
+  building the archive/date-picker feature.
+
 ## v2.4.1 — Trail phase coloring & auto-clear on new mow
 
 ### Added
