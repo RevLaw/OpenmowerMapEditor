@@ -1,5 +1,5 @@
 <script>
-  import { fade } from "svelte/transition";
+  import { fade, slide } from "svelte/transition";
   import {
     robotLive,
     robotReadout,
@@ -37,6 +37,21 @@
   // read as one consistent language: green once toggled on, muted when off.
   const ICON_ON_COLOR = "var(--ok)";
   const ICON_OFF_COLOR = "var(--muted)";
+
+  // Collapsed by default: the full panel (all three sections) can otherwise
+  // eat most of a phone's vertical space, squeezing the mower-control/tool
+  // dock stack below it into an unusably cramped layout. Remembered
+  // per-device, same pattern as the sidebar panels' Collapsible.
+  const HUD_EXPANDED_KEY = "openmower-map-editor-hud-expanded";
+  let hudExpanded =
+    typeof localStorage === "undefined" || localStorage.getItem(HUD_EXPANDED_KEY) !== "0";
+
+  function toggleHudExpanded() {
+    hudExpanded = !hudExpanded;
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(HUD_EXPANDED_KEY, hudExpanded ? "1" : "0");
+    }
+  }
 
   $: ok = $robotLive && $robotPose?.ok;
   $: signalColor = wifiSignalColor($wifiSurveySummary.signalDbm);
@@ -103,7 +118,30 @@
 </script>
 
 <div class="glass w-[260px] rounded-2xl px-3 py-2.5">
-  <div class="flex items-center justify-between gap-2">
+  <button class="flex w-full items-center justify-between gap-2" on:click={toggleHudExpanded}>
+    <div class="flex items-center gap-1.5 text-xs font-semibold">
+      <span
+        class="material-symbols-outlined"
+        style="font-size:16px;color:{ok ? ICON_ON_COLOR : $robotLive ? 'var(--warn)' : ICON_OFF_COLOR}"
+      >radar</span>
+      <span
+        class="material-symbols-outlined"
+        style="font-size:16px;color:{$wifiMapEnabled ? ICON_ON_COLOR : ICON_OFF_COLOR}"
+      >signal_cellular_alt</span>
+      <span
+        class="material-symbols-outlined"
+        style="font-size:16px;color:{$robotTrailEnabled ? ICON_ON_COLOR : ICON_OFF_COLOR}"
+      >route</span>
+      Status
+    </div>
+    <span class="material-symbols-outlined text-subtle" style="font-size:20px">
+      {hudExpanded ? "expand_less" : "expand_more"}
+    </span>
+  </button>
+
+  {#if hudExpanded}
+  <div transition:slide={{ duration: 160 }}>
+  <div class="mt-2 flex items-center justify-between gap-2">
     <div class="flex items-center gap-2 text-xs font-semibold">
       <span
         class="material-symbols-outlined"
@@ -275,4 +313,6 @@
       </div>
     {/if}
   </div>
+  </div>
+  {/if}
 </div>
