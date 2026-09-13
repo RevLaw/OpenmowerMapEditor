@@ -103,7 +103,7 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 
 ### Live robot & control
 - **Live robot** overlay with **smooth motion**: the **Live robot** toolbar button opens an **SSE stream** (`GET /api/robot_pose/stream`). The server holds **one persistent ROS subscriber** inside `open_mower_ros` to `/xbot_positioning/xb_pose` (~48 Hz fused GPS/odometry pose, map frame) plus `/xbot_monitoring/robot_state` (telemetry), and pushes each sample to the browser, which **interpolates** the marker between frames — so it glides instead of jumping. On ROS 2 / non-xbot setups it falls back to a `tf2_echo`/`tf_echo` probe, and the client falls back to polling `GET /api/robot_pose` if SSE is unavailable. Marker style reflects **navigation**, **docking**, **charging at dock**, **dock full**, **emergency**, and **error** states, with RTK status. Streaming pauses while the tab is hidden
-- **Mower control** — a floating control bar with **Start**, **Stop**, **Home**, and **Reset E-stop**, wired to OpenMower's real services via `POST /api/control`. **Start/Home/Reset need a two-step confirm** (click → *Confirm?* → click); **Stop** is one tap. ⚠️ These move a real robot with spinning blades — disable entirely with `OPENMOWER_CONTROL_DISABLE=1`
+- **Mower control** — **Start**, **Stop**, **Home**, and **Reset E-stop** in the top group of the tool dock (right side), wired to OpenMower's real services via `POST /api/control`. **Start/Home/Reset need a two-step confirm** (click → *Confirm?* → click); **Stop** is one tap. ⚠️ These move a real robot with spinning blades — disable entirely with `OPENMOWER_CONTROL_DISABLE=1`
 
 ### WiFi signal survey & movement trail
 - Optional **WiFi signal map** — a main toggle starts/stops the mower recording its radio's dBm value with each live pose; a nested toggle paints the red-to-green heatmap in *this* browser. Shared, mower-side, persists across restarts. See [Shared data storage](#shared-data-storage-wifi-survey--movement-trail) for the full architecture
@@ -232,7 +232,7 @@ Reconnects react to Docker's container-start events for `open_mower_ros` rather 
 
 ## Tool legend
 
-Tools live in the floating dock on the right (icons from [Material Symbols Outlined](https://fonts.google.com/icons)). Every action is also reachable from the **command palette** (`Ctrl`/`Cmd + K`); press `?` for the full shortcut cheat sheet.
+Tools live in the floating dock on the right (icons from [Material Symbols Outlined](https://fonts.google.com/icons)), arranged as a 2-column grid with a divider between groups: mower control (Start/Stop/Home/Reset) at the top, then edit tools, then delete, then undo/redo. Every action is also reachable from the **command palette** (`Ctrl`/`Cmd + K`); press `?` for the full shortcut cheat sheet. The robot status HUD above it (Live robot / WiFi / Movement trail) collapses to a compact one-line summary by default — tap it to expand; the choice is remembered per device.
 
 - **near_me** — select / drag (`V`): default mode, drag a vertex or click to select. Arrow keys nudge the selection (`Shift` = larger step).
 - **add_location_alt** — add point (`A`): click near an outline and the vertex is inserted on the **nearest edge**.
