@@ -8,7 +8,6 @@
   import ToolHint from "./ToolHint.svelte";
   import ZoomControl from "./ZoomControl.svelte";
   import BasemapControl from "./BasemapControl.svelte";
-  import MowerControl from "./MowerControl.svelte";
   import StatusToasts from "./StatusToasts.svelte";
   import CommandPalette from "./CommandPalette.svelte";
   import ShortcutCheatSheet from "./ShortcutCheatSheet.svelte";
@@ -28,31 +27,26 @@
   let sidebarOpen = typeof window === "undefined" || window.innerWidth >= 1024;
   const cleanups = [];
 
-  // The mower-control + tool-dock stack normally floats vertically centered
-  // on the same right edge as the robot HUD above it. The HUD's height varies
-  // a lot (Live robot / WiFi / trail sections can all be expanded at once),
-  // so instead of a fixed cap, the two are coordinated live: as the HUD grows
-  // past the centered stack's top edge, the stack is pushed down to make
-  // room; if it would then run off the bottom of the viewport, the stack
-  // switches to two columns (mower control beside the tool dock instead of
-  // above it, which is shorter); only if it still doesn't fit does the HUD's
-  // own content start scrolling, as a last resort.
+  // The control dock (mower control + edit tools, merged into one panel —
+  // see ToolDock.svelte) normally floats vertically centered on the same
+  // right edge as the robot HUD above it. The HUD's height varies (it has
+  // its own collapse toggle, but can still be expanded), so instead of a
+  // fixed cap, the two are coordinated live: as the HUD grows past the
+  // centered dock's top edge, the dock is pushed down to make room; only if
+  // it still doesn't fit does the HUD's own content start scrolling, as a
+  // last resort.
   const EDGE_GAP = 12; // matches right-3 / top-3 (0.75rem)
-  const STACK_GAP = 8; // matches gap-2 (0.5rem) between mower control and the tool dock
   const ZOOM_BOTTOM_OFFSET = 28; // matches bottom-7 (1.75rem) on the zoom control
 
   let hudWrapEl;
-  let mowerControlWrapEl;
   let toolDockWrapEl;
   let zoomControlWrapEl;
 
-  let mowerControlHeight = 0;
   let toolDockHeight = 0;
   let hudNaturalHeight = 0;
   let zoomControlHeight = 0;
 
   let controlStackTop = 0;
-  let useTwoColumnStack = false;
   let robotHudMaxHeight = null;
 
   // The sidebar's actual rendered width — it's pure CSS (w-[360px]
@@ -64,48 +58,34 @@
 
   function recomputeLayout() {
     sidebarWidth = Math.min(360, window.innerWidth - 24);
-    if (!mowerControlWrapEl || !toolDockWrapEl || !hudWrapEl || !zoomControlWrapEl) return;
+    if (!toolDockWrapEl || !hudWrapEl || !zoomControlWrapEl) return;
     const vh = window.innerHeight;
-    const singleColHeight = mowerControlHeight + STACK_GAP + toolDockHeight;
-    const twoColHeight = Math.max(mowerControlHeight, toolDockHeight);
     const hudBottom = EDGE_GAP + hudNaturalHeight;
     // The zoom buttons are independently pinned near the bottom-right; the
-    // control stack must never be pushed low enough to reach them.
+    // control dock must never be pushed low enough to reach them.
     const maxStackBottom = vh - ZOOM_BOTTOM_OFFSET - zoomControlHeight - EDGE_GAP;
 
-    // 1) Original layout: stack centered, HUD shown in full.
-    const centeredTop = (vh - singleColHeight) / 2;
-    if (centeredTop >= hudBottom + EDGE_GAP && centeredTop + singleColHeight <= maxStackBottom) {
+    // 1) Original layout: dock centered, HUD shown in full.
+    const centeredTop = (vh - toolDockHeight) / 2;
+    if (centeredTop >= hudBottom + EDGE_GAP && centeredTop + toolDockHeight <= maxStackBottom) {
       controlStackTop = centeredTop;
-      useTwoColumnStack = false;
       robotHudMaxHeight = null;
       return;
     }
 
-    // 2) Push the stack down below the HUD, still one column.
+    // 2) Push the dock down below the HUD.
     const pushedTop = hudBottom + EDGE_GAP;
-    if (pushedTop + singleColHeight <= maxStackBottom) {
+    if (pushedTop + toolDockHeight <= maxStackBottom) {
       controlStackTop = pushedTop;
-      useTwoColumnStack = false;
       robotHudMaxHeight = null;
       return;
     }
 
-    // 3) Pushed down, but shorten the stack by going to two columns.
-    if (pushedTop + twoColHeight <= maxStackBottom) {
-      controlStackTop = pushedTop;
-      useTwoColumnStack = true;
-      robotHudMaxHeight = null;
-      return;
-    }
-
-    // 4) Last resort: two columns, bottom-aligned just above the zoom
-    // buttons — that boundary is a hard requirement, so it's never clamped
-    // back down to stay below the HUD. If the stack is taller than the
-    // space that leaves, its own top edge (not the zoom buttons) is what
-    // gives; the HUD still gets whatever room remains above it, if any.
-    useTwoColumnStack = true;
-    controlStackTop = maxStackBottom - twoColHeight;
+    // 3) Last resort: bottom-aligned just above the zoom buttons — that
+    // boundary is a hard requirement, so it's never clamped back down to
+    // stay below the HUD. The HUD still gets whatever room remains above
+    // it, if any (its own collapse toggle handles the common case).
+    controlStackTop = maxStackBottom - toolDockHeight;
     robotHudMaxHeight = Math.max(44, controlStackTop - EDGE_GAP * 2);
   }
 
@@ -133,14 +113,12 @@
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
-        if (entry.target === mowerControlWrapEl) mowerControlHeight = height;
-        else if (entry.target === toolDockWrapEl) toolDockHeight = height;
+        if (entry.target === toolDockWrapEl) toolDockHeight = height;
         else if (entry.target === hudWrapEl) hudNaturalHeight = height;
         else if (entry.target === zoomControlWrapEl) zoomControlHeight = height;
       }
       recomputeLayout();
     });
-    resizeObserver.observe(mowerControlWrapEl);
     resizeObserver.observe(toolDockWrapEl);
     resizeObserver.observe(hudWrapEl);
     resizeObserver.observe(zoomControlWrapEl);
@@ -181,22 +159,11 @@
     </button>
   {/if}
 
-  <!-- Right-side bars: mower control + tool dock, coordinated with the robot
-       HUD above them (see recomputeLayout) so neither ever overlaps the other. -->
-  <div
-    class="absolute right-3 z-20 flex gap-2"
-    class:flex-col={!useTwoColumnStack}
-    class:items-end={!useTwoColumnStack}
-    class:flex-row-reverse={useTwoColumnStack}
-    class:items-start={useTwoColumnStack}
-    style="top:{controlStackTop}px"
-  >
-    <div bind:this={mowerControlWrapEl}>
-      <MowerControl />
-    </div>
-    <div bind:this={toolDockWrapEl}>
-      <ToolDock />
-    </div>
+  <!-- Right-side control dock: mower control + edit tools merged into one
+       panel (see ToolDock.svelte), coordinated with the robot HUD above it
+       (see recomputeLayout) so neither ever overlaps the other. -->
+  <div bind:this={toolDockWrapEl} class="absolute right-3 z-20" style="top:{controlStackTop}px">
+    <ToolDock />
   </div>
 
   <!-- Active-tool hint (top-center) -->
@@ -206,9 +173,9 @@
     </div>
   </div>
 
-  <!-- Robot HUD (top-right) — the control stack below it gets pushed down (and
-       reflowed to two columns) to make room first; only once that's exhausted
-       does this start scrolling internally instead of overlapping it. -->
+  <!-- Robot HUD (top-right) — the control dock below it gets pushed down to
+       make room first; only once that's exhausted does this start scrolling
+       internally instead of overlapping it. -->
   <div
     class="absolute right-3 top-3 z-20 overflow-y-auto"
     style={robotHudMaxHeight ? `max-height:${robotHudMaxHeight}px` : ""}
