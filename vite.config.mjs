@@ -23,6 +23,6 @@ export default defineConfig({
   resolve: process.env.VITEST ? { conditions: ["browser"] } : undefined,
   test: {
     environment: "node",
-    include: ["src/**/*.{test,spec}.js"],
+    include: ["src/**/*.{test,spec}.js", "*.{test,spec}.js"],
   },
 });
