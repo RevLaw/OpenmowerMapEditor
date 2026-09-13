@@ -55,7 +55,15 @@
   let useTwoColumnStack = false;
   let robotHudMaxHeight = null;
 
+  // The sidebar's actual rendered width — it's pure CSS (w-[360px]
+  // max-w-[calc(100vw-1.5rem)]), so this mirrors that formula rather than
+  // adding a second ResizeObserver on a conditionally-mounted element.
+  // BasemapControl needs this to sit flush against the sidebar's real edge
+  // instead of assuming it's always exactly 360px wide.
+  let sidebarWidth = 360;
+
   function recomputeLayout() {
+    sidebarWidth = Math.min(360, window.innerWidth - 24);
     if (!mowerControlWrapEl || !toolDockWrapEl || !hudWrapEl || !zoomControlWrapEl) return;
     const vh = window.innerHeight;
     const singleColHeight = mowerControlHeight + STACK_GAP + toolDockHeight;
@@ -219,7 +227,7 @@
   <!-- Base-map switcher (bottom-left, clears the sidebar when open) -->
   <div
     class="absolute bottom-3 z-30 transition-all duration-200"
-    style="left:{sidebarOpen ? '376px' : '12px'}"
+    style="left:{sidebarOpen ? `${sidebarWidth + EDGE_GAP + 4}px` : '12px'}"
   >
     <BasemapControl />
   </div>

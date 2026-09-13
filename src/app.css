@@ -293,6 +293,28 @@
   }
 }
 
+/* Touch-target floor: on a touchscreen (not a mouse/trackpad), bump the
+   smallest interactive controls up to a comfortably tappable size. Uses
+   min-width/min-height rather than width/height so it wins over even the
+   `!h-6`-style `!important` Tailwind size overrides used throughout the app
+   (different properties, not a specificity fight) without touching a single
+   component. Left untouched on fine-pointer devices — desktop density is
+   unchanged. */
+@media (pointer: coarse) {
+  .btn-icon {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .input,
+  .select {
+    min-height: 44px;
+  }
+  input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+  }
+}
+
 /* ============================================================= *
  * Custom scrollbars
  * ============================================================= */
