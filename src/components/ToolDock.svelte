@@ -18,7 +18,12 @@
   }
 </script>
 
-<div class="glass flex flex-col gap-1 rounded-2xl p-1.5">
+<!-- 2-column grid instead of one tall column of 9 — a divider spans both
+     grid columns (grid-column:1/-1), which always forces a new row, keeping
+     the three groups (tools / delete / undo-redo) visually separated. Grid
+     auto-sizes the columns to the buttons' own size, so this doesn't need a
+     guessed pixel width the way flex-wrap would. -->
+<div class="glass grid grid-cols-2 gap-1 rounded-2xl p-1.5">
   {#each tools as t}
     <div class="hicon">
       <button
@@ -33,16 +38,16 @@
     </div>
   {/each}
 
-  <div class="my-1 h-px" style="background:var(--edge-soft)"></div>
+  <div class="my-1 h-px" style="grid-column:1/-1;background:var(--edge-soft)"></div>
 
-  <div class="hicon">
+  <div class="hicon" style="grid-column:1/-1">
     <button class="tool-btn danger" aria-label="Remove selected point (Del)" on:click={removePoint}>
       <span class="material-symbols-outlined" style="font-size:22px">delete</span>
     </button>
     <span class="hicon-label">Remove point (Del)</span>
   </div>
 
-  <div class="my-1 h-px" style="background:var(--edge-soft)"></div>
+  <div class="my-1 h-px" style="grid-column:1/-1;background:var(--edge-soft)"></div>
 
   <div class="hicon">
     <button class="tool-btn" disabled={!$history.canUndo} aria-label="Undo (Ctrl+Z)" on:click={undo}>

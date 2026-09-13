@@ -301,7 +301,8 @@
    component. Left untouched on fine-pointer devices — desktop density is
    unchanged. */
 @media (pointer: coarse) {
-  .btn-icon {
+  .btn-icon,
+  .tool-btn {
     min-width: 44px;
     min-height: 44px;
   }
