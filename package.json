@@ -1,6 +1,6 @@
 {
   "name": "openmower-map-editor",
-  "version": "2.5.0",
+  "version": "2.7.0",
   "private": true,
   "description": "OpenMower map editor with host file integration",
   "main": "server.js",
@@ -13,21 +13,21 @@
     "test:watch": "vitest"
   },
   "engines": {
-    "node": ">=20.19"
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
   },
   "dependencies": {
     "express": "^5.2.1",
-    "js-yaml": "^5.2.0"
+    "js-yaml": "^5.4.2"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^7.1.2",
-    "@tailwindcss/postcss": "^4.3.1",
-    "happy-dom": "^20.10.6",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "happy-dom": "^20.14.5",
     "leaflet": "^1.9.4",
-    "postcss": "^8.5.16",
-    "svelte": "^5.56.4",
-    "tailwindcss": "^4.3.1",
-    "vite": "^8.1.0",
-    "vitest": "^4.1.9"
+    "postcss": "^8.5.28",
+    "svelte": "^5.57.0",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
   }
 }

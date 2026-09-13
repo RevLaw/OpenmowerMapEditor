@@ -1,5 +1,88 @@
 # Changelog
 
+## v2.7.0 — Mobile layout pass
+
+The right-side control dock and basemap switcher were built for desktop
+overlay space and broke down on a phone; this pass fixes what was actually
+wrong (verified with device-emulation screenshots at each step) rather than
+guessing at a redesign.
+
+### Fixed
+- **Tool dock didn't fit on a phone** — 9 icon buttons in one tall column,
+  each now touch-sized, simply didn't fit vertically. Reflowed into a
+  2-column grid (dividers span both columns, so the tools/delete/undo-redo
+  groups stay visually separated); same grid on desktop, just more compact
+  there too.
+- **Robot HUD crowded out the control dock below it** — the HUD's three
+  always-expanded sections (Live robot / WiFi / Movement trail) could eat
+  most of a phone's vertical space. It now collapses to a one-line status
+  summary by default (tap to expand), remembered per device.
+- **Touch targets were too small** — icon buttons, checkboxes, and numeric
+  inputs were well under the ~44px recommended minimum on a touchscreen.
+  Fixed with a single `@media (pointer: coarse)` rule in `app.css` covering
+  `.btn-icon`, `.tool-btn`, `.input`/`.select`, and checkboxes — no
+  per-component changes, and desktop (mouse/trackpad) is untouched by
+  construction.
+- **Basemap switcher position assumed a fixed 360px sidebar** — wrong on a
+  narrower phone where the sidebar's own responsive `max-width` had already
+  kicked in. Now computed from the sidebar's actual rendered width.
+
+### Changed
+- **Mower control merged into the tool dock** — Start/Stop/Home/Reset used
+  to float as their own separate panel next to the tool dock; they're now
+  one more group (with a divider) in the same panel, so the right-side
+  control stack reads as a single cohesive dock instead of two boxes side
+  by side. `MowerControl.svelte` is gone; `AppShell.svelte`'s layout
+  coordination simplifies accordingly (only one element to position
+  relative to the HUD, so the old two-column-fallback shape and its
+  tracked state are gone too).
+
+## v2.6.0 — WiFi/trail hardening, tests, and CI
+
+### Fixed
+- **Movement trail no longer resets on every mow** — previously, starting a
+  second or third mow the same day archived the in-progress trail and began
+  a fresh one, so browsing a day only ever showed the last mow. Now every
+  mow during the same calendar day keeps writing to the same history; a
+  fresh session only starts once the local date actually changes.
+- **Movement trail panel no longer looks "stuck" with Live robot off** — the
+  panel's point-count/capturing indicator was reading the client-only Live
+  robot breadcrumb (which only fills while the separate Live robot toggle
+  is on) instead of the actual server-synced capture state. It now reflects
+  real capture status regardless of Live robot.
+- **Trail colors** (docking navy, mowing sky-blue) collided with the
+  nav-zone outline and other overlay colors and were low-contrast over
+  satellite imagery. Replaced with a distinct pink/orange palette.
+
+### Added
+- **Toast notifications** for the WiFi survey and Movement trail capture
+  toggles (previously only toasted on failure), and for turning Live robot
+  off (previously only toasted when turning it on) — consistent feedback
+  across every capture toggle.
+- **Backend unit tests** (`server.test.js`) for previously-untested logic:
+  day-boundary trail merging, WiFi sample validation/merging (including the
+  weighted-average formula), trail point distance-throttling/capping, and
+  env-var clamping.
+- **CI now gates the Docker build on tests** — a new test job (`npm test` +
+  `npm run build`) must pass before the multi-arch image builds; a
+  `docker compose config` step validates the exact compose block users
+  paste into Dockge; and Docker layer caching speeds up the QEMU-emulated
+  arm64 leg of the build.
+
+### Changed
+- **Deduplicated the WiFi survey / movement trail subsystem** — both
+  features had grown near-identical debounced-flush logic (server-side) and
+  shared-toggle-sync logic (client-side). Extracted into shared
+  `createFlushScheduler` (server.js) and `createCaptureSync`
+  (`src/lib/stores/captureSync.js`) factories, and shared
+  `CaptureToggleHeader`/`OverlayToggleRow` components for their near-
+  identical toggle panels.
+- **Updated all dependencies to their latest versions**, including a move
+  to Vitest 5 (raises the minimum Node version to 22.12+/24+/26+).
+- Streamlined and reorganized the README (Docker/Dockge deployment
+  section, grouped environment-variable tables, merged WiFi/trail storage
+  docs).
+
 ## v2.5.0 — Mow history archive & date picker
 
 Every finished mow session is now kept, not just the current one, and the

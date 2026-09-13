@@ -1,0 +1,71 @@
+# Files/directories excluded from AI context: not source code, or too
+# large/low-signal to be worth the tokens. Mirrors .gitignore/.dockerignore
+# where applicable, plus a few things that are tracked but not useful here
+# (package-lock.json, the screenshot, generated docs).
+
+# Dependencies (reinstall via `npm install`; never needed for context)
+node_modules/
+package-lock.json
+
+# Build output / caches
+dist/
+dist-ssr/
+.vite/
+.cache/
+coverage/
+.eslintcache
+*.tgz
+
+# VCS
+.git/
+
+# Runtime/local data — mower-specific instance data, not source
+# (map.json, backups, WiFi survey, params YAML all live here)
+ros/
+params/
+*.local.json
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+logs/
+
+# IDE / OS cruft
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Local agent / tool artifacts (this assistant's own scratch state)
+.cursor/
+.claude/
+terminals/
+agent-transcripts/
+mcps/
+
+# Binary / large media — not useful as text context
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.ico
+*.webp
+
+# Secrets / credentials — never read or commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+id_rsa*

@@ -7,6 +7,7 @@ import {
   fetchRobotTrailHistory,
   setRobotTrailCapture,
 } from "../api.js";
+import { createCaptureSync } from "./captureSync.js";
 import { notify } from "./toast.js";
 
 // "Enabled" here means capture is on — a shared, mower-side setting (every
@@ -119,20 +120,10 @@ export const robotTrailDisplayPoints = derived(
   }
 );
 
-let historyKnownRevision = null;
-let historySyncPromise = null;
-// Bumped on every setRobotTrailEnabled call. A poll/clear response whose
-// snapshot doesn't match the current epoch was in flight during a toggle and
-// may be stale, so it's applied everywhere except the capturing bit — that
-// one field is left for the toggle's own (or a later, current) response to
-// set, so a slow poll can't snap the switch back right after the user flips it.
-let captureIntentEpoch = 0;
-
-function applyHistoryServerPayload(data, requestEpoch = captureIntentEpoch) {
-  if (Number.isFinite(data?.revision)) historyKnownRevision = data.revision;
+function applyTrailPayload(data, isCurrentEpoch) {
   if (data?.storage) {
     robotTrailHistoryStorage.set(data.storage);
-    if (requestEpoch === captureIntentEpoch) {
+    if (isCurrentEpoch) {
       robotTrailEnabled.set(Boolean(data.storage?.collector?.capturing));
     }
   }
@@ -141,40 +132,19 @@ function applyHistoryServerPayload(data, requestEpoch = captureIntentEpoch) {
   }
 }
 
-/** Fetch the mower's trail status + saved points; revision-aware like the WiFi survey sync. */
-export async function syncRobotTrailHistory(force = false) {
-  if (historySyncPromise) return historySyncPromise;
-  const requestEpoch = captureIntentEpoch;
-  historySyncPromise = (async () => {
-    try {
-      const data = await fetchRobotTrailHistory(force ? null : historyKnownRevision);
-      applyHistoryServerPayload(data, requestEpoch);
-      return data;
-    } finally {
-      historySyncPromise = null;
-    }
-  })();
-  return historySyncPromise;
-}
+const trailCapture = createCaptureSync({
+  fetchData: fetchRobotTrailHistory,
+  setCapture: setRobotTrailCapture,
+  applyPayload: applyTrailPayload,
+  enabledStore: robotTrailEnabled,
+  featureLabel: "Movement trail",
+});
 
-function syncRobotTrailHistoryQuietly(force = false) {
-  syncRobotTrailHistory(force).catch(() => {});
-}
+/** Fetch the mower's trail status + saved points; revision-aware like the WiFi survey sync. */
+export const syncRobotTrailHistory = trailCapture.sync;
 
 /** Starts/stops the mower's trail capture. Shared and persisted — affects every browser. */
-export async function setRobotTrailEnabled(enabled) {
-  const want = Boolean(enabled);
-  captureIntentEpoch += 1;
-  const requestEpoch = captureIntentEpoch;
-  robotTrailEnabled.set(want); // optimistic; corrected by the server's response either way
-  try {
-    const data = await setRobotTrailCapture(want);
-    applyHistoryServerPayload(data, requestEpoch);
-  } catch (_error) {
-    if (requestEpoch === captureIntentEpoch) robotTrailEnabled.set(!want);
-    notify(`Movement trail: could not ${want ? "start" : "stop"} capture.`, "warn");
-  }
-}
+export const setRobotTrailEnabled = trailCapture.setEnabled;
 
 /** Feed a live pose into this session's breadcrumb buffer; no-op unless capture is on. */
 export function ingestRobotTrailPose(pose) {
@@ -190,15 +160,15 @@ export function clearRobotTrail() {
 export function setRobotTrailHistoryEnabled(enabled) {
   robotTrailHistoryEnabled.set(Boolean(enabled));
   if (enabled) {
-    syncRobotTrailHistoryQuietly(true);
+    trailCapture.syncQuietly(true);
     loadRobotTrailArchiveListQuietly();
   }
 }
 
 export async function clearRobotTrailHistory() {
-  const requestEpoch = captureIntentEpoch;
+  const requestEpoch = trailCapture.currentEpoch();
   const data = await deleteRobotTrailHistory();
-  applyHistoryServerPayload({ ...data, points: [] }, requestEpoch);
+  trailCapture.apply({ ...data, points: [] }, requestEpoch);
   // The just-cleared session is now archived server-side; reflect that in the picker.
   loadRobotTrailArchiveListQuietly();
 }
@@ -248,17 +218,5 @@ export function shiftRobotTrailDate(deltaDays) {
  * history overlay is off.
  */
 export function initRobotTrailHistoryLifecycle() {
-  if (typeof document === "undefined") return () => {};
-  let timer = null;
-  const syncIfVisible = () => {
-    if (!document.hidden) syncRobotTrailHistoryQuietly();
-  };
-
-  syncIfVisible();
-  timer = setInterval(syncIfVisible, SYNC_MS);
-  document.addEventListener("visibilitychange", syncIfVisible);
-  return () => {
-    if (timer != null) clearInterval(timer);
-    document.removeEventListener("visibilitychange", syncIfVisible);
-  };
+  return trailCapture.initLifecycle(SYNC_MS);
 }
