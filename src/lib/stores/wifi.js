@@ -1,7 +1,7 @@
 import { derived, get, writable } from "svelte/store";
 import { deleteWifiMap, fetchWifiMap, recordWifiSamples, setWifiCapture } from "../api.js";
 import { mergeWifiSample, wifiPercentFromDbm, wifiSignalLabel } from "../wifi/signal.js";
-import { notify } from "./toast.js";
+import { createCaptureSync } from "./captureSync.js";
 
 // "Enabled" here means capture is on — a shared, mower-side setting (every
 // browser, persists across restarts), not a per-browser display preference.
@@ -77,24 +77,11 @@ export const wifiSurveySummary = derived(
   })
 );
 
-let knownRevision = null;
-let syncPromise = null;
-let recordInFlight = false;
-let lastRecordAt = 0;
-let lastRecordCell = null;
-// Bumped on every setWifiMapEnabled call. A poll response whose snapshot
-// doesn't match the current epoch was in flight during a toggle and may be
-// stale, so it's applied everywhere except the capturing bit — that one
-// field is left for the toggle's own (or a later, current) response to set,
-// so a slow poll can't snap the switch back right after the user flips it.
-let captureIntentEpoch = 0;
-
-function applyServerPayload(data, requestEpoch = captureIntentEpoch) {
-  if (Number.isFinite(data?.revision)) knownRevision = data.revision;
+function applyWifiPayload(data, isCurrentEpoch) {
   const collector = data?.storage?.collector;
   if (data?.storage) {
     wifiSurveyStorage.set(data.storage);
-    if (requestEpoch === captureIntentEpoch) {
+    if (isCurrentEpoch) {
       wifiMapEnabled.set(Boolean(collector?.capturing));
     }
   }
@@ -109,24 +96,18 @@ function applyServerPayload(data, requestEpoch = captureIntentEpoch) {
   }
 }
 
-export async function syncWifiSamples(force = false) {
-  if (syncPromise) return syncPromise;
-  const requestEpoch = captureIntentEpoch;
-  syncPromise = (async () => {
-    try {
-      const data = await fetchWifiMap(force ? null : knownRevision);
-      applyServerPayload(data, requestEpoch);
-      return data;
-    } finally {
-      syncPromise = null;
-    }
-  })();
-  return syncPromise;
-}
+const wifiCapture = createCaptureSync({
+  fetchData: fetchWifiMap,
+  setCapture: setWifiCapture,
+  applyPayload: applyWifiPayload,
+  enabledStore: wifiMapEnabled,
+  featureLabel: "WiFi signal map",
+});
 
-function syncWifiSamplesQuietly(force = false) {
-  syncWifiSamples(force).catch(() => {});
-}
+export const syncWifiSamples = wifiCapture.sync;
+
+/** Starts/stops the mower's WiFi capture. Shared and persisted — affects every browser. */
+export const setWifiMapEnabled = wifiCapture.setEnabled;
 
 async function migrateLegacySamples() {
   if (typeof localStorage === "undefined") return;
@@ -143,24 +124,13 @@ async function migrateLegacySamples() {
   }
 }
 
-/** Starts/stops the mower's WiFi capture. Shared and persisted — affects every browser. */
-export async function setWifiMapEnabled(enabled) {
-  const want = Boolean(enabled);
-  captureIntentEpoch += 1;
-  const requestEpoch = captureIntentEpoch;
-  wifiMapEnabled.set(want); // optimistic; corrected by the server's response either way
-  try {
-    const data = await setWifiCapture(want);
-    applyServerPayload(data, requestEpoch);
-  } catch (_error) {
-    if (requestEpoch === captureIntentEpoch) wifiMapEnabled.set(!want);
-    notify(`WiFi signal map: could not ${want ? "start" : "stop"} capture.`, "warn");
-  }
-}
-
 export function setWifiOverlayEnabled(enabled) {
   wifiOverlayEnabled.set(Boolean(enabled));
 }
+
+let recordInFlight = false;
+let lastRecordAt = 0;
+let lastRecordCell = null;
 
 export function ingestWifiPose(pose) {
   const signalDbm = pose?.wifi?.signalDbm;
@@ -184,16 +154,16 @@ export function ingestWifiPose(pose) {
 
   recordInFlight = true;
   recordWifiSamples([{ x: sample.x, y: sample.y, signalDbm: sample.signalDbm }])
-    .catch(() => syncWifiSamplesQuietly(true))
+    .catch(() => wifiCapture.syncQuietly(true))
     .finally(() => {
       recordInFlight = false;
     });
 }
 
 export async function clearWifiSamples() {
-  const requestEpoch = captureIntentEpoch;
+  const requestEpoch = wifiCapture.currentEpoch();
   const data = await deleteWifiMap();
-  applyServerPayload({ ...data, samples: [] }, requestEpoch);
+  wifiCapture.apply({ ...data, samples: [] }, requestEpoch);
 }
 
 /**
@@ -203,17 +173,5 @@ export async function clearWifiSamples() {
  * heatmap overlay is off.
  */
 export function initWifiSurveyLifecycle() {
-  if (typeof document === "undefined") return () => {};
-  let timer = null;
-  const syncIfVisible = () => {
-    if (!document.hidden) syncWifiSamplesQuietly();
-  };
-
-  migrateLegacySamples().finally(syncIfVisible);
-  timer = setInterval(syncIfVisible, SYNC_MS);
-  document.addEventListener("visibilitychange", syncIfVisible);
-  return () => {
-    if (timer != null) clearInterval(timer);
-    document.removeEventListener("visibilitychange", syncIfVisible);
-  };
+  return wifiCapture.initLifecycle(SYNC_MS, { beforeFirstSync: migrateLegacySamples });
 }

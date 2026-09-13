@@ -1,44 +1,84 @@
-﻿name: Build and push
+name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+# Cancel a superseded run on the same branch/PR instead of burning CI minutes
+# on an outdated push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  test:
+    name: Test & build
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+      # Validates the exact compose file users paste into Dockge to deploy on
+      # the mower — a syntax/schema break here would ship straight to every
+      # install that copies it from the README.
+      - name: Validate docker-compose.yml
+        run: docker compose -f docker-compose.yml config -q
+
+  docker:
+    name: Build and push Docker image
+    needs: test
+    runs-on: ubuntu-latest
+    # Multi-arch so the same image installs on both a Raspberry Pi mower
+    # (arm64) and an x86 dev machine. PRs still build both platforms (arm64
+    # via QEMU) without pushing, so a Pi-only breakage is caught before merge
+    # rather than after someone pulls :latest onto their mower.
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     permissions:
       contents: read
       packages: write
     steps:
-    - uses: actions/checkout@v5
-    
-    - name: Lowercase repo name
-      run: |
-        REPO_NAME=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
-        echo "IMAGE_NAME=ghcr.io/$REPO_NAME:latest" >> $GITHUB_ENV
-        echo "IMAGE_NAME=$IMAGE_NAME"
-        SHORT_SHA=$(echo '${{ github.sha }}' | cut -c1-7)
-        echo "IMAGE_SHA=ghcr.io/$REPO_NAME:sha-$SHORT_SHA" >> $GITHUB_ENV
-        echo "IMAGE_SHA=$IMAGE_SHA"
-    
-    - uses: docker/login-action@v4
-      if: github.event_name == 'push'
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v5
 
-    - uses: docker/setup-qemu-action@v3
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
 
-    - uses: docker/setup-buildx-action@v3
-    
-    - uses: docker/build-push-action@v7
-      with:
-        push: ${{ github.event_name == 'push' }}
-        platforms: linux/amd64,linux/arm64
-        tags: |
-          ${{ env.IMAGE_NAME }}
-          ${{ env.IMAGE_SHA }}
+      - uses: docker/login-action@v4
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v7
+        with:
+          push: ${{ github.event_name == 'push' }}
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GitHub Actions cache for Docker layers — the arm64 leg is emulated
+          # under QEMU and by far the slowest part of this build; caching it
+          # keeps PRs and repeat pushes fast instead of rebuilding from
+          # scratch every time.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
