@@ -118,7 +118,12 @@
 </script>
 
 <div class="glass w-[260px] rounded-2xl px-3 py-2.5">
-  <button class="flex w-full items-center justify-between gap-2" on:click={toggleHudExpanded}>
+  <button
+    class="flex w-full items-center justify-between gap-2"
+    aria-expanded={hudExpanded}
+    title={hudExpanded ? "Collapse status panel" : "Expand status panel"}
+    on:click={toggleHudExpanded}
+  >
     <div class="flex items-center gap-1.5 text-xs font-semibold">
       <span
         class="material-symbols-outlined"
