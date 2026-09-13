@@ -18,7 +18,6 @@
   import { notify } from "../lib/stores/toast.js";
   import {
     clearRobotTrailHistory,
-    robotTrail,
     robotTrailDisplayPoints,
     robotTrailEnabled,
     robotTrailHistoryEnabled,
@@ -31,6 +30,8 @@
     shiftRobotTrailDate,
     todayDateKey,
   } from "../lib/stores/robotTrail.js";
+  import CaptureToggleHeader from "./CaptureToggleHeader.svelte";
+  import OverlayToggleRow from "./OverlayToggleRow.svelte";
 
   // Shared on/off colors so the Live robot, WiFi, and Movement trail icons
   // read as one consistent language: green once toggled on, muted when off.
@@ -41,11 +42,10 @@
   $: signalColor = wifiSignalColor($wifiSurveySummary.signalDbm);
   $: today = todayDateKey();
   $: isViewingToday = $robotTrailSelectedDate === today;
-  $: trailSpanLabel = (() => {
-    if ($robotTrail.length < 2) return null;
-    const seconds = Math.round(($robotTrail[$robotTrail.length - 1].t - $robotTrail[0].t) / 1000);
-    return seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)}m`;
-  })();
+  // Server truth, not the client-only Live-robot breadcrumb — this must stay
+  // accurate even when Live robot is off, since capture itself doesn't
+  // depend on it.
+  $: trailCapturing = Boolean($robotTrailHistoryStorage.collector?.capturing);
 
   function toggleWifiMap() {
     setWifiMapEnabled(!$wifiMapEnabled);
@@ -134,25 +134,13 @@
   {/if}
 
   <div class="mt-2 border-t pt-2" style="border-color:var(--glass-edge)">
-    <div class="flex items-center justify-between gap-2">
-      <div class="flex items-center gap-2 text-xs font-semibold">
-        <span
-          class="material-symbols-outlined"
-          style="font-size:17px;color:{$wifiMapEnabled ? ICON_ON_COLOR : ICON_OFF_COLOR}"
-        >signal_cellular_alt</span>
-        WiFi signal map
-      </div>
-      <button
-        class="btn-icon !h-7 !w-7"
-        class:text-accent={$wifiMapEnabled}
-        title="Start/stop capturing the WiFi signal to a file"
-        on:click={toggleWifiMap}
-      >
-        <span class="material-symbols-outlined" style="font-size:22px">
-          {$wifiMapEnabled ? "toggle_on" : "toggle_off"}
-        </span>
-      </button>
-    </div>
+    <CaptureToggleHeader
+      icon="signal_cellular_alt"
+      label="WiFi signal map"
+      enabled={$wifiMapEnabled}
+      toggleTitle="Start/stop capturing the WiFi signal to a file"
+      onToggle={toggleWifiMap}
+    />
 
     {#if $wifiMapEnabled}
       <div transition:fade={{ duration: 140 }}>
@@ -174,29 +162,15 @@
           </div>
         </div>
 
-        <div class="mt-2 flex items-center justify-between gap-2 border-t pt-2" style="border-color:var(--glass-edge)">
-          <span class="text-[10px] text-subtle">Overlay heatmap</span>
-          <div class="flex items-center gap-1">
-            <button
-              class="btn-icon !h-6 !w-6"
-              title="Clear the shared WiFi signal map"
-              disabled={$wifiSurveySummary.sampleCount === 0}
-              on:click={clearSurvey}
-            >
-              <span class="material-symbols-outlined" style="font-size:16px">delete</span>
-            </button>
-            <button
-              class="btn-icon !h-6 !w-6"
-              class:text-accent={$wifiOverlayEnabled}
-              title="Overlay the WiFi signal heatmap on the map"
-              on:click={toggleWifiOverlay}
-            >
-              <span class="material-symbols-outlined" style="font-size:18px">
-                {$wifiOverlayEnabled ? "toggle_on" : "toggle_off"}
-              </span>
-            </button>
-          </div>
-        </div>
+        <OverlayToggleRow
+          label="Overlay heatmap"
+          enabled={$wifiOverlayEnabled}
+          toggleTitle="Overlay the WiFi signal heatmap on the map"
+          onToggle={toggleWifiOverlay}
+          clearTitle="Clear the shared WiFi signal map"
+          clearDisabled={$wifiSurveySummary.sampleCount === 0}
+          onClear={clearSurvey}
+        />
 
         {#if $wifiOverlayEnabled}
           <div transition:fade={{ duration: 140 }} class="mt-1">
@@ -223,55 +197,30 @@
   </div>
 
   <div class="mt-2 border-t pt-2" style="border-color:var(--glass-edge)">
-    <div class="flex items-center justify-between gap-2">
-      <div class="flex items-center gap-2 text-xs font-semibold">
-        <span
-          class="material-symbols-outlined"
-          style="font-size:17px;color:{$robotTrailEnabled ? ICON_ON_COLOR : ICON_OFF_COLOR}"
-        >route</span>
-        Movement trail
-      </div>
-      <button
-        class="btn-icon !h-7 !w-7"
-        class:text-accent={$robotTrailEnabled}
-        title="Start/stop recording the mower's movement trail"
-        on:click={toggleRobotTrail}
-      >
-        <span class="material-symbols-outlined" style="font-size:22px">
-          {$robotTrailEnabled ? "toggle_on" : "toggle_off"}
-        </span>
-      </button>
-    </div>
+    <CaptureToggleHeader
+      icon="route"
+      label="Movement trail"
+      enabled={$robotTrailEnabled}
+      toggleTitle="Start/stop recording the mower's movement trail"
+      onToggle={toggleRobotTrail}
+    />
 
     {#if $robotTrailEnabled}
       <div transition:fade={{ duration: 140 }}>
         <div class="text-[10px] text-subtle">
-          {$robotTrail.length} point{$robotTrail.length === 1 ? "" : "s"}{trailSpanLabel ? ` · last ${trailSpanLabel}` : ""}
+          {$robotTrailHistoryPoints.length} point{$robotTrailHistoryPoints.length === 1 ? "" : "s"} today ·
+          {trailCapturing ? "capturing now" : "not capturing"}
         </div>
 
-        <div class="mt-2 flex items-center justify-between gap-2 border-t pt-2" style="border-color:var(--glass-edge)">
-          <span class="text-[10px] text-subtle">Overlay saved history</span>
-          <div class="flex items-center gap-1">
-            <button
-              class="btn-icon !h-6 !w-6"
-              title="Clear the saved movement trail"
-              disabled={!isViewingToday || $robotTrailHistoryPoints.length === 0}
-              on:click={clearSavedTrail}
-            >
-              <span class="material-symbols-outlined" style="font-size:16px">delete</span>
-            </button>
-            <button
-              class="btn-icon !h-6 !w-6"
-              class:text-accent={$robotTrailHistoryEnabled}
-              title="Overlay the mower's saved movement trail"
-              on:click={toggleRobotTrailHistory}
-            >
-              <span class="material-symbols-outlined" style="font-size:18px">
-                {$robotTrailHistoryEnabled ? "toggle_on" : "toggle_off"}
-              </span>
-            </button>
-          </div>
-        </div>
+        <OverlayToggleRow
+          label="Overlay saved history"
+          enabled={$robotTrailHistoryEnabled}
+          toggleTitle="Overlay the mower's saved movement trail"
+          onToggle={toggleRobotTrailHistory}
+          clearTitle="Clear the saved movement trail"
+          clearDisabled={!isViewingToday || $robotTrailHistoryPoints.length === 0}
+          onClear={clearSavedTrail}
+        />
 
         {#if $robotTrailHistoryEnabled}
           <div transition:fade={{ duration: 140 }} class="mt-1">
@@ -317,7 +266,6 @@
               {/if}
             </div>
             <div class="mt-1 text-[9px] leading-relaxed text-subtle">
-              {$robotTrailHistoryStorage.collector?.capturing ? "Capturing now" : "Not capturing"} ·
               {$robotTrailHistoryStorage.minDistanceM} m spacing ·
               {Math.round($robotTrailHistoryStorage.flushIntervalMs / 1000)} s disk flush ·
               {formatBytes($robotTrailHistoryStorage.fileBytes)}

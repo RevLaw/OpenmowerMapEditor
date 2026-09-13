@@ -166,7 +166,7 @@ export function setRobotLive(on) {
     stop();
     robotPose.set(null);
     clearRobotTrail();
-    setStatus("Live robot overlay off.");
+    notify("Live robot off.", "info");
   }
 }
 

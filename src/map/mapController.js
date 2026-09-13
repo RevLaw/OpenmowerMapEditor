@@ -280,11 +280,16 @@ export function createMapController(container) {
   // undocking, "mowing" covers active mowing) so the line can show what the
   // robot was doing, not just where it went. Colors are fixed regardless of
   // light/dark theme, like the rest of the map's overlays.
+  // Picked to stand out against typical aerial imagery (grass/asphalt) and to
+  // stay distinct from every other overlay color already in use on this map
+  // (nav-zone outlines and the path-preview lines are the same blue as the
+  // old "mowing" color, and dark navy reads as near-black over shadowed
+  // ground — both were hard to actually see).
   const TRAIL_PHASE_COLORS = {
-    docking: "#1e3a8a",
-    mowing: "#38bdf8",
+    docking: "#f97316",
+    mowing: "#ec4899",
   };
-  const TRAIL_FALLBACK_COLOR = "#fbbf24";
+  const TRAIL_FALLBACK_COLOR = "#facc15";
 
   function trailPhaseColor(phase) {
     return TRAIL_PHASE_COLORS[phase] || TRAIL_FALLBACK_COLOR;
@@ -329,29 +334,39 @@ export function createMapController(container) {
     return runs;
   }
 
+  /**
+   * Draws one polyline per constant-phase run in `points` (see
+   * splitTrailByPhase), appending each to `out`. Shared by the live
+   * breadcrumb and the persisted trail history — they only differ in line
+   * weight/opacity and whether corners are rounded.
+   */
+  function drawTrailRuns(points, out, { weight, mowingOpacity, lineJoin }) {
+    for (const run of splitTrailByPhase(points)) {
+      const style = trailPhaseStyle(run.phase, mowingOpacity);
+      out.push(
+        L.polyline(
+          run.points.map((p) => metersToLatLng(p, origin())),
+          {
+            color: trailPhaseColor(run.phase),
+            weight,
+            opacity: style.opacity,
+            dashArray: style.dashArray,
+            lineCap: "round",
+            ...(lineJoin ? { lineJoin } : {}),
+            interactive: false,
+          }
+        ).addTo(map)
+      );
+    }
+  }
+
   /** Breadcrumb of recent live-robot positions — a lightweight "where has it been" trail. */
   function renderRobotTrail(enabled, trail) {
     layers.robotTrail.forEach((layer) => map.removeLayer(layer));
     layers.robotTrail = [];
     if (!enabled || !s.origin || !Array.isArray(trail) || trail.length < 2) return;
 
-    for (const run of splitTrailByPhase(trail)) {
-      const style = trailPhaseStyle(run.phase, 0.75);
-      layers.robotTrail.push(
-        L.polyline(
-          run.points.map((p) => metersToLatLng(p, origin())),
-          {
-            color: trailPhaseColor(run.phase),
-            weight: 3,
-            opacity: style.opacity,
-            dashArray: style.dashArray,
-            lineCap: "round",
-            lineJoin: "round",
-            interactive: false,
-          }
-        ).addTo(map)
-      );
-    }
+    drawTrailRuns(trail, layers.robotTrail, { weight: 3, mowingOpacity: 0.75, lineJoin: "round" });
   }
 
   // Persisted, mower-side trail history: breaks into separate segments across
@@ -360,22 +375,7 @@ export function createMapController(container) {
   const TRAIL_HISTORY_SEGMENT_GAP_MS = 120000;
 
   function drawTrailHistorySegment(segment, out) {
-    for (const run of splitTrailByPhase(segment)) {
-      const style = trailPhaseStyle(run.phase, 0.9);
-      out.push(
-        L.polyline(
-          run.points.map((p) => metersToLatLng(p, origin())),
-          {
-            color: trailPhaseColor(run.phase),
-            weight: 4,
-            opacity: style.opacity,
-            dashArray: style.dashArray,
-            lineCap: "round",
-            interactive: false,
-          }
-        ).addTo(map)
-      );
-    }
+    drawTrailRuns(segment, out, { weight: 4, mowingOpacity: 0.9 });
   }
 
   function renderRobotTrailHistory(enabled, points) {

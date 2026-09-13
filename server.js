@@ -142,8 +142,6 @@ const wifiSurvey = new Map();
 let wifiSurveyLoaded = false;
 let wifiSurveyLoadPromise = null;
 let wifiSurveyDirty = false;
-let wifiSurveyFlushTimer = null;
-let wifiSurveyFlushPromise = null;
 let wifiSurveyRevision = 0;
 let wifiSurveyUpdatedAt = null;
 let wifiSurveyLastBytes = 0;
@@ -173,8 +171,6 @@ const robotTrailHistory = []; // ordered [{x, y, t}], oldest first
 let robotTrailHistoryLoaded = false;
 let robotTrailHistoryLoadPromise = null;
 let robotTrailHistoryDirty = false;
-let robotTrailHistoryFlushTimer = null;
-let robotTrailHistoryFlushPromise = null;
 let robotTrailHistoryRevision = 0;
 let robotTrailHistoryUpdatedAt = null;
 let robotTrailHistoryLastBytes = 0;
@@ -388,52 +384,87 @@ async function backupBeforeClear(targetPath) {
   return backupPath;
 }
 
-async function flushWifiSurvey(forceAll = false) {
-  if (wifiSurveyFlushTimer) {
-    clearTimeout(wifiSurveyFlushTimer);
-    wifiSurveyFlushTimer = null;
+/**
+ * Debounced disk flush shared by every persisted store (WiFi survey, trail
+ * history): coalesces bursts of dirty-marking into one write per
+ * `flushIntervalMs`, waits out an in-flight write instead of racing it, and
+ * retries once more if new writes landed while the previous one was in
+ * flight. `write()` does the store-specific part (build payload, atomic
+ * write, update byte count, log); this only owns the timer/in-flight/retry
+ * mechanics around it.
+ */
+function createFlushScheduler({ label, flushIntervalMs, isLoaded, isDirty, getRevision, onFlushed, write }) {
+  let flushTimer = null;
+  let flushPromise = null;
+
+  async function flush(forceAll = false) {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    if (flushPromise) {
+      await flushPromise;
+      if (forceAll && isDirty()) return flush(true);
+      return;
+    }
+    if (!isLoaded() || !isDirty()) return;
+    const flushRevision = getRevision();
+    flushPromise = (async () => {
+      await write();
+      onFlushed(flushRevision);
+    })();
+    try {
+      await flushPromise;
+    } finally {
+      flushPromise = null;
+    }
+    if (isDirty()) {
+      if (forceAll) return flush(true);
+      schedule();
+    }
   }
-  if (wifiSurveyFlushPromise) {
-    await wifiSurveyFlushPromise;
-    if (forceAll && wifiSurveyDirty) return flushWifiSurvey(true);
-    return;
+
+  function schedule() {
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flush().catch((error) => {
+        logError(`Failed to flush ${label}`, { error: error.message });
+        if (isDirty()) schedule();
+      });
+    }, flushIntervalMs);
+    flushTimer.unref?.();
   }
-  if (!wifiSurveyLoaded || !wifiSurveyDirty) return;
-  const flushRevision = wifiSurveyRevision;
-  wifiSurveyFlushPromise = (async () => {
+
+  return { flush, schedule };
+}
+
+const wifiFlushScheduler = createFlushScheduler({
+  label: "central WiFi survey",
+  flushIntervalMs: wifiFlushMs,
+  isLoaded: () => wifiSurveyLoaded,
+  isDirty: () => wifiSurveyDirty,
+  getRevision: () => wifiSurveyRevision,
+  onFlushed: (flushRevision) => {
+    wifiSurveyDirty = wifiSurveyRevision !== flushRevision;
+  },
+  write: async () => {
     const payload = JSON.stringify(wifiSurveyPayload());
     await atomicWriteOwnedFile(wifiMapPath, payload);
     wifiSurveyLastBytes = Buffer.byteLength(payload, "utf8");
-    wifiSurveyDirty = wifiSurveyRevision !== flushRevision;
     logInfo("Flushed central WiFi survey", {
       file: wifiMapPath,
       points: wifiSurvey.size,
       bytes: wifiSurveyLastBytes,
     });
-  })();
-  try {
-    await wifiSurveyFlushPromise;
-  } finally {
-    wifiSurveyFlushPromise = null;
-  }
-  if (wifiSurveyDirty) {
-    if (forceAll) return flushWifiSurvey(true);
-    scheduleWifiSurveyFlush();
-  }
+  },
+});
+
+async function flushWifiSurvey(forceAll = false) {
+  return wifiFlushScheduler.flush(forceAll);
 }
 
 function scheduleWifiSurveyFlush() {
-  if (wifiSurveyFlushTimer) return;
-  wifiSurveyFlushTimer = setTimeout(() => {
-    flushWifiSurvey().catch((error) => {
-      logError("Failed to flush central WiFi survey", {
-        file: wifiMapPath,
-        error: error.message,
-      });
-      if (wifiSurveyDirty) scheduleWifiSurveyFlush();
-    });
-  }, wifiFlushMs);
-  wifiSurveyFlushTimer.unref?.();
+  wifiFlushScheduler.schedule();
 }
 
 function wifiSurveyMeta() {
@@ -481,8 +512,16 @@ function classifyTrailPhase(stateName) {
   return null;
 }
 
-/** Phase of the most recently appended trail point, to detect the start of a new mow. */
-let robotTrailLastPhase = null;
+/** True if `a` and `b` (epoch ms) fall on different local calendar days. */
+function isDifferentLocalDay(a, b) {
+  const dateA = new Date(a);
+  const dateB = new Date(b);
+  return (
+    dateA.getFullYear() !== dateB.getFullYear() ||
+    dateA.getMonth() !== dateB.getMonth() ||
+    dateA.getDate() !== dateB.getDate()
+  );
+}
 
 /** Matches the id format `archiveRobotTrailSession` generates (an ISO timestamp, `:`/`.` swapped for `-`). */
 const ROBOT_TRAIL_ARCHIVE_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
@@ -583,27 +622,29 @@ function appendRobotTrailPoint(x, y, timestamp = Date.now(), markDirty = true, p
 
 /**
  * Fed by the persistent live-pose subscriber; no-op unless capture is
- * actually on. Clears the saved history right as a new mow begins (rising
- * edge into the "mowing" phase), so re-mowing the same area starts a fresh,
- * readable trail instead of piling up on top of previous passes — the
- * outgoing session is archived first (see GET /api/robot-trail/archive), not
- * just discarded.
+ * actually on. Every mow during the same calendar day keeps writing to the
+ * same history — a second or third mow the same day just continues the
+ * day's trail instead of starting over — so browsing a day shows everything
+ * that happened on it. A fresh session only starts once the local date
+ * actually changes since the last recorded point; the outgoing day is
+ * archived first (see GET /api/robot-trail/archive), not just discarded.
  */
 function ingestLiveTrailPoint(x, y) {
   if (robotTrailCollectorDisabled || !robotTrailCaptureEnabled || !robotTrailHistoryLoaded) return;
+  const now = Date.now();
   const phase = classifyTrailPhase(robotStream.telemetry?.stateName);
-  if (phase === "mowing" && robotTrailLastPhase !== "mowing" && robotTrailHistory.length) {
+  const lastPoint = robotTrailHistory[robotTrailHistory.length - 1];
+  if (lastPoint && isDifferentLocalDay(now, lastPoint.t)) {
     archiveRobotTrailSession(robotTrailHistory.slice()).catch((error) => {
       logWarn("Failed to archive movement-trail session", { error: error.message });
     });
     robotTrailHistory.length = 0;
     robotTrailHistoryDirty = true;
     robotTrailHistoryRevision += 1;
-    robotTrailHistoryUpdatedAt = Date.now();
+    robotTrailHistoryUpdatedAt = now;
     scheduleRobotTrailHistoryFlush();
   }
-  robotTrailLastPhase = phase;
-  appendRobotTrailPoint(x, y, Date.now(), true, phase);
+  appendRobotTrailPoint(x, y, now, true, phase);
 }
 
 /** Starts/stops capture (shared across every browser); resumes the pose subscriber
@@ -642,10 +683,6 @@ async function ensureRobotTrailHistoryLoaded() {
       robotTrailHistoryUpdatedAt = Number(parsed?.updatedAt) || null;
       robotTrailCaptureEnabled = parsed?.captureEnabled === true;
       robotTrailHistoryRevision = 1;
-      // Otherwise a restart mid-mow would reset this to null and the very
-      // next point would look like a rising edge into "mowing", wiping the
-      // history it just loaded.
-      robotTrailLastPhase = robotTrailHistory[robotTrailHistory.length - 1]?.phase || null;
       logInfo("Loaded robot movement trail history", {
         file: robotTrailHistoryPath,
         points: robotTrailHistory.length,
@@ -677,52 +714,33 @@ function robotTrailHistoryPayload() {
   };
 }
 
-async function flushRobotTrailHistory(forceAll = false) {
-  if (robotTrailHistoryFlushTimer) {
-    clearTimeout(robotTrailHistoryFlushTimer);
-    robotTrailHistoryFlushTimer = null;
-  }
-  if (robotTrailHistoryFlushPromise) {
-    await robotTrailHistoryFlushPromise;
-    if (forceAll && robotTrailHistoryDirty) return flushRobotTrailHistory(true);
-    return;
-  }
-  if (!robotTrailHistoryLoaded || !robotTrailHistoryDirty) return;
-  const flushRevision = robotTrailHistoryRevision;
-  robotTrailHistoryFlushPromise = (async () => {
+const robotTrailFlushScheduler = createFlushScheduler({
+  label: "robot movement trail history",
+  flushIntervalMs: robotTrailFlushMs,
+  isLoaded: () => robotTrailHistoryLoaded,
+  isDirty: () => robotTrailHistoryDirty,
+  getRevision: () => robotTrailHistoryRevision,
+  onFlushed: (flushRevision) => {
+    robotTrailHistoryDirty = robotTrailHistoryRevision !== flushRevision;
+  },
+  write: async () => {
     const payload = JSON.stringify(robotTrailHistoryPayload());
     await atomicWriteOwnedFile(robotTrailHistoryPath, payload);
     robotTrailHistoryLastBytes = Buffer.byteLength(payload, "utf8");
-    robotTrailHistoryDirty = robotTrailHistoryRevision !== flushRevision;
     logInfo("Flushed robot movement trail history", {
       file: robotTrailHistoryPath,
       points: robotTrailHistory.length,
       bytes: robotTrailHistoryLastBytes,
     });
-  })();
-  try {
-    await robotTrailHistoryFlushPromise;
-  } finally {
-    robotTrailHistoryFlushPromise = null;
-  }
-  if (robotTrailHistoryDirty) {
-    if (forceAll) return flushRobotTrailHistory(true);
-    scheduleRobotTrailHistoryFlush();
-  }
+  },
+});
+
+async function flushRobotTrailHistory(forceAll = false) {
+  return robotTrailFlushScheduler.flush(forceAll);
 }
 
 function scheduleRobotTrailHistoryFlush() {
-  if (robotTrailHistoryFlushTimer) return;
-  robotTrailHistoryFlushTimer = setTimeout(() => {
-    flushRobotTrailHistory().catch((error) => {
-      logError("Failed to flush robot movement trail history", {
-        file: robotTrailHistoryPath,
-        error: error.message,
-      });
-      if (robotTrailHistoryDirty) scheduleRobotTrailHistoryFlush();
-    });
-  }, robotTrailFlushMs);
-  robotTrailHistoryFlushTimer.unref?.();
+  robotTrailFlushScheduler.schedule();
 }
 
 function robotTrailHistoryMeta() {
@@ -3170,70 +3188,90 @@ app.get(/^(?!\/api\/).*/, (req, res, next) => {
   });
 });
 
-process.on("uncaughtException", (error) => {
-  logError("Uncaught exception (process crash)", {
-    name: error.name,
-    message: error.message,
-    stack: error.stack,
+// Everything below only runs the process as a real server — never when this
+// file is `require()`d instead (e.g. by server.test.js to reach the pure
+// helpers exported below), so a test run never binds a port, touches Docker,
+// or registers process-wide signal handlers.
+if (require.main === module) {
+  process.on("uncaughtException", (error) => {
+    logError("Uncaught exception (process crash)", {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    });
   });
-});
 
-process.on("unhandledRejection", (reason) => {
-  logError("Unhandled promise rejection", { reason });
-});
-
-const server = app.listen(port, () => {
-  logInfo("OpenMower Map Editor listening", {
-    port,
-    mapPath,
-    paramsPath,
-    restartContainerName,
-    poseContainerName,
-    poseCacheMs,
-    tfEchoTimeoutSec,
-    rosTopicSampleTimeoutSec,
-    rosTopicFallbackTimeoutSec,
-    poseDisabled,
-    verboseLogs,
-    dockerSocketPath,
-    wifiMapPath,
-    wifiCellSizeM,
-    wifiMaxPoints,
-    wifiFlushMs,
-    wifiCollectorIntervalMs,
-    wifiCollectorCellRevisitMs,
-    wifiCollectorDisabled,
-    robotTrailHistoryPath,
-    robotTrailMinDistanceM,
-    robotTrailMaxPoints,
-    robotTrailFlushMs,
-    robotTrailCollectorDisabled,
+  process.on("unhandledRejection", (reason) => {
+    logError("Unhandled promise rejection", { reason });
   });
-  startAutonomousWifiCollector();
-  startPoseContainerEventWatcher();
-  startAutonomousTrailCapture();
-});
 
-let shuttingDown = false;
-async function shutdown(signal) {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  logInfo("Shutting down", { signal });
-  stopPoseContainerEventWatcher();
-  await Promise.all([stopAutonomousWifiCollector(), stopRobotStream()]);
-  server.close();
-  try {
-    await flushWifiSurvey(true);
-  } catch (error) {
-    logError("Final WiFi survey flush failed", { error: error.message });
-  }
-  try {
-    await flushRobotTrailHistory(true);
-  } catch (error) {
-    logError("Final movement trail history flush failed", { error: error.message });
-  }
-  process.exit(0);
+  const server = app.listen(port, () => {
+    logInfo("OpenMower Map Editor listening", {
+      port,
+      mapPath,
+      paramsPath,
+      restartContainerName,
+      poseContainerName,
+      poseCacheMs,
+      tfEchoTimeoutSec,
+      rosTopicSampleTimeoutSec,
+      rosTopicFallbackTimeoutSec,
+      poseDisabled,
+      verboseLogs,
+      dockerSocketPath,
+      wifiMapPath,
+      wifiCellSizeM,
+      wifiMaxPoints,
+      wifiFlushMs,
+      wifiCollectorIntervalMs,
+      wifiCollectorCellRevisitMs,
+      wifiCollectorDisabled,
+      robotTrailHistoryPath,
+      robotTrailMinDistanceM,
+      robotTrailMaxPoints,
+      robotTrailFlushMs,
+      robotTrailCollectorDisabled,
+    });
+    startAutonomousWifiCollector();
+    startPoseContainerEventWatcher();
+    startAutonomousTrailCapture();
+  });
+
+  let shuttingDown = false;
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logInfo("Shutting down", { signal });
+    stopPoseContainerEventWatcher();
+    await Promise.all([stopAutonomousWifiCollector(), stopRobotStream()]);
+    server.close();
+    try {
+      await flushWifiSurvey(true);
+    } catch (error) {
+      logError("Final WiFi survey flush failed", { error: error.message });
+    }
+    try {
+      await flushRobotTrailHistory(true);
+    } catch (error) {
+      logError("Final movement trail history flush failed", { error: error.message });
+    }
+    process.exit(0);
+  };
+
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 }
 
-process.once("SIGTERM", () => shutdown("SIGTERM"));
-process.once("SIGINT", () => shutdown("SIGINT"));
+// Pure/stateless helpers plus the two in-memory stores, exposed so
+// server.test.js can unit-test them directly without booting a server.
+module.exports = {
+  isDifferentLocalDay,
+  classifyTrailPhase,
+  normalizeWifiSample,
+  wifiCellKey,
+  readClampedEnvNumber,
+  mergeWifiSurveySample,
+  appendRobotTrailPoint,
+  wifiSurvey,
+  robotTrailHistory,
+};
