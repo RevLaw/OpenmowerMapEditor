@@ -27,7 +27,7 @@ lock, save dialog, draft restore, import, recording, trail → zone).
 - **Confirm-before-save dialog** with a zone-level diff and validation results.
 - **Draft autosave** to local storage with a restore prompt after reload.
 - **New validation checks** — mow zones unreachable from the dock, dock
-  outside every drivable zone, obstacles crossing a mow edge, zones narrower
+  outside every drivable zone, zones narrower
   than the cutting width. Validation now runs debounced.
 - Shortcuts: `[` / `]` cycle zones, `L` lock, `H` hide, `Ctrl + A` select
   all points, `Shift + F` fit map.
@@ -72,6 +72,10 @@ lock, save dialog, draft restore, import, recording, trail → zone).
   arrows. The HUD's reset button reads **Reset** so it fits.
 
 ### Fixed
+- Removed the "obstacle crosses the edge of a mow zone" warning: OpenMower's
+  coverage planner clips every obstacle to the area it plans, so a border
+  obstacle (tree, bed) that sticks out is fine — the warning was a false
+  alarm. Combine zones → Clip remains for tidy outlines.
 - **Push brush lag** — a stroke over a 768-point zone ran at ~11 fps (89 ms
   frames, spikes to 160 ms). Brush steps are now batched per animation frame
   into one store update, the stroke patches the outline and moved handles in

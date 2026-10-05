@@ -14,7 +14,6 @@ import {
   signedArea,
   pointToSegmentDistance,
 } from "./geo/geometry.js";
-import { intersectOutlines } from "./geo/boolean.js";
 import { getEditablePoints } from "./format/outline.js";
 import { getAreaType, getZoneName } from "./format/mapFormat.js";
 
@@ -22,8 +21,6 @@ const DUP_EPSILON_M = 0.02;
 // Zones whose borders come this close are treated as connected (the robot can
 // drive from one into the other). Generous enough for hand-traced seams.
 const CONNECT_EPSILON_M = 0.15;
-// An obstacle counts as "crossing" a mow edge once this share sticks out.
-const CROSSING_SHARE = 0.01;
 // The dock usually stands right at a zone's border, so allow some slack.
 const DOCK_SLACK_M = 1;
 
@@ -48,14 +45,6 @@ function findSelfIntersection(points) {
     }
   }
   return false;
-}
-
-function safeIntersect(a, b) {
-  try {
-    return intersectOutlines(a, b).outlines;
-  } catch (_e) {
-    return []; // degenerate input the clipper can't handle — reported elsewhere
-  }
 }
 
 /** Are two zones connected — overlapping, nested, or with borders (nearly) touching? */
@@ -197,25 +186,10 @@ export function validateMap(map, opts = {}) {
     }
   });
 
-  // An obstacle poking out over a mow edge: the part outside does nothing and
-  // usually means the outline was traced sloppily — clip it to the zone.
-  for (const ob of zones) {
-    if (ob.type !== "obstacle") continue;
-    const obArea = polygonArea(ob.pts);
-    for (const mow of zones) {
-      if (mow.type !== "mow" || !boxesOverlap(ob.box, mow.box)) continue;
-      const inside = safeIntersect(ob.pts, mow.pts).reduce((sum, p) => sum + polygonArea(p), 0);
-      if (inside > 0 && inside < obArea * (1 - CROSSING_SHARE)) {
-        issues.push({
-          id: `crossing-${ob.index}-${mow.index}`,
-          severity: "warning",
-          message: `${ob.label} crosses the edge of ${mow.label} — clip it to the zone.`,
-          areaIndex: ob.index,
-          pointIndex: null,
-        });
-      }
-    }
-  }
+  // Note: an obstacle that sticks out over a mow edge is deliberately NOT
+  // flagged — OpenMower's coverage planner clips every obstacle to the area
+  // it plans (the outside part only keeps blocking navigation, which is
+  // usually intended for a tree or bed on the border).
 
   // Dock sitting inside an obstacle is almost certainly a mistake.
   const dock = map?.docking_stations?.[0]?.position;

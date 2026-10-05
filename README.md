@@ -131,7 +131,7 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 ### Safety net
 - **Confirm before save** — Save opens a summary of what changed since the last load/save (zones added / removed / edited, dock moved, reordering) plus the validation results, with an optional ROS restart
 - **Draft autosave** — unsaved edits are mirrored to the browser's local storage; after a reload or crash you're offered to restore them
-- **Extra checks** — mow zones the robot can't reach from the dock through mow/nav zones, a dock outside every drivable zone, obstacles crossing a mow edge, and mow zones narrower than the cutting width
+- **Extra checks** — mow zones the robot can't reach from the dock through mow/nav zones, a dock outside every drivable zone, and mow zones narrower than the cutting width (an obstacle sticking out over a mow edge is fine — OpenMower clips it to the area)
 
 ### Map management
 - Auto-load `/data/ros/map.json` (if present); auto-fill projection from `/data/params/mower_params.yaml` (`datum_lat`, `datum_long`)

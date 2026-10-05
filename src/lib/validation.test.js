@@ -79,13 +79,11 @@ describe("validateMap — connectivity, dock and overlap checks", () => {
     expect(validateMap(map).filter((i) => i.id.startsWith("unreachable"))).toEqual([]);
   });
 
-  it("flags an obstacle crossing a mow edge but not one fully inside", () => {
+  it("does not flag an obstacle sticking out over a mow edge (OpenMower clips it)", () => {
     const map = {
-      areas: [zone("mow", rect(0, 0, 10, 10)), zone("obstacle", rect(9, 4, 2, 2)), zone("obstacle", rect(4, 4, 1, 1))],
+      areas: [zone("mow", rect(0, 0, 10, 10)), zone("obstacle", rect(8.5, 4, 2, 2))], // 25% sticks out
     };
-    const ids = validateMap(map).map((i) => i.id);
-    expect(ids).toContain("crossing-1-0");
-    expect(ids).not.toContain("crossing-2-0");
+    expect(validateMap(map)).toEqual([]);
   });
 
   it("flags a mow strip narrower than the cutting width", () => {
