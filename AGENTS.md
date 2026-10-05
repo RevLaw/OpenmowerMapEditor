@@ -29,17 +29,26 @@ Read files in roughly this order when getting oriented:
    you're adding a new editing action, it goes here.
 3. **`src/lib/geo/`** — framework-free, unit-tested geometry: projection
    (lat/lng ⟷ local meters), polygon math, offset/simplify, coverage-path
-   approximation, and the interactive tools (`geo/tools/brush.js`,
-   `geo/tools/snap.js`). No DOM or Leaflet imports here by design — this is
+   approximation, the interactive tools (`geo/tools/brush.js`,
+   `geo/tools/snap.js`, magnetic snapping in `geo/tools/magnet.js`), and
+   polygon boolean ops (`geo/boolean.js` — merge/cut/clip/split on top of
+   `polygon-clipping`, reduced to hole-free outer rings because `map.json`
+   outlines can't have holes). GeoJSON/KML exchange lives in
+   `format/exchange.js`. No DOM or Leaflet imports here by design — this is
    what `npm test` covers most heavily.
 4. **`src/map/mapController.js`** — the Leaflet integration layer. Subscribes
    to the editor store and renders/updates markers, polylines, and overlays;
    translates raw mouse/touch events into store actions. This is the seam
    between "pure logic" and "browser rendering."
 5. **`src/components/`** — Svelte UI: `AppShell.svelte` is the root layout;
-   `components/panels/` holds sidebar panels (Mowing, Transform, Create,
-   etc.); `ToolDock.svelte`, `CommandPalette.svelte`, `RobotHud.svelte` are
-   the other major interactive surfaces.
+   `components/panels/` holds sidebar panels (Zones list, Mowing, Transform,
+   Dock, Record, etc.), grouped into Zones / Map / Robot tabs by
+   `Sidebar.svelte`; `ToolDock.svelte`, `CommandPalette.svelte`,
+   `RobotHud.svelte` (status + mower control) are the other major
+   interactive surfaces. `ContextMenu.svelte`, `SaveDialog.svelte` and
+   `DraftBanner.svelte` are driven by stores (`stores/ui.js`,
+   `stores/draft.js`). Editor-only view state (hidden / locked zones) lives
+   in `stores/zoneView.js` and is never written to `map.json`.
 6. **`server.js`** — single-file Express backend. It's long but organized
    top-to-bottom as: logging helpers → WiFi-survey merge/persistence →
    Docker Engine API client (`dockerApiRequest`) → shell scripts that get

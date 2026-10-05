@@ -90,8 +90,20 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 - Move the home station marker (`docking_stations[0].position`)
 - Undo/redo history for editing actions (arrow buttons)
 
+### Comfortable editing
+- **Every zone visible and clickable** — all zones are drawn (type-colored fill), click one on the map to select it, hover for its name / type / area
+- **Zone list** (Zones tab) — every zone with type color and area; click to select & fit, plus per-zone **hide** and **lock** toggles (editor-only, kept per browser, never written to `map.json`). Locked zones can't be edited or deleted
+- **Draw polygon** (`P`) — click corners, finish by clicking the first point, double-click, `Enter` or right-click; `Backspace` removes the last corner
+- **Midpoint handles** — drag the small dot in the middle of any edge to insert a vertex there; outlines redraw live while you drag
+- **Magnetic snapping** — dragged/placed points snap onto other zones' vertices and edges (and the dock) so neighbouring zones line up without gaps; toggle in the tool dock, hold `Alt` to bypass
+- **Right-click / long-press menus** on zones, vertices, the dock and empty map (retype, duplicate, split, lock, hide, delete, make start point, draw/measure from here, …)
+- **Selection bar** — floating quick actions for the selected zone (fit, duplicate, lock, hide, delete)
+- **Exact values** — type a vertex's X/Y, rotate by any angle, scale to any percentage; set the docking station's position and **heading** (shown as an arrow on the dock)
+- **Combine & split** — merge two zones (union), cut one out of another (difference), clip an obstacle to its mow zone (intersection), or split a zone along a line (`X`)
+- **Ruler** (`D`) — measure distances with per-segment and total labels
+
 ### Quick create & transform
-- Draw rectangle/circle zones, place the dock by clicking, duplicate a zone
+- Draw rectangle/circle/polygon zones, place the dock by clicking, duplicate a zone
 - Move a whole zone, rotate/scale about its centroid
 - **Grow/shrink** — offset every border by a margin (a buffer)
 - Simplify an outline (Douglas–Peucker), smart add-point on the nearest edge, multi-point delete, arrow-key nudging
@@ -101,19 +113,31 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 - **Per-area mowing overrides (OpenMower v1.2)** — set `outline_count`, `outline_overlap_count`, `outline_offset`, and `angle` **per mow zone** in the **Mowing** panel; written to `map.json` under `area.properties` (an unchecked control = use the global default). Angle is shown in degrees, stored in radians, with a hint showing the effective direction after the robot's global `mow_angle_offset`
 - **Exact mowing path (real planner)** — a **Compute exact path** button in the **Mowing** panel runs OpenMower's own `slic3r_coverage_planner` for the selected mow zone (`POST /api/plan_path`) and overlays the **literal** path the robot drives. On-demand and cached; requires the mower online, and flags itself *stale* after you edit. Read-only — planning never commands the robot
 
+### Robot-assisted mapping
+- **Record a boundary by driving** (Robot tab) — drive the mower around an area; its live position is traced (orange preview), smoothed, and turned into a mow/obstacle/nav zone. Pause/resume, step back, discard
+- **Trail → zone** — pick a stretch of the saved movement trail (or this session's live breadcrumb) with start/end sliders and turn it into a zone, with a live outline preview
+- **Robot position as vertex** — insert where the mower stands into the selected zone (nearest edge)
+- **Dock from robot** — set the docking station's position *and heading* from the live pose while the mower sits docked
+
 ### Live robot & control
 - **Live robot** overlay with **smooth motion**: the **Live robot** toolbar button opens an **SSE stream** (`GET /api/robot_pose/stream`). The server holds **one persistent ROS subscriber** inside `open_mower_ros` to `/xbot_positioning/xb_pose` (~48 Hz fused GPS/odometry pose, map frame) plus `/xbot_monitoring/robot_state` (telemetry), and pushes each sample to the browser, which **interpolates** the marker between frames — so it glides instead of jumping. On ROS 2 / non-xbot setups it falls back to a `tf2_echo`/`tf_echo` probe, and the client falls back to polling `GET /api/robot_pose` if SSE is unavailable. Marker style reflects **navigation**, **docking**, **charging at dock**, **dock full**, **emergency**, and **error** states, with RTK status. Streaming pauses while the tab is hidden
-- **Mower control** — **Start**, **Stop**, **Home**, and **Reset E-stop** in the top group of the tool dock (right side), wired to OpenMower's real services via `POST /api/control`. **Start/Home/Reset need a two-step confirm** (click → *Confirm?* → click); **Stop** is one tap. ⚠️ These move a real robot with spinning blades — disable entirely with `OPENMOWER_CONTROL_DISABLE=1`
+- **Mower control** — **Start**, **Home**, **Reset E-stop**, and **Stop** in the robot status panel (top-right, visible even when collapsed — kept apart from the map-editing tools), wired to OpenMower's real services via `POST /api/control`. **Start/Home/Reset need a two-step confirm** (click → *Confirm?* → click); **Stop** is one tap. ⚠️ These move a real robot with spinning blades — disable entirely with `OPENMOWER_CONTROL_DISABLE=1`
 
 ### WiFi signal survey & movement trail
 - Optional **WiFi signal map** — a main toggle starts/stops the mower recording its radio's dBm value with each live pose; a nested toggle paints the red-to-green heatmap in *this* browser. Shared, mower-side, persists across restarts. See [Shared data storage](#shared-data-storage-wifi-survey--movement-trail) for the full architecture
 - Optional **movement trail** — a main toggle starts/stops the mower recording its position history to a shared file; a nested toggle overlays it on the map. Colored/styled by phase (dark blue dashed while docking/undocking, light blue solid while mowing) and auto-archived per mow session, with a **date picker** to browse past days. A separate, client-only breadcrumb of the *current* session also draws whenever **Live robot** is on
+
+### Safety net
+- **Confirm before save** — Save opens a summary of what changed since the last load/save (zones added / removed / edited, dock moved, reordering) plus the validation results, with an optional ROS restart
+- **Draft autosave** — unsaved edits are mirrored to the browser's local storage; after a reload or crash you're offered to restore them
+- **Extra checks** — mow zones the robot can't reach from the dock through mow/nav zones, a dock outside every drivable zone, obstacles crossing a mow edge, and mow zones narrower than the cutting width
 
 ### Map management
 - Auto-load `/data/ros/map.json` (if present); auto-fill projection from `/data/params/mower_params.yaml` (`datum_lat`, `datum_long`)
 - Save directly to `/data/ros/map.json` with automatic timestamped backup
 - Optional: restart the container named in `OPENMOWER_CONTAINER_NAME` via the mounted Docker socket (Save + restart)
 - **Load map / backup…** gallery with mini-map previews, timestamps, stats, and a diff vs your current map
+- **GeoJSON / KML import & export** (Map tab → File) — trace zones in QGIS / Google Earth / geojson.io and import them (polygons without a `type` get the type you pick), or export the map as WGS84 for an off-robot copy. Zone names, types, ids and per-zone mowing overrides round-trip; the dock is a `type: "dock"` point
 
 ### Interface
 - **Command palette** (`Ctrl`/`Cmd + K`) to run any action, and a **keyboard-shortcut** cheat sheet (`?`)
@@ -121,10 +145,9 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 - **Geometry validation** — flags self-intersections, too-few points, degenerate/duplicate vertices, orphan obstacles, and a dock placed inside an obstacle; click an issue to zoom to it
 - **Map navigation** — zoom buttons, scroll-wheel/`+`/`−` keys, base-map switching from the command palette
 - **Switchable base maps** (bottom-left **Layers**) — Esri satellite (default), the free **20 cm Lower Saxony aerial (DOP20)**, **OpenStreetMap** (global fallback), or a custom XYZ/WMS URL; choice persists
-- **Zone management** — friendly **name** (`properties.name`), type (mow/obstacle/nav), reorder, remove; zone picker shows a colored type badge (🟩 mow · 🟥 obstacle · 🟦 nav)
-- **Organized sidebar** — panels are **collapsible** and remember their open/closed state
+- **Zone management** — friendly **name** (`properties.name`), type (mow/obstacle/nav), reorder, remove; `[` / `]` cycle through zones
+- **Organized sidebar** — three tabs (**Zones** · **Map** · **Robot**); panels are **collapsible** and remember their open/closed state
 - **Unsaved-changes guard** — an "Unsaved" indicator and a browser prompt before leaving with unsaved edits
-- Type-aware overlays while editing (the other two zone types shown dashed for reference)
 - Toast notifications and a dark-tech / HUD interface with glass map-overlay panels; light/dark toggle changes sidebar UI only — map colors stay fixed for readability
 
 ## Usage
@@ -134,14 +157,14 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
    - load `/data/ros/map.json`
    - read `/data/params/mower_params.yaml` and apply `datum_lat` / `datum_long`
 3. If no map is found, load one manually with the file picker.
-4. Pick a zone from the **Selected zone** dropdown (colored type badge: 🟩 mow · 🟥 obstacle · 🟦 nav).
-5. Create zones in the **Create zone** panel — pick a type, then **Add zone** (square at the map center) or draw a rectangle/circle. Use the **Selected zone** panel to pick, name, retype, reorder, or remove a zone, and the **Mowing** panel to set a mow zone's cutting parameters and preview the path.
-6. Use the tool dock on the right to edit your map geometry.
+4. Pick a zone by clicking it on the map or in the **Zones** list.
+5. Create zones under **New zone** in the Zones tab — pick a type, then draw a polygon / rectangle / circle or add a square — or record one by driving the mower (**Robot** tab). Use **Zone details** to name, retype, reorder, or remove a zone, and the **Mowing** panel to set a mow zone's cutting parameters and preview the path.
+6. Use the tool dock on the right (or right-click on the map) to edit your map geometry.
 7. Optional: turn on **Live robot** to stream the pose from the running ROS container (requires the Docker socket mount). The marker glides in real time from the fused map-frame pose; on fallback (probe) setups it matches the map when TF uses the `map` frame, and may drift relative to `map.json` while only `odom` is available until localization aligns.
 8. Optional: turn on **WiFi signal map** to start capture, then the nested toggle to display the heatmap — the mower records the survey autonomously without an open browser and stores it in `/data/ros/wifi-signal-map.json`. Optional: turn on **Movement trail** the same way to record and display the mower's saved path; use the date picker to review past mow sessions.
 9. Save your edits:
-   - **Save map.json** writes to `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
-   - **Save + restart ROS** does the same, then restarts the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
+   - **Save map.json** (`Ctrl + S`) opens a confirmation listing the changes and any validation warnings; confirming writes `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
+   - Tick **Restart ROS after saving** (or use the orange button) to also restart the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
    - If direct save is unavailable, fallback is downloading the map as `openmower-map-edited.json`.
 10. Roll back from backup (if needed):
     - Click **Load map / backup…** to open the gallery of `map.json` (running) and `map.json.bak-*` versions from `/data/ros`.
@@ -232,35 +255,47 @@ Reconnects react to Docker's container-start events for `open_mower_ros` rather 
 
 ## Tool legend
 
-Tools live in the floating dock on the right (icons from [Material Symbols Outlined](https://fonts.google.com/icons)), arranged as a 2-column grid with a divider between groups: mower control (Start/Stop/Home/Reset) at the top, then edit tools, then delete, then undo/redo. Every action is also reachable from the **command palette** (`Ctrl`/`Cmd + K`); press `?` for the full shortcut cheat sheet. The robot status HUD above it (Live robot / WiFi / Movement trail) collapses to a compact one-line summary by default — tap it to expand; the choice is remembered per device.
+Tools live in the floating dock on the right (icons from [Material Symbols Outlined](https://fonts.google.com/icons)), arranged as a 2-column grid: edit tools, then draw/measure tools and the snapping toggle, then delete, then undo/redo. Every action is also reachable from the **command palette** (`Ctrl`/`Cmd + K`); press `?` for the full shortcut cheat sheet. Right-click (long-press on touch) a zone, vertex, the dock or empty map for a context menu. The robot status panel (top-right) holds the mower controls and the Live robot / WiFi / Movement trail toggles; it collapses to a compact summary — tap it to expand.
 
-- **near_me** — select / drag (`V`): default mode, drag a vertex or click to select. Arrow keys nudge the selection (`Shift` = larger step).
+Edit tools:
+
+- **near_me** — select / drag (`V`): default mode. Click a zone to select it, drag a vertex, drag an edge's midpoint dot to insert a vertex. Arrow keys nudge the selection (`Shift` = larger step).
+- **select_all** — multi-select (`M`): click points or `Shift + drag` a rectangle, then drag the group handle.
 - **add_location_alt** — add point (`A`): click near an outline and the vertex is inserted on the **nearest edge**.
 - **blur_circular** — push brush (`B`): drag across the outline to push points along your stroke; radius/strength sliders appear in the sidebar.
-- **horizontal_rule** — snap line (`S`): pick start and end point.
-- **select_all** — multi-select (`M`): click points or `Shift + drag` a rectangle, then drag the group handle.
+- **horizontal_rule** — straighten (`S`): pick start and end point; the points between are snapped onto a straight, evenly spaced line.
 - **open_with** — move whole zone (`G`): drag the centroid handle to translate the entire zone.
-- **delete** — remove selected point(s) (`Del`): deletes the whole multi-selection when several points are selected.
+
+Draw & measure:
+
+- **polyline** — draw polygon (`P`): click corners; click the first corner, double-click, press `Enter` or right-click to finish; `Backspace` removes the last corner.
+- **crop_square** / **circle** — rectangle (`R`) / circle (`O`): drag on the map.
+- **content_cut** — split (`X`): click two points; the selected zone is cut along that line into two zones.
+- **straighten** — ruler (`D`): click points to measure; `Backspace` removes the last, `Esc` clears.
+- **adjust** — snapping on/off: snap dragged and placed points to other zones' vertices/edges and the dock. Hold `Alt` to bypass it for one action.
+- **delete** — remove selected point(s) (`Del`).
 - **undo** / **redo** — history (`Ctrl + Z` / `Ctrl + Shift + Z`).
 
-Create & transform (sidebar **Create** and **Transform zone** panels, also in the command palette):
+Sidebar (Zones tab):
 
-- **Rectangle** (`R`) / **Circle** (`O`) — drag on the map to draw a new zone of the chosen type.
-- **Place dock** — click the map to set the docking station (`docking_stations[0]`).
-- **Duplicate zone** (`Ctrl + D`) — copy the selected zone, offset so the copy is visible.
-- **Rotate** ±15° / **Scale** ±5% — transform the selected zone about its centroid.
-- **Grow / Shrink** — offset every border of the selected zone outward/inward by a margin (a buffer; unlike Scale it keeps a uniform border distance). For a donut (mow + obstacle), **Grow** the mow and **Shrink** the obstacle to widen the mowable ring.
-- **Simplify outline** — Douglas–Peucker reduction with an adjustable tolerance, to thin out dense outlines.
-- **Create zone** panel adds a zone (square at center, or rectangle/circle draw); the **Selected zone** panel names / retypes / reorders / removes the current zone.
-- **Live robot** (toolbar toggle) streams the fused ROS pose via the mounted Docker socket (SSE) and interpolates the marker for smooth motion + heading. While driving/mowing it shows a **top-down mower** icon rotated to the live heading; other states swap the icon (docking, dock charging, dock full, emergency, error) and keep the badge fixed. Preference is stored in `localStorage`. The dock uses **ev_station** on the map.
+- **Zones** list — select (and fit) a zone, lock it (`L`) or hide it (`H`); **New zone** picks the type for every draw tool.
+- **Zone details** — name, type, reorder, remove.
+- **Mowing** — per-zone cutting parameters, coverage preview, exact planner path.
+- **Vertex** — exact X/Y of the selected vertex, **make start point** (OpenMower measures the automatic mow angle from the first edge), add the robot's position as a vertex.
+- **Transform zone** — rotate ±15° or by any angle, scale ±5% or to any percentage, **grow / shrink** (offset every border by a margin — for a donut, grow the mow and shrink the obstacle), **simplify** (Douglas–Peucker).
+- **Combine & split** — **merge** (union), **cut out** (difference), **clip** (intersection) with another zone (touching zones listed first), or split along a line. Outlines can't have holes, so cutting a zone fully out of another is refused — use an obstacle instead.
+- **Measurements** — area, perimeter, points, net mowable area.
+
+Sidebar (Map tab): **File** (backups, open JSON, GeoJSON/KML import & export), **Validation** (click an issue to zoom to it), **Docking station** (position, heading, place by click, from robot), **Projection**.
+
+Sidebar (Robot tab): **Record boundary by driving** and **Trail → zone**.
+
+Other notes:
+
+- **Live robot** streams the fused ROS pose via the mounted Docker socket (SSE) and interpolates the marker for smooth motion + heading. While driving/mowing it shows a **top-down mower** icon rotated to the live heading; other states swap the icon (docking, dock charging, dock full, emergency, error). The dock uses **ev_station** on the map, with an arrow for its heading.
 - `Load map / backup…` opens a gallery of saved versions, each with a mini-map preview, timestamp, stats, and a diff vs your current map.
-- **Zoom** buttons sit at the bottom-right; the **Layers** button (bottom-left) switches the base map.
-
-Tool sliders are contextual:
-
-- Brush sliders appear only while brush mode is active.
-- Mowing parameters (**Mowing** panel) and transform controls (**Transform zone** panel) live in the sidebar.
-- On touch devices, brush also supports finger paint (`touchstart`/`move`/`end`).
+- **Zoom** buttons sit at the bottom-right; the **Layers** button (bottom-left) switches the base map; `F` fits the selected zone, `Shift + F` the whole map.
+- On touch devices, brush also supports finger paint, and long-press opens context menus.
 - Light/dark mode affects sidebar/tool styling only. Map line/point colors remain identical in both modes.
 
 ## Development

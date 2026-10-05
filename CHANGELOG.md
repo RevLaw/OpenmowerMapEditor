@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased — Editor redesign & map-editor essentials
+
+A UI restructure plus the editing features a map editor was still missing.
+Verified with unit tests for all new geometry/format logic and a scripted
+browser run against a copy of a real map (draw, split, merge, clip, snap,
+lock, save dialog, draft restore, import, recording, trail → zone).
+
+### Added
+- **All zones visible and click-to-select** — every zone is drawn with a
+  type-colored fill and hover label; click one on the map to select it.
+- **Zone list** with per-zone **hide** / **lock** (editor-only, per browser).
+- **Draw polygon** tool (`P`), **split zone** tool (`X`), **ruler** (`D`).
+- **Midpoint handles** to insert vertices by dragging, with live outline
+  preview while dragging vertices.
+- **Magnetic snapping** to other zones' vertices/edges and the dock (toggle in
+  the dock, `Alt` bypasses).
+- **Context menus** (right-click / long-press) for zones, vertices, the dock
+  and the map.
+- **Combine & split** — merge, cut out, clip to zone (via `polygon-clipping`).
+- **Exact values** — vertex X/Y, rotate by any angle, scale to any %, dock
+  position and **heading** (drawn as an arrow), make-start-point.
+- **Robot-assisted mapping** — record a boundary by driving, trail → zone,
+  robot position as vertex, dock from robot pose.
+- **GeoJSON / KML import & export**.
+- **Confirm-before-save dialog** with a zone-level diff and validation results.
+- **Draft autosave** to local storage with a restore prompt after reload.
+- **New validation checks** — mow zones unreachable from the dock, dock
+  outside every drivable zone, obstacles crossing a mow edge, zones narrower
+  than the cutting width. Validation now runs debounced.
+- Shortcuts: `[` / `]` cycle zones, `L` lock, `H` hide, `Shift + F` fit map.
+
+### Changed
+- **Sidebar split into Zones / Map / Robot tabs**; the zone dropdown and the
+  Create panel are replaced by the zone list.
+- **Mower control moved into the robot status panel** (always visible), so
+  the tool dock only holds map-editing tools.
+- Floating **selection bar** for the selected zone's quick actions.
+
 ## v2.7.1 — Svelte 5 runes & dependency refresh
 
 Maintenance release: no user-visible changes. The UI was verified against
