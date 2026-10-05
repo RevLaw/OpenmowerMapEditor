@@ -73,6 +73,9 @@ lock, save dialog, draft restore, import, recording, trail → zone).
   the base-map button: **find & follow robot**, **show trail**, zoom (zoom
   moved there from the bottom-right). The status panel starts collapsed on
   phones.
+- **Trail calendar with data dots** — the movement-trail date picker is a
+  month calendar where days with a recorded trail have a dot; the ‹ › arrows
+  jump straight to the previous / next day with data.
 - **One Save button** — "Save + restart" is the checkbox in the save dialog.
 - **Compact sidebar panels** — smaller buttons, fields and spacing inside the
   panels; Zone details puts name and type on one row with small reorder

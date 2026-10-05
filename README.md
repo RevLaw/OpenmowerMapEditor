@@ -126,7 +126,7 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 
 ### WiFi signal survey & movement trail
 - Optional **WiFi signal map** — a main toggle starts/stops the mower recording its radio's dBm value with each live pose; a nested toggle paints the red-to-green heatmap in *this* browser. Shared, mower-side, persists across restarts. See [Shared data storage](#shared-data-storage-wifi-survey--movement-trail) for the full architecture
-- Optional **movement trail** — a main toggle starts/stops the mower recording its position history to a shared file; a nested toggle overlays it on the map. Colored/styled by phase (dark blue dashed while docking/undocking, light blue solid while mowing) and auto-archived per mow session, with a **date picker** to browse past days. A separate, client-only breadcrumb of the *current* session also draws whenever **Live robot** is on
+- Optional **movement trail** — a main toggle starts/stops the mower recording its position history to a shared file; a nested toggle overlays it on the map. Colored/styled by phase (dark blue dashed while docking/undocking, light blue solid while mowing) and auto-archived per mow session, with a **calendar** to browse past days (days with a recorded trail have a dot; the ‹ › arrows jump between them). A separate, client-only breadcrumb of the *current* session also draws whenever **Live robot** is on
 
 ### Safety net
 - **Confirm before save** — Save opens a summary of what changed since the last load/save (zones added / removed / edited, dock moved, reordering) plus the validation results, with an optional ROS restart

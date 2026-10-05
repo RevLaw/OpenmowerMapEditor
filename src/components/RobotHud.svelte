@@ -27,9 +27,12 @@
     selectRobotTrailDate,
     setRobotTrailEnabled,
     setRobotTrailHistoryEnabled,
-    shiftRobotTrailDate,
     todayDateKey,
+    robotTrailDataDays,
+    jumpToRobotTrailDataDay,
   } from "../lib/stores/robotTrail.js";
+  import { adjacentDataDay } from "../lib/robot/trailDays.js";
+  import TrailCalendar from "./TrailCalendar.svelte";
   import CaptureToggleHeader from "./CaptureToggleHeader.svelte";
   import MowerControl from "./MowerControl.svelte";
   import { isNarrowScreen } from "../lib/stores/ui.js";
@@ -81,9 +84,21 @@
     setRobotTrailHistoryEnabled(!$robotTrailHistoryEnabled);
   }
 
-  function onDateInput(event) {
-    if (event.target.value) selectRobotTrailDate(event.target.value);
-  }
+  // Trail day picker: a calendar with a dot on days that have data; the
+  // arrows skip straight to the previous / next such day.
+  let calendarOpen = $state(false);
+  let prevDataDay = $derived(adjacentDataDay($robotTrailDataDays, $robotTrailSelectedDate, -1));
+  let nextDataDay = $derived(adjacentDataDay($robotTrailDataDays, $robotTrailSelectedDate, 1));
+  let selectedLabel = $derived(
+    $robotTrailSelectedDate === today
+      ? "Today"
+      : new Date(`${$robotTrailSelectedDate}T12:00:00`).toLocaleDateString(undefined, {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+  );
 
   function formatBytes(bytes) {
     if (!Number.isFinite(bytes) || bytes <= 0) return "not flushed yet";
@@ -279,24 +294,30 @@
             <div class="flex items-center gap-1">
               <button
                 class="btn-icon !h-6 !w-6"
-                title="Previous day"
-                onclick={() => shiftRobotTrailDate(-1)}
+                title="Previous day with a recorded trail"
+                disabled={!prevDataDay}
+                onclick={() => jumpToRobotTrailDataDay(-1)}
               >
                 <span class="material-symbols-outlined" style="font-size:16px">chevron_left</span>
               </button>
-              <input
-                type="date"
-                class="min-w-0 flex-1 rounded bg-transparent text-center text-[10px] text-ink"
-                style="border-color:var(--glass-edge)"
-                max={today}
-                value={$robotTrailSelectedDate}
-                onchange={onDateInput}
-              />
+              <button
+                class="date-btn flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md py-0.5 text-[11px]"
+                class:open={calendarOpen}
+                title="Pick a day — days with a recorded trail have a dot"
+                aria-expanded={calendarOpen}
+                onclick={() => (calendarOpen = !calendarOpen)}
+              >
+                <span class="material-symbols-outlined" style="font-size:14px">calendar_month</span>
+                <span class="truncate">{selectedLabel}</span>
+                {#if $robotTrailDataDays.has($robotTrailSelectedDate)}
+                  <span class="h-1.5 w-1.5 shrink-0 rounded-full" style="background:var(--ok)"></span>
+                {/if}
+              </button>
               <button
                 class="btn-icon !h-6 !w-6"
-                title="Next day"
-                disabled={isViewingToday}
-                onclick={() => shiftRobotTrailDate(1)}
+                title="Next day with a recorded trail"
+                disabled={!nextDataDay}
+                onclick={() => jumpToRobotTrailDataDay(1)}
               >
                 <span class="material-symbols-outlined" style="font-size:16px">chevron_right</span>
               </button>
@@ -309,6 +330,7 @@
                 <span class="material-symbols-outlined" style="font-size:16px">home</span>
               </button>
             </div>
+            <TrailCalendar bind:open={calendarOpen} />
 
             <div class="mt-2 text-[9px] text-subtle">
               {#if $robotTrailDisplayPoints.length > 0}
@@ -330,3 +352,14 @@
   </div>
   {/if}
 </div>
+
+<style>
+  .date-btn {
+    color: var(--ink);
+    border: 1px solid var(--glass-edge);
+  }
+  .date-btn:hover,
+  .date-btn.open {
+    border-color: var(--accent);
+  }
+</style>
