@@ -1,31 +1,32 @@
 <script>
   import { fade, scale } from "svelte/transition";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { getCommands } from "../lib/commands.js";
 
-  export let open = false;
-  export let onCheat = () => {};
+  let { open = $bindable(false), onCheat = () => {} } = $props();
 
-  let query = "";
-  let selected = 0;
-  let inputEl;
-  let listEl;
-  let wasOpen = false;
+  let query = $state("");
+  let selected = $state(0);
+  let inputEl = $state();
+  let listEl = $state();
 
-  $: all = getCommands({
+  const all = getCommands({
     openCheatSheet: () => {
       close();
       onCheat();
     },
   });
-  $: filtered = filterCommands(all, query);
-  $: if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
+  let filtered = $derived(filterCommands(all, query));
 
-  $: if (open && !wasOpen) {
-    wasOpen = true;
-    reset();
-  }
-  $: if (!open && wasOpen) wasOpen = false;
+  // Keep the highlighted row inside the list as the filter narrows it.
+  $effect.pre(() => {
+    if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
+  });
+
+  // Fresh query + focus each time the palette opens.
+  $effect.pre(() => {
+    if (open) untrack(reset);
+  });
 
   function filterCommands(list, q) {
     const s = q.trim().toLowerCase();
@@ -77,15 +78,15 @@
 {#if open}
   <div
     class="fixed inset-0 z-[80] flex items-start justify-center bg-black/50 px-4 pt-[12vh]"
-    on:click={close}
-    on:keydown={onKey}
+    onclick={close}
+    onkeydown={onKey}
     transition:fade={{ duration: 120 }}
     role="presentation"
   >
-    <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions a11y-no-noninteractive-element-interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
     <div
       class="glass glass-strong w-full max-w-lg overflow-hidden rounded-2xl"
-      on:click|stopPropagation
+      onclick={(e) => e.stopPropagation()}
       transition:scale={{ duration: 140, start: 0.97 }}
       role="dialog"
       tabindex="-1"
@@ -93,11 +94,11 @@
     >
       <div class="flex items-center gap-2 border-b px-3.5 py-2.5" style="border-color:var(--edge-soft)">
         <span class="material-symbols-outlined text-subtle" style="font-size:20px">bolt</span>
-        <!-- svelte-ignore a11y-autofocus -->
+        <!-- svelte-ignore a11y_autofocus -->
         <input
           bind:this={inputEl}
           bind:value={query}
-          on:keydown={onKey}
+          onkeydown={onKey}
           autofocus
           class="w-full bg-transparent text-sm outline-none placeholder:text-subtle"
           placeholder="Type a command…"
@@ -114,8 +115,8 @@
               data-selected={i === selected}
               class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors"
               style={i === selected ? "background:var(--surface-3)" : ""}
-              on:mouseenter={() => (selected = i)}
-              on:click={() => run(cmd)}
+              onmouseenter={() => (selected = i)}
+              onclick={() => run(cmd)}
             >
               <span class="material-symbols-outlined text-muted" style="font-size:18px">{cmd.icon}</span>
               <span class="flex-1">{cmd.title}</span>

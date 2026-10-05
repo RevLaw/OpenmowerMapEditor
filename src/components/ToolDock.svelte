@@ -29,7 +29,7 @@
   ];
 
   // Motion-causing mower commands need a 2-step confirm; Stop is one tap.
-  let armed = null;
+  let armed = $state(null);
   let armTimer = null;
 
   function disarmMower() {
@@ -70,7 +70,7 @@
         class:stop={b.stop}
         disabled={$controlSending}
         aria-label={b.label}
-        on:click={() => clickMower(b)}
+        onclick={() => clickMower(b)}
       >
         <span class="material-symbols-outlined" style="font-size:22px">{b.icon}</span>
       </button>
@@ -88,7 +88,7 @@
         class="tool-btn"
         class:active={$activeTool === t.id}
         aria-label={t.label}
-        on:click={() => pick(t.id)}
+        onclick={() => pick(t.id)}
       >
         <span class="material-symbols-outlined" style="font-size:22px">{t.icon}</span>
       </button>
@@ -99,7 +99,7 @@
   <div class="my-1 h-px" style="grid-column:1/-1;background:var(--edge-soft)"></div>
 
   <div class="hicon" style="grid-column:1/-1">
-    <button class="tool-btn danger" aria-label="Remove selected point (Del)" on:click={removePoint}>
+    <button class="tool-btn danger" aria-label="Remove selected point (Del)" onclick={removePoint}>
       <span class="material-symbols-outlined" style="font-size:22px">delete</span>
     </button>
     <span class="hicon-label">Remove point (Del)</span>
@@ -108,13 +108,13 @@
   <div class="my-1 h-px" style="grid-column:1/-1;background:var(--edge-soft)"></div>
 
   <div class="hicon">
-    <button class="tool-btn" disabled={!$history.canUndo} aria-label="Undo (Ctrl+Z)" on:click={undo}>
+    <button class="tool-btn" disabled={!$history.canUndo} aria-label="Undo (Ctrl+Z)" onclick={undo}>
       <span class="material-symbols-outlined" style="font-size:22px">undo</span>
     </button>
     <span class="hicon-label">Undo (Ctrl+Z)</span>
   </div>
   <div class="hicon">
-    <button class="tool-btn" disabled={!$history.canRedo} aria-label="Redo (Ctrl+Shift+Z)" on:click={redo}>
+    <button class="tool-btn" disabled={!$history.canRedo} aria-label="Redo (Ctrl+Shift+Z)" onclick={redo}>
       <span class="material-symbols-outlined" style="font-size:22px">redo</span>
     </button>
     <span class="hicon-label">Redo (Ctrl+Shift+Z)</span>

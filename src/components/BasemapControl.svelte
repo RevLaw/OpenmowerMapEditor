@@ -2,9 +2,9 @@
   import { fly } from "svelte/transition";
   import { BASEMAPS, basemapId, customBasemap } from "../lib/stores/basemap.js";
 
-  let open = false;
-  $: current = BASEMAPS.find((b) => b.id === $basemapId);
-  $: label = $basemapId === "custom" ? "Custom" : (current?.label ?? "Base map");
+  let open = $state(false);
+  let current = $derived(BASEMAPS.find((b) => b.id === $basemapId));
+  let label = $derived($basemapId === "custom" ? "Custom" : (current?.label ?? "Base map"));
 </script>
 
 <div class="relative">
@@ -64,7 +64,7 @@
 
   <button
     class="glass flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium"
-    on:click={() => (open = !open)}
+    onclick={() => (open = !open)}
     title="Base map"
   >
     <span class="material-symbols-outlined text-accent" style="font-size:18px">layers</span>

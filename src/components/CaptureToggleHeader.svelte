@@ -3,11 +3,7 @@
   // movement trail): an icon+label that tints on/off, and the on/off button
   // itself. Kept separate from whatever each feature shows once expanded —
   // that content differs too much per feature to share.
-  export let icon;
-  export let label;
-  export let enabled;
-  export let toggleTitle;
-  export let onToggle;
+  let { icon, label, enabled, toggleTitle, onToggle } = $props();
 </script>
 
 <div class="flex items-center justify-between gap-2">
@@ -22,7 +18,7 @@
     class="btn-icon !h-7 !w-7"
     class:text-accent={enabled}
     title={toggleTitle}
-    on:click={onToggle}
+    onclick={onToggle}
   >
     <span class="material-symbols-outlined" style="font-size:22px">
       {enabled ? "toggle_on" : "toggle_off"}

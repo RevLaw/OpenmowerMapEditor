@@ -6,9 +6,9 @@
   import { mapApi } from "../../lib/stores/mapApi.js";
   import Collapsible from "../Collapsible.svelte";
 
-  $: issues = $editor.mapData ? validateMap($editor.mapData) : [];
-  $: errors = issues.filter((i) => i.severity === "error").length;
-  $: warnings = issues.length - errors;
+  let issues = $derived($editor.mapData ? validateMap($editor.mapData) : []);
+  let errors = $derived(issues.filter((i) => i.severity === "error").length);
+  let warnings = $derived(issues.length - errors);
 
   function goto(issue) {
     if (issue.areaIndex != null) setAreaIndex(issue.areaIndex);
@@ -27,16 +27,18 @@
 </script>
 
 <Collapsible title="Validation" icon="rule" key="validation">
-  <span slot="badge">
-    {#if issues.length === 0}
-      <span class="chip" style="color:var(--ok)">all clear</span>
-    {:else}
-      <span class="flex gap-1">
-        {#if errors}<span class="chip" style="color:var(--danger)">{errors} err</span>{/if}
-        {#if warnings}<span class="chip" style="color:var(--warn)">{warnings} warn</span>{/if}
-      </span>
-    {/if}
-  </span>
+  {#snippet badge()}
+    <span>
+      {#if issues.length === 0}
+        <span class="chip" style="color:var(--ok)">all clear</span>
+      {:else}
+        <span class="flex gap-1">
+          {#if errors}<span class="chip" style="color:var(--danger)">{errors} err</span>{/if}
+          {#if warnings}<span class="chip" style="color:var(--warn)">{warnings} warn</span>{/if}
+        </span>
+      {/if}
+    </span>
+  {/snippet}
 
   {#if issues.length === 0}
     <p class="text-[11px] text-subtle">No geometry problems detected.</p>
@@ -47,7 +49,7 @@
           <button
             class="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] leading-snug transition-colors"
             style="background:var(--surface-2)"
-            on:click={() => goto(issue)}
+            onclick={() => goto(issue)}
           >
             <span
               class="material-symbols-outlined mt-px"

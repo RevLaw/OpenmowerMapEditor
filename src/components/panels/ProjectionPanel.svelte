@@ -3,15 +3,18 @@
   import { applyProjection } from "../../lib/actions.js";
   import Collapsible from "../Collapsible.svelte";
 
-  let lat = 52.52;
-  let lng = 13.405;
-  let dirty = false;
+  let lat = $state(52.52);
+  let lng = $state(13.405);
+  let dirty = $state(false);
 
   // Mirror the store origin until the user starts editing the fields.
-  $: if (!dirty) {
-    lat = $editor.origin.lat;
-    lng = $editor.origin.lng;
-  }
+  // Follow the map origin until the user starts typing their own values.
+  $effect.pre(() => {
+    if (!dirty) {
+      lat = $editor.origin.lat;
+      lng = $editor.origin.lng;
+    }
+  });
 
   function apply() {
     applyProjection(Number(lat), Number(lng));
@@ -33,7 +36,7 @@
         type="number"
         step="0.000001"
         bind:value={lat}
-        on:input={() => (dirty = true)}
+        oninput={() => (dirty = true)}
       />
     </label>
     <label class="field !mb-0">
@@ -43,12 +46,12 @@
         type="number"
         step="0.000001"
         bind:value={lng}
-        on:input={() => (dirty = true)}
+        oninput={() => (dirty = true)}
       />
     </label>
   </div>
 
-  <button class="btn mt-2 w-full" on:click={apply}>
+  <button class="btn mt-2 w-full" onclick={apply}>
     <span class="material-symbols-outlined" style="font-size:18px">my_location</span>
     Apply projection
   </button>

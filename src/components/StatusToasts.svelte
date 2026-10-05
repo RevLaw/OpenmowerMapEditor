@@ -26,7 +26,7 @@
         {icon[t.kind]}
       </span>
       <span>{t.text}</span>
-      <button class="btn-icon !h-6 !w-6" on:click={() => dismiss(t.id)} aria-label="Dismiss">
+      <button class="btn-icon !h-6 !w-6" onclick={() => dismiss(t.id)} aria-label="Dismiss">
         <span class="material-symbols-outlined" style="font-size:15px">close</span>
       </button>
     </div>

@@ -13,7 +13,7 @@
     dock: { label: "Place dock", text: "Click the map to set the docking station" },
   };
 
-  $: hint = hints[$activeTool];
+  let hint = $derived(hints[$activeTool]);
 </script>
 
 {#if hint}
@@ -24,7 +24,7 @@
     <span class="material-symbols-outlined text-accent" style="font-size:16px">info</span>
     <span class="font-semibold">{hint.label}</span>
     <span class="text-muted">— {hint.text}</span>
-    <button class="chip transition-colors hover:text-ink" on:click={() => setTool("none")}>
+    <button class="chip transition-colors hover:text-ink" onclick={() => setTool("none")}>
       Esc
     </button>
   </div>

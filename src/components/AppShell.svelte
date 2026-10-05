@@ -21,10 +21,10 @@
   import { isDirty } from "../lib/stores/dirty.js";
   import { initShortcuts } from "../lib/shortcuts.js";
 
-  let paletteOpen = false;
-  let cheatOpen = false;
+  let paletteOpen = $state(false);
+  let cheatOpen = $state(false);
   // Open by default on desktop; collapsed on small screens (toggle via FAB).
-  let sidebarOpen = typeof window === "undefined" || window.innerWidth >= 1024;
+  let sidebarOpen = $state(typeof window === "undefined" || window.innerWidth >= 1024);
   const cleanups = [];
 
   // The control dock (mower control + edit tools, merged into one panel —
@@ -38,23 +38,23 @@
   const EDGE_GAP = 12; // matches right-3 / top-3 (0.75rem)
   const ZOOM_BOTTOM_OFFSET = 28; // matches bottom-7 (1.75rem) on the zoom control
 
-  let hudWrapEl;
-  let toolDockWrapEl;
-  let zoomControlWrapEl;
+  let hudWrapEl = $state();
+  let toolDockWrapEl = $state();
+  let zoomControlWrapEl = $state();
 
   let toolDockHeight = 0;
   let hudNaturalHeight = 0;
   let zoomControlHeight = 0;
 
-  let controlStackTop = 0;
-  let robotHudMaxHeight = null;
+  let controlStackTop = $state(0);
+  let robotHudMaxHeight = $state(null);
 
   // The sidebar's actual rendered width — it's pure CSS (w-[360px]
   // max-w-[calc(100vw-1.5rem)]), so this mirrors that formula rather than
   // adding a second ResizeObserver on a conditionally-mounted element.
   // BasemapControl needs this to sit flush against the sidebar's real edge
   // instead of assuming it's always exactly 360px wide.
-  let sidebarWidth = 360;
+  let sidebarWidth = $state(360);
 
   function recomputeLayout() {
     sidebarWidth = Math.min(360, window.innerWidth - 24);
@@ -153,7 +153,7 @@
     <button
       class="glass absolute left-3 top-3 z-30 grid h-11 w-11 place-items-center rounded-xl"
       title="Open panel"
-      on:click={() => (sidebarOpen = true)}
+      onclick={() => (sidebarOpen = true)}
     >
       <span class="material-symbols-outlined text-accent" style="font-size:24px">tune</span>
     </button>

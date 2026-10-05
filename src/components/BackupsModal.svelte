@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from "svelte";
   import { get } from "svelte/store";
   import { fade, scale } from "svelte/transition";
   import { backups, refreshBackups, loadBackup } from "../lib/actions.js";
@@ -9,18 +10,17 @@
   import { formatArea } from "../lib/measurements.js";
   import MiniMap from "./MiniMap.svelte";
 
-  export let open = false;
+  let { open = $bindable(false) } = $props();
 
-  let items = [];
-  let loading = false;
-  let wasOpen = false;
+  let items = $state([]);
+  let loading = $state(false);
 
-  $: current = mapSummary($editor.mapData || { areas: [] });
-  $: if (open && !wasOpen) {
-    wasOpen = true;
-    load();
-  }
-  $: if (!open && wasOpen) wasOpen = false;
+  let current = $derived(mapSummary($editor.mapData || { areas: [] }));
+
+  // (Re)load the backup list each time the modal opens.
+  $effect.pre(() => {
+    if (open) untrack(load);
+  });
 
   async function load() {
     loading = true;
@@ -76,14 +76,14 @@
 {#if open}
   <div
     class="fixed inset-0 z-[90] flex bg-black/60 p-3"
-    on:click={() => (open = false)}
+    onclick={() => (open = false)}
     transition:fade={{ duration: 120 }}
     role="presentation"
   >
-    <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions a11y-no-noninteractive-element-interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
     <div
       class="glass glass-strong flex h-full w-full flex-col overflow-hidden rounded-2xl"
-      on:click|stopPropagation
+      onclick={(e) => e.stopPropagation()}
       transition:scale={{ duration: 140, start: 0.98 }}
       role="dialog"
       tabindex="-1"
@@ -94,7 +94,7 @@
           <span class="material-symbols-outlined" style="font-size:18px">history</span>
           Load map / backup
         </h2>
-        <button class="btn-icon" on:click={() => (open = false)} aria-label="Close">
+        <button class="btn-icon" onclick={() => (open = false)} aria-label="Close">
           <span class="material-symbols-outlined" style="font-size:20px">close</span>
         </button>
       </header>
@@ -138,7 +138,7 @@
                   </div>
                 {/if}
 
-                <button class="btn mt-auto w-full !py-1.5 text-xs" on:click={() => choose(item.name)}>
+                <button class="btn mt-auto w-full !py-1.5 text-xs" onclick={() => choose(item.name)}>
                   <span class="material-symbols-outlined" style="font-size:16px">download</span>
                   Load this version
                 </button>

@@ -5,22 +5,22 @@
   import Collapsible from "../Collapsible.svelte";
 
   const fmt = (v) => Number(v).toFixed(2).replace(/\.?0+$/, "");
-  let margin = 0.2;
-  $: disabled = !$currentArea;
+  let margin = $state(0.2);
+  let disabled = $derived(!$currentArea);
 </script>
 
 <Collapsible title="Transform zone" icon="transform" key="transform" open={false}>
   <div class="mb-3 grid grid-cols-4 gap-2">
-    <button class="btn !px-0" {disabled} title="Rotate −15°" on:click={() => rotateZone(-15)}>
+    <button class="btn !px-0" {disabled} title="Rotate −15°" onclick={() => rotateZone(-15)}>
       <span class="material-symbols-outlined" style="font-size:20px">rotate_left</span>
     </button>
-    <button class="btn !px-0" {disabled} title="Rotate +15°" on:click={() => rotateZone(15)}>
+    <button class="btn !px-0" {disabled} title="Rotate +15°" onclick={() => rotateZone(15)}>
       <span class="material-symbols-outlined" style="font-size:20px">rotate_right</span>
     </button>
-    <button class="btn !px-0" {disabled} title="Scale −5%" on:click={() => scaleZone(0.95)}>
+    <button class="btn !px-0" {disabled} title="Scale −5%" onclick={() => scaleZone(0.95)}>
       <span class="material-symbols-outlined" style="font-size:20px">zoom_in_map</span>
     </button>
-    <button class="btn !px-0" {disabled} title="Scale +5%" on:click={() => scaleZone(1.05)}>
+    <button class="btn !px-0" {disabled} title="Scale +5%" onclick={() => scaleZone(1.05)}>
       <span class="material-symbols-outlined" style="font-size:20px">zoom_out_map</span>
     </button>
   </div>
@@ -32,11 +32,11 @@
   </div>
   <input class="slider mb-2" type="range" min="0.05" max="2" step="0.05" bind:value={margin} {disabled} />
   <div class="mb-3 grid grid-cols-2 gap-2">
-    <button class="btn" {disabled} title="Move all borders outward" on:click={() => growZone(margin)}>
+    <button class="btn" {disabled} title="Move all borders outward" onclick={() => growZone(margin)}>
       <span class="material-symbols-outlined" style="font-size:18px">open_in_full</span>
       Grow
     </button>
-    <button class="btn" {disabled} title="Move all borders inward" on:click={() => growZone(-margin)}>
+    <button class="btn" {disabled} title="Move all borders inward" onclick={() => growZone(-margin)}>
       <span class="material-symbols-outlined" style="font-size:18px">close_fullscreen</span>
       Shrink
     </button>
@@ -55,7 +55,7 @@
     bind:value={$simplifyTolerance}
     {disabled}
   />
-  <button class="btn w-full" {disabled} on:click={simplifyZoneAction}>
+  <button class="btn w-full" {disabled} onclick={simplifyZoneAction}>
     <span class="material-symbols-outlined" style="font-size:18px">compress</span>
     Simplify outline
   </button>

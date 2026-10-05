@@ -17,25 +17,28 @@
   } from "../../lib/stores/exactPath.js";
 
   // The exact path is stale once the zone or its geometry changed after planning.
-  $: exactStale =
-    $exactPath && ($exactPath.rev !== $editor.rev || $exactPath.areaIndex !== $editor.areaIndex);
+  let exactStale = $derived(
+    $exactPath && ($exactPath.rev !== $editor.rev || $exactPath.areaIndex !== $editor.areaIndex)
+  );
 
   const fmt = (v) => Number(v).toFixed(2).replace(/\.?0+$/, "");
   const SRC = { live: "from robot", file: "from params file", default: "defaults" };
 
-  $: area = $currentArea;
-  $: isMow = getAreaType(area) === "mow";
-  $: ov = getZoneOverrides(area);
-  $: gp = $mowParams;
-  $: pts = area ? getEditablePoints(area.outline || []) : [];
-  $: autoAngleRad = firstSegmentAngle(pts);
-  $: autoAngleDeg = Math.round((autoAngleRad * 180) / Math.PI);
-  $: settings = resolveMowSettings(ov, gp, pts);
-  $: laps = settings.laps;
-  $: overlap = settings.overlap;
-  $: offset = settings.outerOffset;
-  $: effAngleDeg = Math.round(((settings.angleRad * 180) / Math.PI) % 360);
-  $: angleOffsetActive = gp.mowAngleOffsetIsAbsolute || Math.abs(gp.mowAngleOffset || 0) > 0.01;
+  // Read $currentArea directly rather than through a `$derived` alias: the editor
+  // store mutates zones in place, and a derived of the same object reference
+  // would never invalidate its dependents.
+  let isMow = $derived(getAreaType($currentArea) === "mow");
+  let ov = $derived(getZoneOverrides($currentArea));
+  let gp = $derived($mowParams);
+  let pts = $derived($currentArea ? getEditablePoints($currentArea.outline || []) : []);
+  let autoAngleRad = $derived(firstSegmentAngle(pts));
+  let autoAngleDeg = $derived(Math.round((autoAngleRad * 180) / Math.PI));
+  let settings = $derived(resolveMowSettings(ov, gp, pts));
+  let laps = $derived(settings.laps);
+  let overlap = $derived(settings.overlap);
+  let offset = $derived(settings.outerOffset);
+  let effAngleDeg = $derived(Math.round(((settings.angleRad * 180) / Math.PI) % 360));
+  let angleOffsetActive = $derived(gp.mowAngleOffsetIsAbsolute || Math.abs(gp.mowAngleOffset || 0) > 0.01);
 
   // Toggle an override: enable it seeded with the current global value, or clear.
   function toggleOv(rosKey, camelKey, defaultVal) {
@@ -67,7 +70,7 @@
         type="checkbox"
         class="accent-[var(--accent)]"
         checked={ov.outlineCount != null}
-        on:change={() => toggleOv("outline_count", "outlineCount", gp.outlineCount)}
+        onchange={() => toggleOv("outline_count", "outlineCount", gp.outlineCount)}
       />
       <span class="flex-1 text-xs text-muted">Outline laps</span>
       <input
@@ -77,7 +80,7 @@
         step="1"
         disabled={ov.outlineCount == null}
         value={ov.outlineCount ?? gp.outlineCount}
-        on:change={(e) => setNum("outline_count", e.currentTarget.value)}
+        onchange={(e) => setNum("outline_count", e.currentTarget.value)}
       />
     </div>
 
@@ -86,7 +89,7 @@
         type="checkbox"
         class="accent-[var(--accent)]"
         checked={ov.outlineOverlapCount != null}
-        on:change={() => toggleOv("outline_overlap_count", "outlineOverlapCount", gp.outlineOverlapCount)}
+        onchange={() => toggleOv("outline_overlap_count", "outlineOverlapCount", gp.outlineOverlapCount)}
       />
       <span class="flex-1 text-xs text-muted">Fill overlap</span>
       <input
@@ -96,7 +99,7 @@
         step="1"
         disabled={ov.outlineOverlapCount == null}
         value={ov.outlineOverlapCount ?? gp.outlineOverlapCount}
-        on:change={(e) => setNum("outline_overlap_count", e.currentTarget.value)}
+        onchange={(e) => setNum("outline_overlap_count", e.currentTarget.value)}
       />
     </div>
 
@@ -105,7 +108,7 @@
         type="checkbox"
         class="accent-[var(--accent)]"
         checked={ov.outlineOffset != null}
-        on:change={() => toggleOv("outline_offset", "outlineOffset", gp.outlineOffset)}
+        onchange={() => toggleOv("outline_offset", "outlineOffset", gp.outlineOffset)}
       />
       <span class="flex-1 text-xs text-muted">Outline offset (m)</span>
       <input
@@ -114,7 +117,7 @@
         step="0.05"
         disabled={ov.outlineOffset == null}
         value={ov.outlineOffset ?? gp.outlineOffset}
-        on:change={(e) => setNum("outline_offset", e.currentTarget.value)}
+        onchange={(e) => setNum("outline_offset", e.currentTarget.value)}
       />
     </div>
 
@@ -123,7 +126,7 @@
         type="checkbox"
         class="accent-[var(--accent)]"
         checked={ov.angle != null}
-        on:change={() => toggleOv("angle", "angle", autoAngleRad)}
+        onchange={() => toggleOv("angle", "angle", autoAngleRad)}
       />
       <span class="flex-1 text-xs text-muted">
         Mow angle (°) <span class="text-subtle">{ov.angle == null ? "· auto" : "· fixed"}</span>
@@ -134,7 +137,7 @@
         step="5"
         disabled={ov.angle == null}
         value={ov.angle != null ? Math.round((ov.angle * 180) / Math.PI) : autoAngleDeg}
-        on:change={(e) => setAngleDeg(e.currentTarget.value)}
+        onchange={(e) => setAngleDeg(e.currentTarget.value)}
       />
     </div>
 
@@ -158,7 +161,7 @@
         class="btn-icon !h-7 !w-7"
         class:text-accent={$coverageOn}
         title="Toggle coverage overlay"
-        on:click={() => coverageOn.update((v) => !v)}
+        onclick={() => coverageOn.update((v) => !v)}
       >
         <span class="material-symbols-outlined" style="font-size:22px">
           {$coverageOn ? "toggle_on" : "toggle_off"}
@@ -167,7 +170,7 @@
     </div>
 
     {#if $coverageOn}
-      <div transition:slide|local={{ duration: 160 }}>
+      <div transition:slide={{ duration: 160 }}>
         <dl class="mt-2 space-y-1 text-xs">
           <div class="flex justify-between">
             <dt class="text-muted">Tool width (spacing)</dt>
@@ -206,14 +209,14 @@
 
     <div class="mt-3 border-t pt-2" style="border-color:var(--edge-soft)">
       <div class="flex items-center gap-2">
-        <button class="btn flex-1" on:click={computeExactPath} disabled={$exactPathLoading}>
+        <button class="btn flex-1" onclick={computeExactPath} disabled={$exactPathLoading}>
           <span class="material-symbols-outlined" style="font-size:18px">
             {$exactPathLoading ? "hourglass_top" : "route"}
           </span>
           {$exactPathLoading ? "Planning…" : "Compute exact path"}
         </button>
         {#if $exactPath}
-          <button class="btn-icon !h-8 !w-8" title="Clear exact path" on:click={clearExactPath}>
+          <button class="btn-icon !h-8 !w-8" title="Clear exact path" onclick={clearExactPath}>
             <span class="material-symbols-outlined" style="font-size:20px">close</span>
           </button>
         {/if}

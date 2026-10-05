@@ -6,7 +6,7 @@
 </script>
 
 {#if $activeTool === "brush"}
-  <section class="card" transition:slide|local={{ duration: 160 }}>
+  <section class="card" transition:slide={{ duration: 160 }}>
     <h2 class="card-title">
       <span class="material-symbols-outlined" style="font-size:16px">blur_circular</span>
       Push brush

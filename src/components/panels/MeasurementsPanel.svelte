@@ -10,9 +10,10 @@
   import Collapsible from "../Collapsible.svelte";
 
   // $editor.rev bumps on every edit, so these recompute live.
-  $: areas = $editor.mapData?.areas || [];
-  $: cur = $currentArea ? zoneMeasurement($currentArea) : null;
-  $: totals = totalMowArea(areas);
+  let cur = $derived($currentArea ? zoneMeasurement($currentArea) : null);
+  // Read the store directly: zones are mutated in place, so an `areas` alias
+  // would keep the same array reference and never recompute the totals.
+  let totals = $derived(totalMowArea($editor.mapData?.areas || []));
 </script>
 
 <Collapsible title="Measurements" icon="straighten" key="measure">

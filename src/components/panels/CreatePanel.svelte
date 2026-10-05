@@ -20,7 +20,7 @@
     </select>
   </label>
 
-  <button class="btn mb-2 w-full" on:click={() => addZoneAtCenter($drawZoneType)}>
+  <button class="btn mb-2 w-full" onclick={() => addZoneAtCenter($drawZoneType)}>
     <span class="material-symbols-outlined" style="font-size:18px">add_circle</span>
     Add zone (square at center)
   </button>
@@ -34,7 +34,7 @@
           ? 'var(--accent)'
           : 'var(--surface-2)'};color:{$activeTool === t.id ? '#04121f' : 'var(--ink)'}"
         title={`${t.label} — ${t.hint}`}
-        on:click={() => toggleTool(t.id)}
+        onclick={() => toggleTool(t.id)}
       >
         <span class="material-symbols-outlined" style="font-size:20px">{t.icon}</span>
         {t.label}
@@ -42,7 +42,7 @@
     {/each}
   </div>
 
-  <button class="btn mt-3 w-full" on:click={duplicateZoneAction}>
+  <button class="btn mt-3 w-full" onclick={duplicateZoneAction}>
     <span class="material-symbols-outlined" style="font-size:18px">content_copy</span>
     Duplicate selected zone
   </button>

@@ -22,6 +22,20 @@ const PROPS = {
   MiniMap: [{ map: null }],
 };
 
+function mountInto(Component, props) {
+  const target = document.createElement("div");
+  document.body.appendChild(target);
+  const instance = mount(Component, { target, props });
+  flushSync();
+  return {
+    target,
+    destroy() {
+      unmount(instance);
+      target.remove();
+    },
+  };
+}
+
 function mountOk(Component, props) {
   const target = document.createElement("div");
   document.body.appendChild(target);
@@ -43,4 +57,69 @@ describe("Svelte 5 mount smoke", () => {
       });
     }
   }
+});
+
+// The editor store mutates zones in place and re-emits the same object
+// references. Panels must still re-render on those edits (a `$derived` alias of
+// a store object compares by identity and would silently go stale).
+describe("panels follow in-place editor mutations", () => {
+  const square = (x, y, s) => [
+    { x, y },
+    { x: x + s, y },
+    { x: x + s, y: y + s },
+    { x, y: y + s },
+  ];
+  const MAP = JSON.stringify({
+    areas: [
+      { id: "a1", properties: { type: "mow", name: "front" }, outline: square(0, 0, 10) },
+      { id: "a2", properties: { type: "obstacle" }, outline: square(2, 2, 1) },
+    ],
+  });
+
+  async function load() {
+    const { loadMap } = await import("./lib/stores/editor.js");
+    loadMap(MAP);
+    flushSync();
+  }
+
+  it("ZonePanel shows a renamed zone", async () => {
+    await load();
+    const { renameCurrentZone } = await import("./lib/actions.js");
+    const ZonePanel = modules["./components/panels/ZonePanel.svelte"].default;
+    const view = mountInto(ZonePanel);
+    const nameInput = () => view.target.querySelector("input.input");
+    expect(nameInput().value).toBe("front");
+    renameCurrentZone("back");
+    flushSync();
+    expect(nameInput().value).toBe("back");
+    view.destroy();
+  });
+
+  it("CoveragePanel shows a changed per-zone override", async () => {
+    await load();
+    const { setZoneOverride } = await import("./lib/actions.js");
+    const CoveragePanel = modules["./components/panels/CoveragePanel.svelte"].default;
+    const view = mountInto(CoveragePanel);
+    const values = () => [...view.target.querySelectorAll("input[type=number]")].map((i) => i.value);
+    expect(values()).not.toContain("7");
+    setZoneOverride("outline_count", 7);
+    flushSync();
+    expect(values()).toContain("7");
+    view.destroy();
+  });
+
+  it("MeasurementsPanel totals follow an outline edit", async () => {
+    await load();
+    const { insertPointAtIndex } = await import("./lib/stores/editor.js");
+    const MeasurementsPanel = modules["./components/panels/MeasurementsPanel.svelte"].default;
+    const view = mountInto(MeasurementsPanel);
+    // The all-zones "Net mowable" total, not the per-zone figures.
+    const netTotal = () => view.target.querySelector(".text-ok")?.textContent;
+    const before = netTotal();
+    expect(before).toBeTruthy();
+    insertPointAtIndex(1, { x: 5, y: -20 }); // bulge the bottom edge outwards
+    flushSync();
+    expect(netTotal()).not.toBe(before);
+    view.destroy();
+  });
 });
