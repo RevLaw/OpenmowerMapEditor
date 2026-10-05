@@ -57,6 +57,10 @@ lock, save dialog, draft restore, import, recording, trail → zone).
 - Equal-width **Save** / **Save + restart** buttons; focusing a zone zooms in
   closer.
 
+- **Inline zone editor** — a pencil on each zone row (or double-click)
+  opens name, type, order, zone id (click to copy) and, for mow zones, the
+  mowing parameters / coverage preview / exact path right under the zone.
+  Replaces the separate Zone details and Mowing panels.
 - **Compact sidebar panels** — smaller buttons, fields and spacing inside the
   panels; Zone details puts name and type on one row with small reorder
   arrows. The HUD's reset button reads **Reset** so it fits.

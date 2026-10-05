@@ -82,11 +82,11 @@ describe("panels follow in-place editor mutations", () => {
     flushSync();
   }
 
-  it("ZonePanel shows a renamed zone", async () => {
+  it("Zone editor shows a renamed zone", async () => {
     await load();
     const { renameCurrentZone } = await import("./lib/actions.js");
-    const ZonePanel = modules["./components/panels/ZonePanel.svelte"].default;
-    const view = mountInto(ZonePanel);
+    const ZoneEditor = modules["./components/ZoneEditor.svelte"].default;
+    const view = mountInto(ZoneEditor);
     const nameInput = () => view.target.querySelector("input.input");
     expect(nameInput().value).toBe("front");
     renameCurrentZone("back");
@@ -95,11 +95,22 @@ describe("panels follow in-place editor mutations", () => {
     view.destroy();
   });
 
-  it("CoveragePanel shows a changed per-zone override", async () => {
+  it("Zone list pencil opens the inline editor", async () => {
+    await load();
+    const ZoneListPanel = modules["./components/panels/ZoneListPanel.svelte"].default;
+    const view = mountInto(ZoneListPanel);
+    expect(view.target.querySelector("input[aria-label='Zone name']")).toBeNull();
+    view.target.querySelector("button[aria-label='Edit zone']").click();
+    flushSync();
+    expect(view.target.querySelector("input[aria-label='Zone name']").value).toBe("front");
+    view.destroy();
+  });
+
+  it("Mowing settings show a changed per-zone override", async () => {
     await load();
     const { setZoneOverride } = await import("./lib/actions.js");
-    const CoveragePanel = modules["./components/panels/CoveragePanel.svelte"].default;
-    const view = mountInto(CoveragePanel);
+    const MowingSettings = modules["./components/MowingSettings.svelte"].default;
+    const view = mountInto(MowingSettings);
     const values = () => [...view.target.querySelectorAll("input[type=number]")].map((i) => i.value);
     expect(values()).not.toContain("7");
     setZoneOverride("outline_count", 7);

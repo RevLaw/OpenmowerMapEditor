@@ -92,7 +92,7 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 
 ### Comfortable editing
 - **Every zone visible and clickable** — all zones are drawn (type-colored fill), click one on the map to select it, hover for its name / type / area
-- **Zone list** (Zones tab) — every zone with type color and area; click to select & fit, plus per-zone **hide** and **lock** toggles (editor-only, kept per browser, never written to `map.json`). Locked zones can't be edited or deleted
+- **Zone list** (Zones tab) — every zone with type color and area; click to select & fit, a **pencil** for the inline editor (name, type, order, id, mowing settings), plus per-zone **hide** and **lock** toggles (editor-only, kept per browser, never written to `map.json`). Locked zones can't be edited or deleted
 - **Draw polygon** (`P`) — click corners, finish by clicking the first point, double-click, `Enter` or right-click; `Backspace` removes the last corner
 - **Midpoint handles** — drag the small dot in the middle of any edge to insert a vertex there; outlines redraw live while you drag
 - **Magnetic snapping** — dragged/placed points snap onto other zones' vertices and edges (and the dock) so neighbouring zones line up without gaps; toggle in the tool dock, hold `Alt` to bypass
@@ -110,8 +110,8 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 
 ### Mowing coverage
 - **Mowing coverage preview** — overlay the rows the robot drives: green **outline laps** (driven first) around the edge, then cyan **back-and-forth fill** inside, with obstacles carved out. Uses the robot's **real** parameters: global values read live from `/mower_logic` (`tool_width` = spacing, `outline_count`, `outline_overlap_count`, `mow_angle_offset`, …) via `GET /api/mow_params`, plus any **per-area overrides** in `map.json`, and OpenMower's exact angle logic (first-2 m auto-orientation, or a fixed per-area angle). Falls back to the params file + OpenMower defaults offline
-- **Per-area mowing overrides (OpenMower v1.2)** — set `outline_count`, `outline_overlap_count`, `outline_offset`, and `angle` **per mow zone** in the **Mowing** panel; written to `map.json` under `area.properties` (an unchecked control = use the global default). Angle is shown in degrees, stored in radians, with a hint showing the effective direction after the robot's global `mow_angle_offset`
-- **Exact mowing path (real planner)** — a **Compute exact path** button in the **Mowing** panel runs OpenMower's own `slic3r_coverage_planner` for the selected mow zone (`POST /api/plan_path`) and overlays the **literal** path the robot drives. On-demand and cached; requires the mower online, and flags itself *stale* after you edit. Read-only — planning never commands the robot
+- **Per-area mowing overrides (OpenMower v1.2)** — set `outline_count`, `outline_overlap_count`, `outline_offset`, and `angle` **per mow zone** in the zone's inline editor (pencil in the zone list); written to `map.json` under `area.properties` (an unchecked control = use the global default). Angle is shown in degrees, stored in radians, with a hint showing the effective direction after the robot's global `mow_angle_offset`
+- **Exact mowing path (real planner)** — an **Exact path** button in the zone editor runs OpenMower's own `slic3r_coverage_planner` for the selected mow zone (`POST /api/plan_path`) and overlays the **literal** path the robot drives. On-demand and cached; requires the mower online, and flags itself *stale* after you edit. Read-only — planning never commands the robot
 
 ### Robot-assisted mapping
 - **Drive the mower with an on-screen joystick** (Robot tab) — touch/mouse thumbstick or `W A S D` / arrow keys, adjustable max speed. *Start drive mode* puts OpenMower into its area-recording mode (the only mode in which it accepts joystick commands — blade off; nothing is saved on the robot), *Leave drive mode* returns it to idle. Commands go to `/joy_vel` like the official app's joystick. Safety: the robot stops as soon as you let go, the tab is hidden or loses focus, and a server-side deadman zeroes the speed if no command arrives for 0.4 s; speed is capped at 0.5 m/s / 1.5 rad/s
@@ -159,7 +159,7 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
    - read `/data/params/mower_params.yaml` and apply `datum_lat` / `datum_long`
 3. If no map is found, load one manually with the file picker.
 4. Pick a zone by clicking it on the map or in the **Zones** list.
-5. Create zones: pick the type under **New zones are** in the Zones tab, then draw with the polygon / rectangle / circle tools in the dock (or right-click the map) — or record one by driving the mower (**Robot** tab). Use **Zone details** to name, retype, reorder, or remove a zone, and the **Mowing** panel to set a mow zone's cutting parameters and preview the path.
+5. Create zones: pick the type under **New zones are** in the Zones tab, then draw with the polygon / rectangle / circle tools in the dock (or right-click the map) — or record one by driving the mower (**Robot** tab). Click the **pencil** next to a zone to rename, retype or reorder it and (for mow zones) set its cutting parameters and preview the path; delete it from the selection bar.
 6. Use the tool dock on the right (or right-click on the map) to edit your map geometry.
 7. Optional: turn on **Live robot** to stream the pose from the running ROS container (requires the Docker socket mount). The marker glides in real time from the fused map-frame pose; on fallback (probe) setups it matches the map when TF uses the `map` frame, and may drift relative to `map.json` while only `odom` is available until localization aligns.
 8. Optional: turn on **WiFi signal map** to start capture, then the nested toggle to display the heatmap — the mower records the survey autonomously without an open browser and stores it in `/data/ros/wifi-signal-map.json`. Optional: turn on **Movement trail** the same way to record and display the mower's saved path; use the date picker to review past mow sessions.
@@ -278,8 +278,7 @@ Draw & measure:
 Sidebar (Zones tab):
 
 - **Zones** list — select (and fit) a zone, lock it (`L`) or hide it (`H`); **New zones are** picks the type for every draw tool.
-- **Zone details** — name, type, reorder (delete it from the selection bar).
-- **Mowing** — per-zone cutting parameters, coverage preview, exact planner path.
+- **Zone editor** (pencil on a zone row, or double-click it) — opens inline under the zone and follows the selection: name, type, list order, zone id (click to copy), and for mow zones the per-zone cutting parameters, coverage preview and exact planner path. Delete a zone from the selection bar.
 - **Vertex** — exact X/Y of the selected vertex, **make start point** (OpenMower measures the automatic mow angle from the first edge), add the robot's position as a vertex.
 - **Simplify outline** — Douglas–Peucker reduction with an adjustable tolerance.
 - **Combine zones** — **merge** (union), **cut out** (difference), **clip** (intersection) with another zone (touching zones listed first). Outlines can't have holes, so cutting a zone fully out of another is refused — use an obstacle instead. Splitting is the **Split** tool in the dock.

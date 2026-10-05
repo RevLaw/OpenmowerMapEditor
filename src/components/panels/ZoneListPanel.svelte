@@ -16,6 +16,7 @@
   import { drawZoneType } from "../../lib/stores/tools.js";
   import { mapApi } from "../../lib/stores/mapApi.js";
   import { sidebarOpen, isNarrowScreen } from "../../lib/stores/ui.js";
+  import ZoneEditor from "../ZoneEditor.svelte";
 
   const TYPES = [
     { id: "mow", label: "Mow", color: "#22c55e" },
@@ -42,6 +43,19 @@
   );
   let hiddenCount = $derived(rows.filter((r) => r.hidden).length);
 
+  // Edit mode follows the selection: the inline editor opens under whichever
+  // zone is selected (picked here or on the map) until "Done".
+  let editing = $state(false);
+
+  function toggleEdit(i) {
+    if (editing && i === $editor.areaIndex) {
+      editing = false;
+      return;
+    }
+    setAreaIndex(i);
+    editing = true;
+  }
+
   function pick(i) {
     setAreaIndex(i);
     // On a phone the open panel covers the map — fold it to show the zone.
@@ -61,10 +75,11 @@
     {#if rows.length === 0}
       <p class="mb-2 text-[11px] text-subtle">No zones yet — draw one with the tools on the right.</p>
     {:else}
-      <ul class="scroll-thin -mx-1 mb-2 max-h-[34vh] space-y-0.5 overflow-y-auto px-1" role="listbox" aria-label="Zones">
+      <ul class="-mx-1 mb-2 space-y-0.5 px-1" role="listbox" aria-label="Zones">
         {#each rows as r (r.index)}
+          {@const isEditing = editing && r.index === $editor.areaIndex}
           <li
-            class="zone-row group flex items-center gap-1 rounded-lg pl-2 pr-0.5"
+            class="zone-row group flex items-center gap-0.5 rounded-lg pl-2 pr-0.5"
             class:selected={r.index === $editor.areaIndex}
             class:dim={r.hidden}
           >
@@ -73,10 +88,21 @@
               role="option"
               aria-selected={r.index === $editor.areaIndex}
               onclick={() => pick(r.index)}
+              ondblclick={() => toggleEdit(r.index)}
             >
               <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style="background:{COLOR[r.type] || '#94a3b8'}"></span>
               <span class="min-w-0 flex-1 truncate text-xs">{r.name}</span>
               <span class="shrink-0 font-mono text-[10px] text-subtle">{formatArea(r.area)}</span>
+            </button>
+            <button
+              class="btn-icon !h-7 !w-7"
+              class:on={isEditing}
+              title={isEditing ? "Close editor" : "Edit name, type, order and mowing settings"}
+              aria-label="Edit zone"
+              aria-expanded={isEditing}
+              onclick={() => toggleEdit(r.index)}
+            >
+              <span class="material-symbols-outlined" style="font-size:16px">{isEditing ? "edit_off" : "edit"}</span>
             </button>
             <button
               class="btn-icon !h-7 !w-7"
@@ -94,6 +120,11 @@
               <span class="material-symbols-outlined" style="font-size:16px">{r.hidden ? "visibility_off" : "visibility"}</span>
             </button>
           </li>
+          {#if isEditing}
+            <li class="list-none">
+              <ZoneEditor onClose={() => (editing = false)} />
+            </li>
+          {/if}
         {/each}
       </ul>
       {#if hiddenCount}

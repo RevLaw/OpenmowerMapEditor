@@ -1,14 +1,12 @@
 <script>
   import MapSourcePanel from "./panels/MapSourcePanel.svelte";
   import ZoneListPanel from "./panels/ZoneListPanel.svelte";
-  import ZonePanel from "./panels/ZonePanel.svelte";
   import VertexPanel from "./panels/VertexPanel.svelte";
   import ShapeOpsPanel from "./panels/ShapeOpsPanel.svelte";
   import ProjectionPanel from "./panels/ProjectionPanel.svelte";
   import ToolSettingsPanel from "./panels/ToolSettingsPanel.svelte";
   import TransformPanel from "./panels/TransformPanel.svelte";
   import MeasurementsPanel from "./panels/MeasurementsPanel.svelte";
-  import CoveragePanel from "./panels/CoveragePanel.svelte";
   import ValidationPanel from "./panels/ValidationPanel.svelte";
   import DockPanel from "./panels/DockPanel.svelte";
   import RecordPanel from "./panels/RecordPanel.svelte";
@@ -91,8 +89,6 @@
     {#if $sidebarTab === "zones"}
       <ZoneListPanel />
       <ToolSettingsPanel />
-      <ZonePanel />
-      <CoveragePanel />
       <VertexPanel />
       <TransformPanel />
       <ShapeOpsPanel />
