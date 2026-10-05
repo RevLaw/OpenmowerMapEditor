@@ -1,4 +1,5 @@
 import { writable } from "svelte/store";
+import { editMode } from "./ui.js";
 
 // A writable that persists to localStorage (numbers and booleans).
 function persisted(key, initial) {
@@ -56,9 +57,15 @@ export const rulerInfo = writable({ points: 0, total: 0, last: 0 });
 export const coverageOn = persisted("om-coverage-on", false);
 
 export function setTool(tool) {
+  // Picking an editing tool (shortcut, palette, menu) switches edit mode on.
+  if (tool !== "none") editMode.set(true);
   activeTool.set(tool);
 }
 
 export function toggleTool(tool) {
-  activeTool.update((current) => (current === tool ? "none" : tool));
+  activeTool.update((current) => {
+    const next = current === tool ? "none" : tool;
+    if (next !== "none") editMode.set(true);
+    return next;
+  });
 }

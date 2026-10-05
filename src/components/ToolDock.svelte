@@ -1,5 +1,6 @@
 <script>
   import { activeTool, setTool, toggleTool, snapEnabled } from "../lib/stores/tools.js";
+  import { editMode } from "../lib/stores/ui.js";
   import { history } from "../lib/stores/editor.js";
   import { undo, redo, removePoint } from "../lib/actions.js";
 
@@ -30,6 +31,15 @@
 <!-- 2-column grid; a divider spans both columns (grid-column:1/-1), which
      always forces a new row, keeping the groups visually separated. -->
 <div class="glass grid grid-cols-2 gap-1 rounded-2xl p-1.5">
+  <button
+    class="done-btn"
+    style="grid-column:1/-1"
+    title="Done editing — back to the map view"
+    onclick={() => editMode.set(false)}
+  >
+    <span class="material-symbols-outlined" style="font-size:16px">check</span>
+    Done
+  </button>
   {#each GROUPS as group, gi}
     {#if gi > 0}
       <div class="my-1 h-px" style="grid-column:1/-1;background:var(--edge-soft)"></div>
@@ -89,6 +99,25 @@
 </div>
 
 <style>
+  .done-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 26px;
+    border-radius: 9px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .done-btn:hover {
+    background: var(--surface-2);
+  }
+  @media (pointer: coarse) {
+    .done-btn {
+      height: 36px;
+    }
+  }
   .tool-btn.toggled {
     color: var(--accent);
     border-color: color-mix(in srgb, var(--accent) 55%, transparent);

@@ -69,3 +69,12 @@ export function openSidebarTab(tab) {
   sidebarTab.set(tab);
   sidebarOpen.set(true);
 }
+
+/**
+ * Edit mode: editing tools, vertex handles and the selection bar are shown.
+ * Off = a calm "view" map (zones, robot, trail) — the default on phones.
+ */
+export const editMode = writable(!isNarrowScreen());
+
+/** Keep the live robot in view (turned off as soon as the user pans the map). */
+export const followRobot = writable(false);

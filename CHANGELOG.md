@@ -67,6 +67,13 @@ lock, save dialog, draft restore, import, recording, trail → zone).
   **Apply** commits exactly what was previewed.
 - **Brush settings in the top hint bar** — radius / strength sliders sit next
   to the active brush instead of in a sidebar panel.
+- **Calmer phone view** — phones open in a view mode (zones, robot, trail;
+  no vertex handles, tool dock or selection bar) with a single **Edit**
+  button; **Done** in the tool dock goes back. New map control stack above
+  the base-map button: **find & follow robot**, **show trail**, zoom (zoom
+  moved there from the bottom-right). The status panel starts collapsed on
+  phones.
+- **One Save button** — "Save + restart" is the checkbox in the save dialog.
 - **Compact sidebar panels** — smaller buttons, fields and spacing inside the
   panels; Zone details puts name and type on one row with small reorder
   arrows. The HUD's reset button reads **Reset** so it fits.

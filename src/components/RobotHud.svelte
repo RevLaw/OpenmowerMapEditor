@@ -32,6 +32,7 @@
   } from "../lib/stores/robotTrail.js";
   import CaptureToggleHeader from "./CaptureToggleHeader.svelte";
   import MowerControl from "./MowerControl.svelte";
+  import { isNarrowScreen } from "../lib/stores/ui.js";
   import OverlayToggleRow from "./OverlayToggleRow.svelte";
 
   // Shared on/off colors so the Live robot, WiFi, and Movement trail icons
@@ -44,8 +45,9 @@
   // dock stack below it into an unusably cramped layout. Remembered
   // per-device, same pattern as the sidebar panels' Collapsible.
   const HUD_EXPANDED_KEY = "openmower-map-editor-hud-expanded";
-  let hudExpanded =
-    $state(typeof localStorage === "undefined" || localStorage.getItem(HUD_EXPANDED_KEY) !== "0");
+  // Phones start collapsed (unless the user expanded it before).
+  const savedHud = typeof localStorage === "undefined" ? null : localStorage.getItem(HUD_EXPANDED_KEY);
+  let hudExpanded = $state(savedHud == null ? !isNarrowScreen() : savedHud !== "0");
 
   function toggleHudExpanded() {
     hudExpanded = !hudExpanded;

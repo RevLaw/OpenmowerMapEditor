@@ -136,7 +136,7 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 ### Map management
 - Auto-load `/data/ros/map.json` (if present); auto-fill projection from `/data/params/mower_params.yaml` (`datum_lat`, `datum_long`)
 - Save directly to `/data/ros/map.json` with automatic timestamped backup
-- Optional: restart the container named in `OPENMOWER_CONTAINER_NAME` via the mounted Docker socket (Save + restart)
+- Optional: restart the container named in `OPENMOWER_CONTAINER_NAME` via the mounted Docker socket (tick **Restart ROS after saving** in the save dialog)
 - **Load map / backup…** gallery with mini-map previews, timestamps, stats, and a diff vs your current map
 - **GeoJSON / KML import & export** (Map tab → File) — trace zones in QGIS / Google Earth / geojson.io and import them (polygons without a `type` get the type you pick), or export the map as WGS84 for an off-robot copy. Zone names, types, ids and per-zone mowing overrides round-trip; the dock is a `type: "dock"` point
 
@@ -144,7 +144,8 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 - **Command palette** (`Ctrl`/`Cmd + K`) to run any action, and a **keyboard-shortcut** cheat sheet (`?`)
 - **Live measurements** — per-zone area (m²/ha) and perimeter, plus net mowable area (mow minus contained obstacles)
 - **Geometry validation** — flags self-intersections, too-few points, degenerate/duplicate vertices, orphan obstacles, and a dock placed inside an obstacle; click an issue to zoom to it
-- **Map navigation** — zoom buttons, scroll-wheel/`+`/`−` keys, base-map switching from the command palette
+- **Map navigation** — a control stack above the base-map button (bottom-left): **find & follow the robot** (keeps it in view until you pan), **show where it drove** (saved trail), zoom; plus scroll-wheel/`+`/`−` keys
+- **View mode vs. edit mode** — phones open in a calm view mode: zones, robot and trail only, no vertex handles, tool dock or selection bar, just an **Edit** button. Edit mode (the desktop default) shows the tools; **Done** at the top of the tool dock returns to view mode, and picking any tool switches edit mode on
 - **Switchable base maps** (bottom-left **Layers**) — Esri satellite (default), the free **20 cm Lower Saxony aerial (DOP20)**, **OpenStreetMap** (global fallback), or a custom XYZ/WMS URL; choice persists
 - **Zone management** — friendly **name** (`properties.name`), type (mow/obstacle/nav), reorder, remove; `[` / `]` cycle through zones
 - **Organized sidebar** — three tabs (**Zones** · **Map** · **Robot**); panels are **collapsible** and remember their open/closed state. The whole sidebar **folds into a slim icon rail** (`Ctrl + B`) to give the map the screen — phones always start folded, and picking a zone in the list folds it again
@@ -165,13 +166,13 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 8. Optional: turn on **WiFi signal map** to start capture, then the nested toggle to display the heatmap — the mower records the survey autonomously without an open browser and stores it in `/data/ros/wifi-signal-map.json`. Optional: turn on **Movement trail** the same way to record and display the mower's saved path; use the date picker to review past mow sessions.
 9. Save your edits:
    - **Save map.json** (`Ctrl + S`) opens a confirmation listing the changes and any validation warnings; confirming writes `/data/ros/map.json` and creates a backup first (`map.json.bak-<timestamp>`).
-   - Tick **Restart ROS after saving** (or use the orange button) to also restart the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
+   - Tick **Restart ROS after saving** to also restart the container set in `OPENMOWER_CONTAINER_NAME` through the mounted Docker socket.
    - If direct save is unavailable, fallback is downloading the map as `openmower-map-edited.json`.
 10. Roll back from backup (if needed):
     - Click **Load map / backup…** to open the gallery of `map.json` (running) and `map.json.bak-*` versions from `/data/ros`.
     - Each version shows a **mini-map preview**, a friendly timestamp, summary stats (zones / points / mow area), and the **difference vs your current map** (Δ zones / points / area).
     - Click **Load this version** to load it (nothing is overwritten).
-    - Click **Save map.json** (or **Save + restart ROS**) to make a loaded backup your active `map.json`.
+    - Click **Save** to make a loaded backup your active `map.json`.
 
 ## Docker & OpenMower integration
 
@@ -184,7 +185,7 @@ The editor ships as a single multi-stage Docker image (see [`Dockerfile`](./Dock
 - Live pose streaming and the fallback TF/topic probes
 - Reading mow parameters (`/mower_logic`) and running the exact-path planner
 - Mower control (Start/Stop/Home/Reset) and joystick driving (`/joy_vel`, plus entering/leaving area-recording mode), gated by `OPENMOWER_CONTROL_DISABLE`
-- **Save + restart ROS** — restarting `OPENMOWER_CONTAINER_NAME` after a save
+- **Restart ROS after saving** (save dialog) — restarting `OPENMOWER_CONTAINER_NAME` after a save
 - The autonomous WiFi survey collector and movement-trail capture (both run as long-lived subscribers inside `open_mower_ros`)
 
 This means the map editor container has effectively the same power as root on the host (see [Security](#security)) — mount it only on a trusted LAN.
@@ -294,7 +295,7 @@ Other notes:
 
 - **Live robot** streams the fused ROS pose via the mounted Docker socket (SSE) and interpolates the marker for smooth motion + heading. While driving/mowing it shows a **top-down mower** icon rotated to the live heading; other states swap the icon (docking, dock charging, dock full, emergency, error). The dock uses **ev_station** on the map, with an arrow for its heading.
 - `Load map / backup…` opens a gallery of saved versions, each with a mini-map preview, timestamp, stats, and a diff vs your current map.
-- **Zoom** buttons sit at the bottom-right; the **Layers** button (bottom-left) switches the base map; `F` fits the selected zone, `Shift + F` the whole map.
+- **Follow robot / trail / zoom** buttons sit above the **Layers** button (bottom-left), which switches the base map; `F` fits the selected zone, `Shift + F` the whole map.
 - On touch devices, brush also supports finger paint, and long-press opens context menus.
 - Light/dark mode affects sidebar/tool styling only. Map line/point colors remain identical in both modes.
 
@@ -347,7 +348,7 @@ Project layout:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `OPENMOWER_CONTAINER_NAME` | `open_mower_ros` | Container restarted by **Save + restart ROS** |
+| `OPENMOWER_CONTAINER_NAME` | `open_mower_ros` | Container restarted by **Restart ROS after saving** |
 | `OPENMOWER_POSE_CONTAINER` | same as above | Container used for TF echo / ROS topic sampling |
 | `OPENMOWER_POSE_DISABLE` | `0` | Set `1` to disable live pose entirely |
 | `OPENMOWER_CONTROL_DISABLE` | `0` | Set `1` to disable the Start/Stop/Home/Reset mower control buttons and joystick driving |

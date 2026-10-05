@@ -104,16 +104,11 @@
   </div>
 
   <footer class="space-y-1.5 border-t p-2.5" style="border-color:var(--edge-soft)">
-    <div class="grid grid-cols-2 gap-1.5">
-      <button class="btn btn-accent" title="Save map.json (Ctrl+S)" onclick={() => requestSave({ restart: false })}>
-        <span class="material-symbols-outlined" style="font-size:18px">save</span>
-        Save
-      </button>
-      <button class="btn btn-warn" title="Save map.json, then restart ROS so the robot loads it" onclick={() => requestSave({ restart: true })}>
-        <span class="material-symbols-outlined" style="font-size:18px">restart_alt</span>
-        Save + restart
-      </button>
-    </div>
+    <!-- One Save: the confirm dialog offers "Restart ROS after saving". -->
+    <button class="btn btn-accent w-full" title="Save map.json (Ctrl+S)" onclick={() => requestSave({ restart: false })}>
+      <span class="material-symbols-outlined" style="font-size:18px">save</span>
+      Save
+    </button>
     <div class="flex items-center gap-2">
       {#if $isDirty}
         <span class="chip shrink-0" style="color:var(--warn);border-color:var(--warn)">● Unsaved</span>

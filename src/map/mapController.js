@@ -50,7 +50,7 @@ import {
   rulerInfo,
 } from "../lib/stores/tools.js";
 import { hiddenZones, lockedZones, zoneKey, toggleZoneHidden, toggleZoneLocked } from "../lib/stores/zoneView.js";
-import { contextMenu, sidebarTab } from "../lib/stores/ui.js";
+import { contextMenu, sidebarTab, editMode, followRobot } from "../lib/stores/ui.js";
 import { recording } from "../lib/stores/recorder.js";
 import { trailZonePath, trailZoneOutline } from "../lib/stores/trailZone.js";
 import {
@@ -205,6 +205,8 @@ export function createMapController(container) {
   let hidden = get(hiddenZones);
   let locked = get(lockedZones);
   let snapOn = get(snapEnabled);
+  // View mode (editing off): zones, robot and trail only — no handles / menus.
+  let editing = get(editMode);
   // Preview latlngs of the selected outline, patched live while dragging.
   let previewLatLngs = [];
   // Selected-zone points as last drawn (lets a brush stroke patch, not rebuild).
@@ -283,6 +285,7 @@ export function createMapController(container) {
   function openMenu(e, title, items) {
     const oe = e.originalEvent || e;
     if (oe?.preventDefault) oe.preventDefault();
+    if (!editing) return; // view mode: no editing menus
     if (e.originalEvent) L.DomEvent.stopPropagation(e);
     contextMenu.set({ x: oe.clientX ?? 0, y: oe.clientY ?? 0, title, items });
   }
@@ -401,7 +404,7 @@ export function createMapController(container) {
     const previewing = get(simplifyPreviewOn);
     renderSimplifyPreview(pts);
     // While previewing a simplify, the dense vertex handles would hide it.
-    if (!isLocked && !previewing) {
+    if (editing && !isLocked && !previewing) {
       renderPoints(pts, latlngs);
       if (tool === "none") renderMidpoints(pts, latlngs);
       renderMultiHandle(pts);
@@ -964,7 +967,7 @@ export function createMapController(container) {
       ? `<span class="dock-heading" style="transform:rotate(${90 - (station.heading * 180) / Math.PI}deg)"><span></span></span>`
       : "";
     const dock = L.marker(metersToLatLng(station.position, origin()), {
-      draggable: true,
+      draggable: editing,
       interactive: !PLACE_TOOLS.includes(tool),
       icon: L.divIcon({
         className: "map-marker-leaflet",
@@ -1675,6 +1678,7 @@ export function createMapController(container) {
 
     const target = { x: pose.x, y: pose.y, yaw: pose.yaw };
     robotAnim.target = target;
+    if (get(followRobot)) keepInView(target);
     const visual = resolveRobotVisualMode(pose.ros);
     robotAnim.rotate = visual === "nav";
 
@@ -1777,6 +1781,25 @@ export function createMapController(container) {
     group.addTo(map);
     layers.exactPath = group;
   }
+
+  // ---- follow robot -----------------------------------------------------------
+
+  /** Pan so `pt` stays in the middle half of the view (no jitter while it's well inside). */
+  function keepInView(pt) {
+    const ll = toLatLng(pt);
+    if (!map.getBounds().pad(-0.25).contains(ll)) map.panTo(ll, { animate: true, duration: 0.4 });
+  }
+
+  /** Center on the live robot. Returns false when there's no live position yet. */
+  function locateRobot() {
+    const pose = get(robotPose);
+    if (!get(robotLive) || !pose?.ok) return false;
+    map.setView(toLatLng(pose), Math.max(map.getZoom(), 20));
+    return true;
+  }
+
+  // Panning by hand means "let me look elsewhere" — stop following.
+  map.on("dragstart", () => followRobot.set(false));
 
   // ---- public helpers ------------------------------------------------------
 
@@ -1927,6 +1950,18 @@ export function createMapController(container) {
     })
   );
   unsubs.push(snapEnabled.subscribe((v) => (snapOn = v)));
+  unsubs.push(
+    editMode.subscribe((v) => {
+      const was = editing;
+      editing = v;
+      if (was && !v) {
+        activeTool.set("none");
+        clearSelection();
+      }
+      render();
+    })
+  );
+  unsubs.push(followRobot.subscribe((on) => on && locateRobot()));
   // Toggling the preview changes which handles are drawn (full re-render);
   // moving the slider only redraws the preview layer.
   unsubs.push(simplifyPreviewOn.subscribe(() => render()));
@@ -1939,7 +1974,7 @@ export function createMapController(container) {
   function refreshMidpoints() {
     layers.midpoints.forEach((m) => map.removeLayer(m));
     layers.midpoints = [];
-    if (tool !== "none" || !s.mapData?.areas?.[s.areaIndex] || currentIsLocked()) return;
+    if (!editing || tool !== "none" || !s.mapData?.areas?.[s.areaIndex] || currentIsLocked()) return;
     const pts = currentEditablePoints();
     renderMidpoints(pts, pts.map(toLatLng));
   }
@@ -1967,6 +2002,7 @@ export function createMapController(container) {
     fitCurrentArea,
     fitAll,
     panToPoint,
+    locateRobot,
     handleKey,
     finishPolygon: finishPoly,
     undoPolygonPoint: undoPolyPoint,
