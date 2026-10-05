@@ -57,6 +57,14 @@ lock, save dialog, draft restore, import, recording, trail → zone).
 - Equal-width **Save** / **Save + restart** buttons; focusing a zone zooms in
   closer.
 
+- **Compact sidebar panels** — smaller buttons, fields and spacing inside the
+  panels; Zone details puts name and type on one row with small reorder
+  arrows. The HUD's reset button reads **Reset** so it fits.
+
+### Fixed
+- The docking-station panel didn't follow the dock when it was dragged on
+  the map (it read a mutated-in-place object through a `$derived`).
+
 ### Removed
 - The **multi-select** and **move whole zone** tools (use `Ctrl + A` and
   drag), and **rotate / scale / grow / shrink** — only **Simplify** remains

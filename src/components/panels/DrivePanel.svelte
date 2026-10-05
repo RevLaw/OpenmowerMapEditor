@@ -52,7 +52,7 @@
       <span class="font-mono text-subtle">{$driveCommand.lx.toFixed(2)} m/s</span>
     </div>
 
-    <div class="mb-3 flex justify-center">
+    <div class="mb-2 flex justify-center">
       <Joystick onChange={setStick} disabled={busy} />
     </div>
     <p class="mb-2 text-center text-[10px] text-subtle">
@@ -63,7 +63,7 @@
       <span>Max speed</span>
       <span class="font-mono text-accent">{($driveSpeed * MAX_LINEAR).toFixed(2)} m/s</span>
     </div>
-    <input class="slider mb-3" type="range" min="0.1" max="1" step="0.05" bind:value={$driveSpeed} />
+    <input class="slider mb-2" type="range" min="0.1" max="1" step="0.05" bind:value={$driveSpeed} />
 
     <button class="btn w-full" disabled={busy} onclick={exitDriveMode}>
       <span class="material-symbols-outlined" style="font-size:18px">logout</span>

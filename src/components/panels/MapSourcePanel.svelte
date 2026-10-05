@@ -34,7 +34,7 @@
     </label>
   </div>
 
-  <div class="mt-3 border-t pt-2" style="border-color:var(--edge-soft)">
+  <div class="mt-2 border-t pt-2" style="border-color:var(--edge-soft)">
     <p class="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-subtle">GeoJSON / KML</p>
     <p class="mb-2 text-[10px] text-subtle">
       Trace in QGIS or Google Earth, or keep an off-robot copy. Uses the current projection origin.

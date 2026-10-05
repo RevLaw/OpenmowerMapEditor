@@ -77,7 +77,7 @@
       <span>Smoothing (m)</span>
       <span class="font-mono text-accent">{tolerance.toFixed(2)}</span>
     </div>
-    <input class="slider mb-3" type="range" min="0" max="0.3" step="0.01" bind:value={tolerance} />
+    <input class="slider mb-2" type="range" min="0" max="0.3" step="0.01" bind:value={tolerance} />
 
     <div class="mb-2 grid grid-cols-3 gap-1.5">
       <button class="btn !px-1 text-xs" onclick={() => setRecordingPaused(!$recording.paused)}>

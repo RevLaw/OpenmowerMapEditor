@@ -7,7 +7,7 @@
   const BUTTONS = [
     { cmd: "start", icon: "play_arrow", label: "Start", color: "var(--ok)", confirm: true },
     { cmd: "home", icon: "home", label: "Home", color: "var(--accent)", confirm: true },
-    { cmd: "reset_emergency", icon: "restart_alt", label: "Reset E-stop", color: "var(--warn)", confirm: true },
+    { cmd: "reset_emergency", icon: "restart_alt", label: "Reset", title: "Reset E-stop", color: "var(--warn)", confirm: true },
     { cmd: "stop", icon: "e911_emergency", label: "Stop", color: "var(--danger)", confirm: false, stop: true },
   ];
 
@@ -37,17 +37,17 @@
 <div class="grid grid-cols-4 gap-1">
   {#each BUTTONS as b}
     <button
-      class="mbtn flex flex-col items-center gap-0.5 rounded-lg px-1 py-1 text-[10px] font-semibold"
+      class="mbtn flex min-w-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-1 text-[10px] font-semibold"
       class:armed={armed === b.cmd}
       class:stop={b.stop}
       style="--c:{b.color}"
       disabled={$controlSending}
-      title={b.confirm ? `${b.label} (tap twice to confirm)` : b.label}
-      aria-label={b.label}
+      title={b.confirm ? `${b.title || b.label} (tap twice to confirm)` : b.title || b.label}
+      aria-label={b.title || b.label}
       onclick={() => click(b)}
     >
       <span class="material-symbols-outlined" style="font-size:20px">{b.icon}</span>
-      <span class="truncate">{armed === b.cmd ? "Confirm?" : b.label}</span>
+      <span class="w-full truncate text-center">{armed === b.cmd ? "Confirm?" : b.label}</span>
     </button>
   {/each}
 </div>

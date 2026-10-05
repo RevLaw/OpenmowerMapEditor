@@ -65,7 +65,7 @@
       default (<span class="text-muted">{SRC[gp.source] || gp.source}</span>).
     </p>
 
-    <div class="mb-1.5 flex items-center gap-2">
+    <div class="mb-1 flex items-center gap-2">
       <input
         type="checkbox"
         class="accent-[var(--accent)]"
@@ -84,7 +84,7 @@
       />
     </div>
 
-    <div class="mb-1.5 flex items-center gap-2">
+    <div class="mb-1 flex items-center gap-2">
       <input
         type="checkbox"
         class="accent-[var(--accent)]"
@@ -103,7 +103,7 @@
       />
     </div>
 
-    <div class="mb-1.5 flex items-center gap-2">
+    <div class="mb-1 flex items-center gap-2">
       <input
         type="checkbox"
         class="accent-[var(--accent)]"
@@ -153,7 +153,7 @@
     {/if}
 
     <div
-      class="mt-3 flex items-center justify-between border-t pt-2"
+      class="mt-2 flex items-center justify-between border-t pt-2"
       style="border-color:var(--edge-soft)"
     >
       <span class="text-xs font-medium text-muted">Show coverage preview</span>
@@ -194,7 +194,7 @@
           </div>
         </dl>
 
-        <div class="mt-3 flex items-center gap-3 text-[10px] text-subtle">
+        <div class="mt-2 flex items-center gap-3 text-[10px] text-subtle">
           <span class="flex items-center gap-1">
             <span class="inline-block h-0.5 w-4 rounded" style="background:var(--ok)"></span>
             outline (first)
@@ -207,7 +207,7 @@
       </div>
     {/if}
 
-    <div class="mt-3 border-t pt-2" style="border-color:var(--edge-soft)">
+    <div class="mt-2 border-t pt-2" style="border-color:var(--edge-soft)">
       <div class="flex items-center gap-2">
         <button class="btn flex-1" onclick={computeExactPath} disabled={$exactPathLoading}>
           <span class="material-symbols-outlined" style="font-size:18px">

@@ -36,50 +36,43 @@
 {#if $currentArea}
   <Collapsible title="Zone details" icon="category" key="zone">
     {#if $currentLocked}
-      <p class="mb-2 flex items-center gap-1.5 text-[11px]" style="color:var(--warn)">
+      <p class="mb-1.5 flex items-center gap-1.5 text-[11px]" style="color:var(--warn)">
         <span class="material-symbols-outlined" style="font-size:15px">lock</span>
         Locked — unlock it in the zone list to edit.
       </p>
     {/if}
-    <label class="field">
-      Type
-      <select class="select" value={type} disabled={$currentLocked} onchange={(e) => changeZoneType(e.target.value)}>
-        <option value="mow">mow</option>
-        <option value="obstacle">obstacle</option>
-        <option value="nav">nav</option>
-      </select>
-    </label>
-
-    <label class="field">
-      Name
-      <input
-        class="input"
-        placeholder={getZoneName($currentArea, index)}
-        disabled={$currentLocked}
-        bind:value={nameDraft}
-        onfocus={() => (editingName = true)}
-        onblur={commitName}
-        onkeydown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-      />
-    </label>
-    <p class="mb-2 truncate text-[10px] text-subtle" title={$currentArea.id}>id: {$currentArea.id}</p>
-
-    {#if type === "mow"}
-      <p class="mb-2 text-[10px] text-subtle">
-        Set this zone's cutting parameters in the <b>Mowing</b> panel below.
-      </p>
-    {/if}
-
-    <div class="grid grid-cols-2 gap-2">
-      <button class="btn" disabled={index <= 0} onclick={() => moveZoneOrder(-1)}>
-        <span class="material-symbols-outlined" style="font-size:18px">arrow_upward</span>
-        Move up
-      </button>
-      <button class="btn" disabled={index >= count - 1} onclick={() => moveZoneOrder(1)}>
-        <span class="material-symbols-outlined" style="font-size:18px">arrow_downward</span>
-        Move down
-      </button>
+    <div class="mb-1.5 grid grid-cols-[1fr_auto] gap-1.5">
+      <label class="field !mb-0">
+        Name
+        <input
+          class="input"
+          placeholder={getZoneName($currentArea, index)}
+          disabled={$currentLocked}
+          bind:value={nameDraft}
+          onfocus={() => (editingName = true)}
+          onblur={commitName}
+          onkeydown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        />
+      </label>
+      <label class="field !mb-0">
+        Type
+        <select class="select block !w-28" value={type} disabled={$currentLocked} onchange={(e) => changeZoneType(e.target.value)}>
+          <option value="mow">mow</option>
+          <option value="obstacle">obstacle</option>
+          <option value="nav">nav</option>
+        </select>
+      </label>
     </div>
 
+    <div class="flex items-center gap-1">
+      <span class="min-w-0 flex-1 truncate text-[10px] text-subtle" title={$currentArea.id}>id: {$currentArea.id}</span>
+      <span class="text-[10px] text-subtle">#{index + 1} of {count}</span>
+      <button class="btn-icon !h-7 !w-7" title="Move up in the list" aria-label="Move zone up" disabled={index <= 0} onclick={() => moveZoneOrder(-1)}>
+        <span class="material-symbols-outlined" style="font-size:18px">arrow_upward</span>
+      </button>
+      <button class="btn-icon !h-7 !w-7" title="Move down in the list" aria-label="Move zone down" disabled={index >= count - 1} onclick={() => moveZoneOrder(1)}>
+        <span class="material-symbols-outlined" style="font-size:18px">arrow_downward</span>
+      </button>
+    </div>
   </Collapsible>
 {/if}

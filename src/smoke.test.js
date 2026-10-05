@@ -108,6 +108,20 @@ describe("panels follow in-place editor mutations", () => {
     view.destroy();
   });
 
+  it("DockPanel follows a dock dragged on the map", async () => {
+    const { loadMap, moveDock } = await import("./lib/stores/editor.js");
+    loadMap(JSON.stringify({ ...JSON.parse(MAP), docking_stations: [{ position: { x: 1, y: 2 }, heading: 0 }] }));
+    flushSync();
+    const DockPanel = modules["./components/panels/DockPanel.svelte"].default;
+    const view = mountInto(DockPanel);
+    const coords = () => [...view.target.querySelectorAll("input[type=number]")].map((i) => i.value);
+    expect(coords().slice(0, 2)).toEqual(["1.000", "2.000"]);
+    moveDock({ x: 4.5, y: -3 }); // mutates the station in place, like a map drag
+    flushSync();
+    expect(coords().slice(0, 2)).toEqual(["4.500", "-3.000"]);
+    view.destroy();
+  });
+
   it("MeasurementsPanel totals follow an outline edit", async () => {
     await load();
     const { insertPointAtIndex } = await import("./lib/stores/editor.js");

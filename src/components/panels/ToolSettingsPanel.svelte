@@ -16,7 +16,7 @@
       <span>Radius (m)</span>
       <span class="font-mono text-accent">{fmt($brushRadius)}</span>
     </div>
-    <input class="slider mb-3" type="range" min="0.05" max="2" step="0.05" bind:value={$brushRadius} />
+    <input class="slider mb-2" type="range" min="0.05" max="2" step="0.05" bind:value={$brushRadius} />
     <div class="mb-1 flex items-center justify-between text-xs text-muted">
       <span>Strength</span>
       <span class="font-mono text-accent">{fmt($brushStrength)}</span>

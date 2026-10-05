@@ -50,7 +50,7 @@
   </button>
 
   {#if open}
-    <div class="mt-2" transition:slide={{ duration: 160 }}>
+    <div class="mt-1.5" transition:slide={{ duration: 160 }}>
       {@render children?.()}
     </div>
   {/if}

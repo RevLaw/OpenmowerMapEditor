@@ -87,7 +87,7 @@
     {/each}
   </div>
 
-  <div class="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5" role="tabpanel">
+  <div class="scroll-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2" role="tabpanel">
     {#if $sidebarTab === "zones"}
       <ZoneListPanel />
       <ToolSettingsPanel />
