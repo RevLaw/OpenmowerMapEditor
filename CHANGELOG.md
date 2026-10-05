@@ -1,5 +1,35 @@
 # Changelog
 
+## v2.7.1 — Svelte 5 runes & dependency refresh
+
+Maintenance release: no user-visible changes. The UI was verified against
+v2.7.0 with a scripted side-by-side browser comparison (palette, modals,
+zone rename/type, mowing overrides, measurements, undo) and matched on every
+step.
+
+### Changed
+- **Components migrated to Svelte 5 runes** — all 26 components moved off
+  the deprecated Svelte 4 syntax (`export let`, `$:`, `on:click`, `<slot>`)
+  to `$props`, `$derived`, `$effect.pre`, event attributes and snippets,
+  with no `svelte/legacy` compatibility helpers left. This removes the
+  dependence on legacy mode ahead of its removal in a future Svelte major.
+- **Panels read the editor store directly** — the editor store mutates
+  zones in place, and a runes `$derived` alias of the same object compares
+  by identity and never invalidates. Zone, Mowing and Measurements panels
+  therefore read `$currentArea` / `$editor` directly so renames, per-zone
+  overrides and outline edits keep updating them live.
+- **Dependencies updated** — Vitest 5.0.3, Vite 8.3.2,
+  `@sveltejs/vite-plugin-svelte` 7.3.1, Svelte 5.57.1, PostCSS 8.5.29
+  (everything else already current; `npm audit` clean).
+- **Docker builds use `npm ci`** — images now install exactly the lockfile's
+  versions, matching CI, instead of re-resolving with `npm install`.
+
+### Tests
+- The component smoke test now mounts every component (was 5 of 26), plus
+  open-modal and collapsed variants, and adds regression tests that panels
+  follow in-place editor mutations (fail on a naive runes migration, pass
+  on v2.7.0 and on this release).
+
 ## v2.7.0 — Mobile layout pass
 
 The right-side control dock and basemap switcher were built for desktop
