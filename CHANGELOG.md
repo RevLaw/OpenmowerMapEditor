@@ -72,6 +72,13 @@ lock, save dialog, draft restore, import, recording, trail → zone).
   arrows. The HUD's reset button reads **Reset** so it fits.
 
 ### Fixed
+- **Push brush lag** — a stroke over a 768-point zone ran at ~11 fps (89 ms
+  frames, spikes to 160 ms). Brush steps are now batched per animation frame
+  into one store update, the stroke patches the outline and moved handles in
+  place instead of rebuilding every layer (one full redraw at stroke end),
+  the WiFi heatmap / trail overlays only redraw when the projection origin
+  changes, and the Combine-zones panel only computes while open. Now ~5 ms
+  frames.
 - The split tool's dashed guide was drawn ~2 km long; Leaflet renders each
   segment straight in Web Mercator, so it bowed visibly off the actual cut
   line at high zoom. It now only extends just across the zone.

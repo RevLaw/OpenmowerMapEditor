@@ -276,14 +276,26 @@ export function removeZone() {
 
 /** Apply one drag-brush step (history is pushed once at stroke start). */
 export function applyBrush(centerMeters, deltaMeters, radius, strength) {
+  return applyBrushSteps([{ center: centerMeters, delta: deltaMeters }], radius, strength);
+}
+
+/**
+ * Apply several brush steps in order with a single store update — the map
+ * batches a frame's worth of pointer moves into one call. Same result as
+ * applying them one by one.
+ */
+export function applyBrushSteps(steps, radius, strength) {
   let moved = 0;
   store.update((s) => {
-    if (!s.mapData) return s;
-    const pts = currentEditablePoints();
-    const result = dragBrush(pts, centerMeters, deltaMeters, radius, strength);
-    moved = result.moved;
+    if (!s.mapData?.areas?.[s.areaIndex] || !steps.length) return s;
+    let pts = currentEditablePoints();
+    for (const step of steps) {
+      const result = dragBrush(pts, step.center, step.delta, radius, strength);
+      moved += result.moved;
+      pts = result.points;
+    }
     if (!moved) return s;
-    setCurrentEditable(result.points, s);
+    setCurrentEditable(pts, s);
     return { ...s, rev: s.rev + 1 };
   });
   return moved;

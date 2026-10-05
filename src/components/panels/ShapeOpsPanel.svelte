@@ -10,8 +10,10 @@
     clipToZone,
   } from "../../lib/actions.js";
 
-  // Recomputed on every edit ($editor.rev) so "touching" stays accurate.
-  let targets = $derived($editor.rev >= 0 && $currentArea ? zoneOperationTargets() : []);
+  // Recomputed on every edit ($editor.rev) so "touching" stays accurate —
+  // only while the panel is open (it compares borders of every zone pair).
+  let open = $state(false);
+  let targets = $derived(open && $editor.rev >= 0 && $currentArea ? zoneOperationTargets() : []);
   let target = $state("");
   let type = $derived(getAreaType($currentArea));
 
@@ -36,7 +38,7 @@
 </script>
 
 {#if $currentArea}
-  <Collapsible title="Combine zones" icon="join" key="shapeops" open={false}>
+  <Collapsible title="Combine zones" icon="join" key="shapeops" bind:open>
     <label class="field">
       With zone
       <select class="select" bind:value={target} disabled={!targets.length}>

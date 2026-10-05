@@ -32,7 +32,7 @@ import {
   setDock,
   setSnapPoints,
   snapBetween,
-  applyBrush,
+  applyBrushSteps,
   pushHistory,
   setAreaIndex,
 } from "../lib/stores/editor.js";
@@ -207,6 +207,8 @@ export function createMapController(container) {
   let snapOn = get(snapEnabled);
   // Preview latlngs of the selected outline, patched live while dragging.
   let previewLatLngs = [];
+  // Selected-zone points as last drawn (lets a brush stroke patch, not rebuild).
+  let renderedPts = [];
 
   const origin = () => s.origin;
   const toLatLng = (p) => metersToLatLng(p, origin());
@@ -380,6 +382,7 @@ export function createMapController(container) {
 
     const pts = currentEditablePoints();
     const latlngs = pts.map(toLatLng);
+    renderedPts = pts;
     previewLatLngs = latlngs.slice();
 
     layers.areaLine = L.polygon(latlngs, {
@@ -1058,20 +1061,60 @@ export function createMapController(container) {
   }
 
   // Drag-direction smear: move points under the brush along the cursor motion.
+  // Pointer moves are queued and applied once per animation frame (one store
+  // update + one cheap redraw per frame instead of per mouse event).
+  let brushSteps = [];
+  let brushFrame = 0;
+
+  function flushBrush() {
+    brushFrame = 0;
+    if (!brushSteps.length) return;
+    const steps = brushSteps;
+    brushSteps = [];
+    brushMoved += applyBrushSteps(steps, get(brushRadius), get(brushStrength));
+  }
+
   function moveBrush(latlng) {
     updateBrushCursor(latlng);
     if (!brushPainting || !brushPrev) return;
     const cur = latLngToMeters(latlng, origin());
     const delta = { x: cur.x - brushPrev.x, y: cur.y - brushPrev.y };
     if (delta.x !== 0 || delta.y !== 0) {
-      brushMoved += applyBrush(cur, delta, get(brushRadius), get(brushStrength));
+      brushSteps.push({ center: cur, delta });
+      if (!brushFrame) brushFrame = requestAnimationFrame(flushBrush);
     }
     brushPrev = cur;
   }
 
+  /**
+   * Mid-stroke redraw: the brush only moves existing vertices, so patch the
+   * selected outline and the moved handles in place instead of rebuilding
+   * every layer. Returns false when a full render is needed instead.
+   */
+  function brushFastRedraw() {
+    const area = s.mapData?.areas?.[s.areaIndex];
+    if (!area || !layers.areaLine) return false;
+    const pts = currentEditablePoints();
+    if (pts.length !== renderedPts.length) return false;
+    const hasHandles = layers.points.length === pts.length;
+    const latlngs = new Array(pts.length);
+    for (let i = 0; i < pts.length; i += 1) {
+      latlngs[i] = toLatLng(pts[i]);
+      const old = renderedPts[i];
+      if (hasHandles && (old.x !== pts[i].x || old.y !== pts[i].y)) layers.points[i].setLatLng(latlngs[i]);
+    }
+    renderedPts = pts;
+    previewLatLngs = latlngs.slice();
+    layers.areaLine.setLatLngs(latlngs);
+    return true;
+  }
+
   function endBrush() {
     if (!brushPainting) return;
+    if (brushFrame) cancelAnimationFrame(brushFrame);
+    flushBrush();
     brushPainting = false;
+    render(); // full redraw (coverage, other zones, …) once the stroke ends
     brushPrev = null;
     map.dragging.enable();
     suppressNextClick = true;
@@ -1792,17 +1835,17 @@ export function createMapController(container) {
   unsubs.push(
     editor.subscribe((value) => {
       s = value;
-      render();
-      // The exact-path overlay uses absolute map metres, so it only needs a
-      // redraw when the projection origin moves — not on every vertex edit.
+      if (!(brushPainting && brushFastRedraw())) render();
+      // These overlays use absolute map metres, so they only need a redraw
+      // when the projection origin moves — not on every vertex edit.
       const key = `${value.origin?.lat},${value.origin?.lng}`;
       if (key !== prevOriginKey) {
         prevOriginKey = key;
         renderExactPath(get(exactPath));
+        renderWifiHeatmap(get(wifiOverlayEnabled), get(wifiSamples));
+        renderRobotTrail(get(robotTrailEnabled), get(robotTrail));
+        renderRobotTrailHistory(get(robotTrailHistoryEnabled), get(robotTrailDisplayPoints));
       }
-      renderWifiHeatmap(get(wifiOverlayEnabled), get(wifiSamples));
-      renderRobotTrail(get(robotTrailEnabled), get(robotTrail));
-      renderRobotTrailHistory(get(robotTrailHistoryEnabled), get(robotTrailDisplayPoints));
     })
   );
   unsubs.push(
