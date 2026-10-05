@@ -23,7 +23,8 @@ function persisted(key, initial) {
 
 // Exactly one editing tool is active at a time. "none" is the default
 // direct-edit mode (drag a vertex, click to select).
-// Tools: none | multi | add | brush | snap | move | rect | circle | dock
+// Tools: none | multi | add | brush | snap | move | rect | circle | poly |
+//        dock | ruler | split
 export const activeTool = writable("none");
 
 export const brushRadius = writable(0.35);
@@ -31,8 +32,20 @@ export const brushRadius = writable(0.35);
 export const brushStrength = writable(0.7);
 export const simplifyTolerance = writable(0.05);
 
-// Zone type used by the rectangle / circle draw tools.
+// Zone type used by the rectangle / circle / polygon draw tools.
 export const drawZoneType = writable("mow");
+
+// Magnetic snapping of dragged / placed points onto other zones' vertices and
+// edges (hold Alt to bypass). Tolerance is in screen pixels so it feels the
+// same at every zoom level.
+export const snapEnabled = persisted("om-snap-enabled", true);
+export const SNAP_TOLERANCE_PX = 12;
+
+// Live state of the multi-click tools, mirrored from the map controller so
+// the tool hint can show progress and offer Finish / Undo buttons.
+// polygon: number of placed vertices; ruler: { points, total } in meters.
+export const polyDraftCount = writable(0);
+export const rulerInfo = writable({ points: 0, total: 0, last: 0 });
 
 // Mowing coverage preview toggle. The parameters now come from the robot's
 // real /mower_logic values (mowParams store) + per-area map.json overrides,

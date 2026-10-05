@@ -462,14 +462,14 @@ export function duplicateZone(offset = { x: 0.5, y: 0.5 }) {
   });
 }
 
-/** Add a new zone from an open editable-point array (rectangle / circle draw). */
-export function addZoneFromPoints(type, points) {
+/** Add a new zone from an open editable-point array (draw tools, recording, import). */
+export function addZoneFromPoints(type, points, extraProps = {}) {
   store.update((s) => {
     if (!s.mapData) return s;
     if (!Array.isArray(s.mapData.areas)) s.mapData.areas = [];
     s.mapData.areas.push({
       id: generateZoneId(),
-      properties: { type },
+      properties: { ...extraProps, type },
       outline: closeLoop(points),
     });
     return {
@@ -482,17 +482,70 @@ export function addZoneFromPoints(type, points) {
   });
 }
 
-/** Place / move the docking station (creating the array if needed). */
-export function setDock(meters) {
+/**
+ * Place / move the docking station (creating the array if needed). `heading`
+ * (radians, map frame, 0 = east) is only written when given.
+ */
+export function setDock(meters, heading) {
   store.update((s) => {
     if (!s.mapData) return s;
     if (!Array.isArray(s.mapData.docking_stations) || !s.mapData.docking_stations.length) {
-      s.mapData.docking_stations = [{ position: { x: meters.x, y: meters.y } }];
+      s.mapData.docking_stations = [{ id: generateZoneId(), properties: {}, position: { x: meters.x, y: meters.y } }];
     } else {
       const st = s.mapData.docking_stations[0];
       st.position = { x: meters.x, y: meters.y };
     }
+    if (Number.isFinite(heading)) s.mapData.docking_stations[0].heading = heading;
     return { ...s, rev: s.rev + 1 };
+  });
+}
+
+/** Set the docking station heading (radians, map frame, 0 = east). */
+export function setDockHeading(heading) {
+  store.update((s) => {
+    const st = s.mapData?.docking_stations?.[0];
+    if (!st?.position || !Number.isFinite(heading)) return s;
+    st.heading = Math.atan2(Math.sin(heading), Math.cos(heading)); // wrap to (-π, π]
+    return { ...s, rev: s.rev + 1 };
+  });
+}
+
+/** Remove the docking station entirely. */
+export function removeDock() {
+  store.update((s) => {
+    if (!s.mapData?.docking_stations?.length) return s;
+    s.mapData.docking_stations = [];
+    return { ...s, rev: s.rev + 1 };
+  });
+}
+
+/**
+ * Replace the whole zone list in one step (boolean ops, import) and select
+ * `areaIndex`. `areas` must already be valid map.json area objects.
+ */
+export function replaceAreas(areas, areaIndex = 0) {
+  store.update((s) => {
+    if (!s.mapData) return s;
+    s.mapData.areas = areas;
+    return {
+      ...s,
+      areaIndex: Math.max(0, Math.min(areaIndex, areas.length - 1)),
+      pointIndex: null,
+      selectedPointIndices: [],
+      snapPointIndices: [],
+      rev: s.rev + 1,
+    };
+  });
+}
+
+/** Make vertex `idx` the outline's first point (OpenMower starts the auto mow angle there). */
+export function setStartPoint(idx) {
+  store.update((s) => {
+    if (!s.mapData?.areas?.[s.areaIndex]) return s;
+    const pts = currentEditablePoints();
+    if (idx <= 0 || idx >= pts.length) return s;
+    setCurrentEditable([...pts.slice(idx), ...pts.slice(0, idx)], s);
+    return { ...s, pointIndex: 0, selectedPointIndices: [], rev: s.rev + 1 };
   });
 }
 

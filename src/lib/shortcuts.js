@@ -1,9 +1,27 @@
 // Global keyboard shortcuts -> editor actions / tool changes. Suppressed while
 // typing in form fields (except global Ctrl/Cmd combos).
 import { setTool, toggleTool } from "./stores/tools.js";
-import { undo, redo, removePoint, saveCurrent, nudge, duplicateZoneAction } from "./actions.js";
+import { undo, redo, removePoint, requestSave, nudge, duplicateZoneAction } from "./actions.js";
 import { mapApi } from "./stores/mapApi.js";
+import { editor, setAreaIndex } from "./stores/editor.js";
+import { toggleZoneLocked, toggleZoneHidden } from "./stores/zoneView.js";
+import { contextMenu, saveDialog } from "./stores/ui.js";
 import { get } from "svelte/store";
+
+/** Select the previous / next zone in list order. */
+function cycleZone(dir) {
+  const s = get(editor);
+  const n = s.mapData?.areas?.length || 0;
+  if (!n) return;
+  setAreaIndex((s.areaIndex + dir + n) % n);
+  get(mapApi)?.fitCurrentArea();
+}
+
+function withCurrentZone(fn) {
+  const s = get(editor);
+  const area = s.mapData?.areas?.[s.areaIndex];
+  if (area) fn(area, s.areaIndex);
+}
 
 function isTyping(target) {
   if (!(target instanceof HTMLElement)) return false;
@@ -40,7 +58,7 @@ export function initShortcuts(ctx) {
     }
     if (mod && key === "s") {
       e.preventDefault();
-      saveCurrent({ restart: false });
+      requestSave({ restart: false });
       return;
     }
     if (mod && key === "d") {
@@ -50,6 +68,14 @@ export function initShortcuts(ctx) {
     }
 
     if (isTyping(e.target) || mod || e.altKey) return;
+    // Menus and dialogs own the keyboard while open.
+    if (get(contextMenu) || get(saveDialog)) return;
+
+    // Multi-click tools (polygon / ruler) consume Enter and Backspace first.
+    if (["enter", "backspace", "delete"].includes(key) && get(mapApi)?.handleKey(key)) {
+      e.preventDefault();
+      return;
+    }
 
     const step = e.shiftKey ? 0.25 : 0.05;
     switch (key) {
@@ -93,14 +119,37 @@ export function initShortcuts(ctx) {
       case "r":
         toggleTool("rect");
         break;
+      case "p":
+        toggleTool("poly");
+        break;
+      case "x":
+        toggleTool("split");
+        break;
+      case "d":
+        toggleTool("ruler");
+        break;
+      case "l":
+        withCurrentZone(toggleZoneLocked);
+        break;
+      case "h":
+        withCurrentZone(toggleZoneHidden);
+        break;
+      case "[":
+        cycleZone(-1);
+        break;
+      case "]":
+        cycleZone(1);
+        break;
       case "o":
         toggleTool("circle");
         break;
       case "f":
-        get(mapApi)?.fitCurrentArea();
+        if (e.shiftKey) get(mapApi)?.fitAll();
+        else get(mapApi)?.fitCurrentArea();
         break;
       case "delete":
       case "backspace":
+        e.preventDefault();
         removePoint();
         break;
       case "escape":
