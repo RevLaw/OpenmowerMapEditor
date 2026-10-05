@@ -61,6 +61,10 @@ lock, save dialog, draft restore, import, recording, trail → zone).
   opens name, type, order, zone id (click to copy) and, for mow zones, the
   mowing parameters / coverage preview / exact path right under the zone.
   Replaces the separate Zone details and Mowing panels.
+- **Live simplify preview** — while the Simplify panel is open, the map
+  shows the simplified outline at the slider's tolerance (dashed, with the
+  kept points) and the panel shows the resulting point count / area change;
+  **Apply** commits exactly what was previewed.
 - **Compact sidebar panels** — smaller buttons, fields and spacing inside the
   panels; Zone details puts name and type on one row with small reorder
   arrows. The HUD's reset button reads **Reset** so it fits.

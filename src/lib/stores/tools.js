@@ -31,6 +31,9 @@ export const brushRadius = writable(0.35);
 // 0..1 follow factor — how strongly points track the drag at the brush center.
 export const brushStrength = writable(0.7);
 export const simplifyTolerance = writable(0.05);
+// True while the Simplify panel is open: the map previews the simplified
+// outline at the current tolerance before it's applied.
+export const simplifyPreviewOn = writable(false);
 
 // Zone type used by the rectangle / circle / polygon draw tools.
 export const drawZoneType = writable("mow");

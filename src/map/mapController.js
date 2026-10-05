@@ -43,6 +43,8 @@ import {
   coverageOn,
   snapEnabled,
   SNAP_TOLERANCE_PX,
+  simplifyTolerance,
+  simplifyPreviewOn,
   polyDraftCount,
   rulerInfo,
 } from "../lib/stores/tools.js";
@@ -162,6 +164,7 @@ export function createMapController(container) {
     split: null,
     recording: null,
     trailZone: null,
+    simplifyPreview: null,
     multiHandle: null,
     snapGuide: null,
     boxSelect: null,
@@ -290,6 +293,8 @@ export function createMapController(container) {
     layers.zones = [];
     layers.midpoints.forEach((m) => map.removeLayer(m));
     layers.midpoints = [];
+    if (layers.simplifyPreview) map.removeLayer(layers.simplifyPreview);
+    layers.simplifyPreview = null;
     layers.coverage.forEach((l) => map.removeLayer(l));
     layers.coverage = [];
     layers.points.forEach((m) => map.removeLayer(m));
@@ -389,7 +394,10 @@ export function createMapController(container) {
     }
 
     if (get(coverageOn) && type === "mow") renderCoverage(pts, area);
-    if (!isLocked) {
+    const previewing = get(simplifyPreviewOn);
+    renderSimplifyPreview(pts);
+    // While previewing a simplify, the dense vertex handles would hide it.
+    if (!isLocked && !previewing) {
       renderPoints(pts, latlngs);
       if (tool === "none") renderMidpoints(pts, latlngs);
       renderMultiHandle(pts);
@@ -397,6 +405,29 @@ export function createMapController(container) {
     }
     renderDock();
     if (tool === "brush" && brushCursorLatLng) updateBrushCursor(brushCursorLatLng);
+  }
+
+  // ---- simplify preview -------------------------------------------------------
+
+  /** Dashed outline + kept vertices of the current zone simplified at the slider tolerance. */
+  function renderSimplifyPreview(pts = currentEditablePoints()) {
+    if (layers.simplifyPreview) map.removeLayer(layers.simplifyPreview);
+    layers.simplifyPreview = null;
+    if (!get(simplifyPreviewOn) || pts.length < 3) return;
+    const kept = simplify(pts, get(simplifyTolerance)).map(toLatLng);
+    const group = L.layerGroup();
+    L.polygon(kept, {
+      color: "#e879f9",
+      weight: 2,
+      dashArray: "6,4",
+      fillColor: "#e879f9",
+      fillOpacity: 0.08,
+      interactive: false,
+    }).addTo(group);
+    kept.forEach((ll) =>
+      L.circleMarker(ll, { radius: 3, color: "#fff", weight: 1, fillColor: "#e879f9", fillOpacity: 1, interactive: false }).addTo(group)
+    );
+    layers.simplifyPreview = group.addTo(map);
   }
 
   // ---- context menus -------------------------------------------------------
@@ -1839,6 +1870,10 @@ export function createMapController(container) {
     })
   );
   unsubs.push(snapEnabled.subscribe((v) => (snapOn = v)));
+  // Toggling the preview changes which handles are drawn (full re-render);
+  // moving the slider only redraws the preview layer.
+  unsubs.push(simplifyPreviewOn.subscribe(() => render()));
+  unsubs.push(simplifyTolerance.subscribe(() => renderSimplifyPreview()));
   unsubs.push(recording.subscribe((r) => renderRecording(r)));
   unsubs.push(trailZonePath.subscribe((path) => renderTrailZone(path, get(trailZoneOutline))));
   unsubs.push(trailZoneOutline.subscribe((outline) => renderTrailZone(get(trailZonePath), outline)));

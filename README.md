@@ -280,7 +280,7 @@ Sidebar (Zones tab):
 - **Zones** list — select (and fit) a zone, lock it (`L`) or hide it (`H`); **New zones are** picks the type for every draw tool.
 - **Zone editor** (pencil on a zone row, or double-click it) — opens inline under the zone and follows the selection: name, type, list order, zone id (click to copy), and for mow zones the per-zone cutting parameters, coverage preview and exact planner path. Delete a zone from the selection bar.
 - **Vertex** — exact X/Y of the selected vertex, **make start point** (OpenMower measures the automatic mow angle from the first edge), add the robot's position as a vertex.
-- **Simplify outline** — Douglas–Peucker reduction with an adjustable tolerance.
+- **Simplify outline** — Douglas–Peucker reduction with an adjustable tolerance. While the panel is open the map previews the result as a dashed outline (with the kept points) and the panel shows "768 → 52 points"; **Apply** commits it (undoable).
 - **Combine zones** — **merge** (union), **cut out** (difference), **clip** (intersection) with another zone (touching zones listed first). Outlines can't have holes, so cutting a zone fully out of another is refused — use an obstacle instead. Splitting is the **Split** tool in the dock.
 - **Measurements** — area, perimeter, points, net mowable area.
 
