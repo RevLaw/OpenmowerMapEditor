@@ -65,11 +65,16 @@ lock, save dialog, draft restore, import, recording, trail → zone).
   shows the simplified outline at the slider's tolerance (dashed, with the
   kept points) and the panel shows the resulting point count / area change;
   **Apply** commits exactly what was previewed.
+- **Brush settings in the top hint bar** — radius / strength sliders sit next
+  to the active brush instead of in a sidebar panel.
 - **Compact sidebar panels** — smaller buttons, fields and spacing inside the
   panels; Zone details puts name and type on one row with small reorder
   arrows. The HUD's reset button reads **Reset** so it fits.
 
 ### Fixed
+- The split tool's dashed guide was drawn ~2 km long; Leaflet renders each
+  segment straight in Web Mercator, so it bowed visibly off the actual cut
+  line at high zoom. It now only extends just across the zone.
 - The docking-station panel didn't follow the dock when it was dragged on
   the map (it read a mutated-in-place object through a `$derived`).
 

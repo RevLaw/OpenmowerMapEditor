@@ -262,7 +262,7 @@ Edit tools:
 
 - **near_me** — select / drag (`V`): default mode. Click a zone to select it, drag a vertex, drag an edge's midpoint dot to insert a vertex. `Shift + click` adds points to the selection, `Shift + drag` draws a selection box, `Ctrl + A` selects every point; dragging any selected point moves them all (that's how you move a whole zone). Clicking empty map clears the selection. Arrow keys nudge the selection (`Shift` = larger step).
 - **add_location_alt** — add point (`A`): click near an outline and the vertex is inserted on the **nearest edge**.
-- **blur_circular** — push brush (`B`): drag across the outline to push points along your stroke; radius/strength sliders appear in the sidebar.
+- **blur_circular** — push brush (`B`): drag across the outline to push points along your stroke; radius/strength sliders appear in the hint bar at the top while the brush is active.
 - **horizontal_rule** — straighten (`S`): pick start and end point; the points between are snapped onto a straight, evenly spaced line.
 
 Draw & measure:

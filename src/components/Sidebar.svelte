@@ -4,7 +4,6 @@
   import VertexPanel from "./panels/VertexPanel.svelte";
   import ShapeOpsPanel from "./panels/ShapeOpsPanel.svelte";
   import ProjectionPanel from "./panels/ProjectionPanel.svelte";
-  import ToolSettingsPanel from "./panels/ToolSettingsPanel.svelte";
   import TransformPanel from "./panels/TransformPanel.svelte";
   import MeasurementsPanel from "./panels/MeasurementsPanel.svelte";
   import ValidationPanel from "./panels/ValidationPanel.svelte";
@@ -88,7 +87,6 @@
   <div class="scroll-thin min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2" role="tabpanel">
     {#if $sidebarTab === "zones"}
       <ZoneListPanel />
-      <ToolSettingsPanel />
       <VertexPanel />
       <TransformPanel />
       <ShapeOpsPanel />

@@ -1,6 +1,14 @@
 <script>
   import { fly } from "svelte/transition";
-  import { activeTool, setTool, polyDraftCount, rulerInfo, drawZoneType } from "../lib/stores/tools.js";
+  import {
+    activeTool,
+    setTool,
+    polyDraftCount,
+    rulerInfo,
+    drawZoneType,
+    brushRadius,
+    brushStrength,
+  } from "../lib/stores/tools.js";
   import { mapApi } from "../lib/stores/mapApi.js";
   import { formatLength } from "../lib/measurements.js";
 
@@ -17,6 +25,7 @@
   };
 
   let hint = $derived(hints[$activeTool]);
+  const fmt = (v) => Number(v).toFixed(2).replace(/\.?0+$/, "");
 </script>
 
 {#if hint}
@@ -41,6 +50,18 @@
       >
         Finish ↵
       </button>
+    {:else if $activeTool === "brush"}
+      <!-- Brush settings live here, next to the tool, not in the sidebar. -->
+      <label class="hint-slider" title="Brush radius">
+        <span class="material-symbols-outlined" style="font-size:15px">radio_button_unchecked</span>
+        <input class="slider" type="range" min="0.05" max="2" step="0.05" bind:value={$brushRadius} aria-label="Brush radius (m)" />
+        <span class="font-mono text-accent">{fmt($brushRadius)} m</span>
+      </label>
+      <label class="hint-slider" title="Brush strength">
+        <span class="material-symbols-outlined" style="font-size:15px">bolt</span>
+        <input class="slider" type="range" min="0.05" max="1" step="0.05" bind:value={$brushStrength} aria-label="Brush strength" />
+        <span class="font-mono text-accent">{Math.round($brushStrength * 100)}%</span>
+      </label>
     {:else if $activeTool === "ruler" && $rulerInfo.points > 0}
       <span class="font-mono text-accent">
         {formatLength($rulerInfo.total + $rulerInfo.last)}
@@ -55,3 +76,19 @@
     </button>
   </div>
 {/if}
+
+<style>
+  .hint-slider {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+  }
+  .hint-slider .slider {
+    width: 92px;
+  }
+  .hint-slider .font-mono {
+    min-width: 40px;
+    font-size: 11px;
+  }
+</style>

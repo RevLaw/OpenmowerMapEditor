@@ -10,6 +10,7 @@ import {
   offsetPolygon,
   polygonArea,
   simplify,
+  boundingBox,
 } from "../lib/geo/geometry.js";
 import { coverageLines } from "../lib/geo/coverage.js";
 import { resolveMowSettings } from "../lib/coverage/mowSettings.js";
@@ -1299,11 +1300,24 @@ export function createMapController(container) {
     layers.split = null;
     if (!splitStart) return;
     const end = hoverMeters || splitStart;
-    // Extend the preview past both clicks so it reads as an infinite cut line.
+    // Extend the preview past both clicks so it reads as an infinite cut line
+    // — but only just across the zone: Leaflet draws each segment straight in
+    // Web Mercator, so a km-long guide would visibly bow off the true (local
+    // metric) line the split actually uses.
     const dx = end.x - splitStart.x;
     const dy = end.y - splitStart.y;
     const len = Math.hypot(dx, dy) || 1;
-    const reach = 2000;
+    const box = boundingBox(currentEditablePoints());
+    const reach = box
+      ? Math.max(
+          ...[
+            { x: box.minX, y: box.minY },
+            { x: box.maxX, y: box.maxY },
+            { x: box.minX, y: box.maxY },
+            { x: box.maxX, y: box.minY },
+          ].map((c) => distance(c, splitStart))
+        ) + 5
+      : 20;
     const a = { x: splitStart.x - (dx / len) * reach, y: splitStart.y - (dy / len) * reach };
     const b = { x: splitStart.x + (dx / len) * reach, y: splitStart.y + (dy / len) * reach };
     const group = L.layerGroup();
