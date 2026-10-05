@@ -54,7 +54,7 @@ services:
       # OPENMOWER_POSE_CACHE_MS: "2200"
       # OPENMOWER_STREAM_FRESH_MS: "2000"
       # OPENMOWER_POSE_DISABLE: "0"
-      # OPENMOWER_CONTROL_DISABLE: "0"   # set "1" to hide/disable Start/Stop/Home/Reset
+      # OPENMOWER_CONTROL_DISABLE: "0"   # set "1" to disable Start/Stop/Home/Reset and joystick driving
       # OPENMOWER_TF_ECHO_TIMEOUT_SEC: "4"
       # OPENMOWER_ROS_TOPIC_TIMEOUT_SEC: "4"
       # OPENMOWER_ROS_TOPIC_FALLBACK_SEC: "10"
@@ -114,6 +114,7 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 - **Exact mowing path (real planner)** — a **Compute exact path** button in the **Mowing** panel runs OpenMower's own `slic3r_coverage_planner` for the selected mow zone (`POST /api/plan_path`) and overlays the **literal** path the robot drives. On-demand and cached; requires the mower online, and flags itself *stale* after you edit. Read-only — planning never commands the robot
 
 ### Robot-assisted mapping
+- **Drive the mower with an on-screen joystick** (Robot tab) — touch/mouse thumbstick or `W A S D` / arrow keys, adjustable max speed. *Start drive mode* puts OpenMower into its area-recording mode (the only mode in which it accepts joystick commands — blade off; nothing is saved on the robot), *Leave drive mode* returns it to idle. Commands go to `/joy_vel` like the official app's joystick. Safety: the robot stops as soon as you let go, the tab is hidden or loses focus, and a server-side deadman zeroes the speed if no command arrives for 0.4 s; speed is capped at 0.5 m/s / 1.5 rad/s
 - **Record a boundary by driving** (Robot tab) — drive the mower around an area; its live position is traced (orange preview), smoothed, and turned into a mow/obstacle/nav zone. Pause/resume, step back, discard
 - **Trail → zone** — pick a stretch of the saved movement trail (or this session's live breadcrumb) with start/end sliders and turn it into a zone, with a live outline preview
 - **Robot position as vertex** — insert where the mower stands into the selected zone (nearest edge)
@@ -146,7 +147,7 @@ See [Docker & OpenMower integration](#docker--openmower-integration) for what ea
 - **Map navigation** — zoom buttons, scroll-wheel/`+`/`−` keys, base-map switching from the command palette
 - **Switchable base maps** (bottom-left **Layers**) — Esri satellite (default), the free **20 cm Lower Saxony aerial (DOP20)**, **OpenStreetMap** (global fallback), or a custom XYZ/WMS URL; choice persists
 - **Zone management** — friendly **name** (`properties.name`), type (mow/obstacle/nav), reorder, remove; `[` / `]` cycle through zones
-- **Organized sidebar** — three tabs (**Zones** · **Map** · **Robot**); panels are **collapsible** and remember their open/closed state
+- **Organized sidebar** — three tabs (**Zones** · **Map** · **Robot**); panels are **collapsible** and remember their open/closed state. The whole sidebar **folds into a slim icon rail** (`Ctrl + B`) to give the map the screen — phones always start folded, and picking a zone in the list folds it again
 - **Unsaved-changes guard** — an "Unsaved" indicator and a browser prompt before leaving with unsaved edits
 - Toast notifications and a dark-tech / HUD interface with glass map-overlay panels; light/dark toggle changes sidebar UI only — map colors stay fixed for readability
 
@@ -182,7 +183,7 @@ The editor ships as a single multi-stage Docker image (see [`Dockerfile`](./Dock
 
 - Live pose streaming and the fallback TF/topic probes
 - Reading mow parameters (`/mower_logic`) and running the exact-path planner
-- Mower control (Start/Stop/Home/Reset), gated by `OPENMOWER_CONTROL_DISABLE`
+- Mower control (Start/Stop/Home/Reset) and joystick driving (`/joy_vel`, plus entering/leaving area-recording mode), gated by `OPENMOWER_CONTROL_DISABLE`
 - **Save + restart ROS** — restarting `OPENMOWER_CONTAINER_NAME` after a save
 - The autonomous WiFi survey collector and movement-trail capture (both run as long-lived subscribers inside `open_mower_ros`)
 
@@ -288,7 +289,7 @@ Selection bar (bottom): the selected zone's name, type, area and point count, pl
 
 Sidebar (Map tab): **File** (backups, open JSON, GeoJSON/KML import & export), **Validation** (click an issue to zoom to it), **Docking station** (position, heading, place by click, from robot), **Projection**.
 
-Sidebar (Robot tab): **Record boundary by driving** and **Trail → zone**.
+Sidebar (Robot tab): **Drive the mower** (joystick), **Record boundary by driving** and **Trail → zone**. Typical flow: *Start drive mode* → *Start recording* → drive around the area → *Finish & create zone* → *Leave drive mode* → save.
 
 Other notes:
 
@@ -350,7 +351,7 @@ Project layout:
 | `OPENMOWER_CONTAINER_NAME` | `open_mower_ros` | Container restarted by **Save + restart ROS** |
 | `OPENMOWER_POSE_CONTAINER` | same as above | Container used for TF echo / ROS topic sampling |
 | `OPENMOWER_POSE_DISABLE` | `0` | Set `1` to disable live pose entirely |
-| `OPENMOWER_CONTROL_DISABLE` | `0` | Set `1` to disable the Start/Stop/Home/Reset mower control buttons |
+| `OPENMOWER_CONTROL_DISABLE` | `0` | Set `1` to disable the Start/Stop/Home/Reset mower control buttons and joystick driving |
 | `OPENMOWER_POSE_CACHE_MS` | `2200` | Server-side cache for the pose fallback probe (ms) |
 | `OPENMOWER_STREAM_FRESH_MS` | `2000` | How long a streamed pose sample stays "fresh" before the SSE endpoint falls back to the probe (ms) |
 | `OPENMOWER_TF_ECHO_TIMEOUT_SEC` | `4` | Timeout for `tf_echo` / `tf2_echo` inside the container |
@@ -385,7 +386,7 @@ Inside the container the defaults match the bind mounts (`/data/ros`, `/data/par
 
 ## Security
 
-Mounting **`/var/run/docker.sock`** gives the editor API the same ability to control Docker as root on the host. Only deploy on a **trusted network** (for example your home LAN), do not expose port `5080` to the public internet without an additional access layer, and treat saved map data as sensitive to your property layout.
+Mounting **`/var/run/docker.sock`** gives the editor API the same ability to control Docker as root on the host. Anyone who can reach the editor can also drive the mower (Start/Home, joystick) unless `OPENMOWER_CONTROL_DISABLE=1`. Only deploy on a **trusted network** (for example your home LAN), do not expose port `5080` to the public internet without an additional access layer, and treat saved map data as sensitive to your property layout.
 
 ## Privacy / GitHub safety
 

@@ -13,12 +13,14 @@
   import DockPanel from "./panels/DockPanel.svelte";
   import RecordPanel from "./panels/RecordPanel.svelte";
   import TrailZonePanel from "./panels/TrailZonePanel.svelte";
+  import DrivePanel from "./panels/DrivePanel.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
   import { status } from "../lib/stores/toast.js";
   import { isDirty } from "../lib/stores/dirty.js";
   import { sidebarTab } from "../lib/stores/ui.js";
   import { validationIssues } from "../lib/stores/validation.js";
   import { recording } from "../lib/stores/recorder.js";
+  import { driveMode } from "../lib/stores/teleop.js";
   import { requestSave } from "../lib/actions.js";
 
   let { onOpenPalette = () => {}, onClose = null } = $props();
@@ -55,8 +57,8 @@
       </button>
       <ThemeToggle />
       {#if onClose}
-        <button class="btn-icon lg:hidden" title="Close" onclick={onClose}>
-          <span class="material-symbols-outlined" style="font-size:20px">close</span>
+        <button class="btn-icon" title="Fold panel (Ctrl+B)" aria-label="Fold panel" onclick={onClose}>
+          <span class="material-symbols-outlined" style="font-size:20px">left_panel_close</span>
         </button>
       {/if}
     </div>
@@ -78,6 +80,8 @@
         {/if}
         {#if t.id === "robot" && $recording.active}
           <span class="badge rec" title="Recording a boundary">REC</span>
+        {:else if t.id === "robot" && $driveMode === "on"}
+          <span class="badge rec" title="Drive mode on">DRIVE</span>
         {/if}
       </button>
     {/each}
@@ -99,6 +103,7 @@
       <DockPanel />
       <ProjectionPanel />
     {:else}
+      <DrivePanel />
       <RecordPanel />
       <TrailZonePanel />
     {/if}

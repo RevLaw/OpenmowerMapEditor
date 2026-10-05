@@ -33,3 +33,39 @@ sidebarTab.subscribe((t) => {
     /* ignore */
   }
 });
+
+const SIDEBAR_KEY = "om-sidebar-open";
+const NARROW_PX = 1024;
+
+/** Narrow screens (phones, small tablets): the open sidebar covers the map. */
+export function isNarrowScreen() {
+  return typeof window !== "undefined" && window.innerWidth < NARROW_PX;
+}
+
+function initialSidebarOpen() {
+  if (typeof window === "undefined") return true;
+  // Phones always start folded so the map gets the screen; desktops remember.
+  if (isNarrowScreen()) return false;
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) !== "0";
+  } catch (_e) {
+    return true;
+  }
+}
+
+/** Left sidebar unfolded (true) or folded to the icon rail (false). */
+export const sidebarOpen = writable(initialSidebarOpen());
+sidebarOpen.subscribe((open) => {
+  if (isNarrowScreen()) return;
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(SIDEBAR_KEY, open ? "1" : "0");
+  } catch (_e) {
+    /* ignore */
+  }
+});
+
+/** Unfold the sidebar on a given tab (from the folded rail). */
+export function openSidebarTab(tab) {
+  sidebarTab.set(tab);
+  sidebarOpen.set(true);
+}

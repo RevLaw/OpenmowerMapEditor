@@ -15,6 +15,7 @@
   } from "../../lib/stores/zoneView.js";
   import { drawZoneType } from "../../lib/stores/tools.js";
   import { mapApi } from "../../lib/stores/mapApi.js";
+  import { sidebarOpen, isNarrowScreen } from "../../lib/stores/ui.js";
 
   const TYPES = [
     { id: "mow", label: "Mow", color: "#22c55e" },
@@ -43,6 +44,8 @@
 
   function pick(i) {
     setAreaIndex(i);
+    // On a phone the open panel covers the map — fold it to show the zone.
+    if (isNarrowScreen()) sidebarOpen.set(false);
     $mapApi?.fitCurrentArea();
   }
 </script>

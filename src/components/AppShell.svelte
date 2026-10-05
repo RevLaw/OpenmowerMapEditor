@@ -16,7 +16,9 @@
   import SaveDialog from "./SaveDialog.svelte";
   import DraftBanner from "./DraftBanner.svelte";
   import SelectionBar from "./SelectionBar.svelte";
-  import { backupsOpen } from "../lib/stores/ui.js";
+  import { backupsOpen, sidebarOpen } from "../lib/stores/ui.js";
+  import SidebarRail from "./SidebarRail.svelte";
+  import { initTeleopSafety } from "../lib/stores/teleop.js";
   import { get } from "svelte/store";
   import { bootstrap } from "../lib/actions.js";
   import { initRobotLifecycle } from "../lib/stores/robot.js";
@@ -28,7 +30,6 @@
   let paletteOpen = $state(false);
   let cheatOpen = $state(false);
   // Open by default on desktop; collapsed on small screens (toggle via FAB).
-  let sidebarOpen = $state(typeof window === "undefined" || window.innerWidth >= 1024);
   const cleanups = [];
 
   // The control dock (mower control + edit tools, merged into one panel —
@@ -108,6 +109,7 @@
   onMount(() => {
     bootstrap();
     cleanups.push(initRobotLifecycle());
+    cleanups.push(initTeleopSafety());
     cleanups.push(initWifiSurveyLifecycle());
     cleanups.push(initRobotTrailHistoryLifecycle());
     cleanups.push(
@@ -145,27 +147,24 @@
   <MapCanvas />
 
   <!-- Sidebar (left). Slides off-canvas when closed (mobile). -->
-  {#if sidebarOpen}
+  {#if $sidebarOpen}
     <div
       class="absolute bottom-3 left-3 top-3 z-30 w-[360px] max-w-[calc(100vw-1.5rem)]"
       transition:fly={{ x: -380, duration: 220 }}
     >
       <Sidebar
         onOpenPalette={() => (paletteOpen = true)}
-        onClose={() => (sidebarOpen = false)}
+        onClose={() => sidebarOpen.set(false)}
       />
     </div>
   {/if}
 
   <!-- FAB to reopen the sidebar (mobile / after closing) -->
-  {#if !sidebarOpen}
-    <button
-      class="glass absolute left-3 top-3 z-30 grid h-11 w-11 place-items-center rounded-xl"
-      title="Open panel"
-      onclick={() => (sidebarOpen = true)}
-    >
-      <span class="material-symbols-outlined text-accent" style="font-size:24px">tune</span>
-    </button>
+  <!-- Folded sidebar: a slim icon rail (keeps the map free on phones) -->
+  {#if !$sidebarOpen}
+    <div class="absolute left-3 top-3 z-30">
+      <SidebarRail />
+    </div>
   {/if}
 
   <!-- Right-side control dock: mower control + edit tools merged into one
@@ -188,7 +187,7 @@
   <!-- Quick actions for the selected zone (bottom-center) -->
   <div
     class="pointer-events-none absolute z-20 flex justify-center transition-all duration-200"
-    style="bottom:{wide ? 12 : 60}px;left:{(sidebarOpen && wide ? sidebarWidth + EDGE_GAP + 4 : 12) +
+    style="bottom:{wide ? 12 : 60}px;left:{($sidebarOpen && wide ? sidebarWidth + EDGE_GAP + 4 : 12) +
       (wide ? BASEMAP_BUTTON_ROOM : 0)}px;right:64px"
   >
     <div class="pointer-events-auto max-w-full">
@@ -217,7 +216,7 @@
   <!-- Base-map switcher (bottom-left, clears the sidebar when open) -->
   <div
     class="absolute bottom-3 z-30 transition-all duration-200"
-    style="left:{sidebarOpen ? `${sidebarWidth + EDGE_GAP + 4}px` : '12px'}"
+    style="left:{$sidebarOpen ? `${sidebarWidth + EDGE_GAP + 4}px` : '12px'}"
   >
     <BasemapControl />
   </div>

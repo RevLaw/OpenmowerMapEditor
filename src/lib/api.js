@@ -154,3 +154,19 @@ export async function fetchRobotTrailArchiveSession(id) {
   if (!res.ok) throw new Error("Failed to load the archived movement trail.");
   return res.json();
 }
+
+/** POST /api/teleop/drive -> one joystick drive command (m/s, rad/s). */
+export async function sendTeleop(lx, az) {
+  const res = await fetch("/api/teleop/drive", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lx, az }),
+  });
+  return res.json();
+}
+
+/** POST /api/teleop/stop -> zero velocity now and end the drive helper. */
+export async function stopTeleop() {
+  const res = await fetch("/api/teleop/stop", { method: "POST" });
+  return res.json();
+}

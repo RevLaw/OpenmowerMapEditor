@@ -32,6 +32,16 @@ lock, save dialog, draft restore, import, recording, trail → zone).
 - Shortcuts: `[` / `]` cycle zones, `L` lock, `H` hide, `Ctrl + A` select
   all points, `Shift + F` fit map.
 
+- **Drive the mower from the editor** — on-screen joystick (touch / mouse /
+  `W A S D`) in the Robot tab. Puts OpenMower into area-recording mode (the
+  only mode that accepts `/joy_vel`, blade off) and streams commands to a
+  persistent helper in the ROS container with a 0.4 s deadman, speed caps,
+  stop-on-release / blur / hidden tab, and self-cleanup. Gated by
+  `OPENMOWER_CONTROL_DISABLE`.
+- **Foldable sidebar** — collapses to a slim icon rail (`Ctrl + B`); phones
+  start folded and picking a zone folds it again. At most three toasts show
+  at once.
+
 ### Changed
 - **Sidebar split into Zones / Map / Robot tabs**; the zone dropdown and the
   Create panel are replaced by the zone list.

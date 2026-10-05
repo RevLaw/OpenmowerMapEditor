@@ -1187,14 +1187,18 @@ const PLAN_PATH_CACHE_MS = 60000;
  * SAFETY: these commands move a robot with spinning blades. Disable entirely
  * with OPENMOWER_CONTROL_DISABLE=1.
  */
-const CONTROL_PY = `import json, os
+const CONTROL_PY = `import json, os, time
 import rospy
 from mower_msgs.srv import (
     HighLevelControlSrv, HighLevelControlSrvRequest,
     EmergencyStopSrv, EmergencyStopSrvRequest,
 )
 
-HIGH_LEVEL = {"start": 1, "home": 2, "reset_emergency": 254}
+# record_mode = COMMAND_S1: from idle, enter OpenMower's area-recording mode —
+# the only behavior that forwards /joy_vel to the motors (blade stays off).
+HIGH_LEVEL = {"start": 1, "home": 2, "record_mode": 3, "reset_emergency": 254}
+# Leave area recording WITHOUT saving anything into OpenMower's own map.
+EXIT_RECORDING_ACTION = "mower_logic:area_recording/exit_recording_mode"
 
 
 def main():
@@ -1206,6 +1210,14 @@ def main():
         req = EmergencyStopSrvRequest()
         req.emergency = 1
         proxy(req)
+    elif cmd == "record_exit":
+        from std_msgs.msg import String
+        pub = rospy.Publisher("/xbot/action", String, queue_size=1, latch=True)
+        deadline = time.time() + 5.0
+        while pub.get_num_connections() == 0 and time.time() < deadline:
+            time.sleep(0.05)
+        pub.publish(String(data=EXIT_RECORDING_ACTION))
+        time.sleep(0.5)
     elif cmd in HIGH_LEVEL:
         rospy.wait_for_service("/mower_service/high_level_control", timeout=8.0)
         proxy = rospy.ServiceProxy("/mower_service/high_level_control", HighLevelControlSrv)
@@ -1229,7 +1241,102 @@ function buildControlBash() {
 }
 
 const controlDisabled = String(process.env.OPENMOWER_CONTROL_DISABLE || "").trim() === "1";
-const CONTROL_COMMANDS = new Set(["start", "stop", "home", "reset_emergency"]);
+const CONTROL_COMMANDS = new Set(["start", "stop", "home", "reset_emergency", "record_mode", "record_exit"]);
+
+/**
+ * Manual driving ("teleop") from the editor's joystick. One persistent helper
+ * inside the ROS container reads JSON lines {lx, az} on stdin and publishes
+ * geometry_msgs/Twist on /joy_vel at 20 Hz — the same topic the official app
+ * and gamepads use. OpenMower only obeys /joy_vel in AREA_RECORDING mode.
+ *
+ * SAFETY: deadman inside the helper — if no command arrives for
+ * TELEOP_DEADMAN_SEC it publishes zero velocity (mower_logic itself only stops
+ * after 10 s). Speeds are clamped here and in the helper. Closing stdin
+ * (browser stopped / server idle timeout) stops the robot and ends the helper.
+ * Disabled together with the other motion commands (OPENMOWER_CONTROL_DISABLE).
+ */
+const TELEOP_MAX_LINEAR = 0.5; // m/s — teleop_twist_joy's scale_linear in OpenMower
+const TELEOP_MAX_ANGULAR = 1.5; // rad/s — teleop_twist_joy's scale_angular
+const TELEOP_DEADMAN_SEC = 0.4;
+const TELEOP_IDLE_CLOSE_MS = 20000;
+// Backstop: the helper exits by itself after this long without commands (in
+// case it can't be killed — Docker doesn't forward stdin EOF reliably).
+const TELEOP_SELF_EXIT_SEC = 30;
+
+const TELEOP_PY = `import json, sys, threading, time
+import rospy
+from geometry_msgs.msg import Twist
+
+MAX_LIN = ${TELEOP_MAX_LINEAR}
+MAX_ANG = ${TELEOP_MAX_ANGULAR}
+DEADMAN = ${TELEOP_DEADMAN_SEC}
+SELF_EXIT = ${TELEOP_SELF_EXIT_SEC}
+
+
+def clamp(v, lim):
+    try:
+        v = float(v)
+    except Exception:
+        return 0.0
+    if v != v:
+        return 0.0
+    return max(-lim, min(lim, v))
+
+
+state = {"lx": 0.0, "az": 0.0, "t": time.time(), "eof": False}
+lock = threading.Lock()
+
+
+def reader():
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        with lock:
+            state["lx"] = clamp(d.get("lx", 0), MAX_LIN)
+            state["az"] = clamp(d.get("az", 0), MAX_ANG)
+            state["t"] = time.time()
+    with lock:
+        state["lx"] = state["az"] = 0.0
+        state["eof"] = True
+
+
+rospy.init_node("om_editor_teleop", anonymous=True, disable_signals=True)
+pub = rospy.Publisher("/joy_vel", Twist, queue_size=1)
+threading.Thread(target=reader, daemon=True).start()
+print(json.dumps({"ready": True}), flush=True)
+rate = rospy.Rate(20)
+quiet = 0
+while not rospy.is_shutdown():
+    with lock:
+        lx, az, t, eof = state["lx"], state["az"], state["t"], state["eof"]
+    if time.time() - t > DEADMAN:
+        lx = az = 0.0
+    moving = lx != 0.0 or az != 0.0
+    # Keep publishing zeros for ~0.5 s after stopping so the stop lands.
+    if moving or quiet < 10:
+        msg = Twist()
+        msg.linear.x = lx
+        msg.angular.z = az
+        pub.publish(msg)
+    quiet = 0 if moving else quiet + 1
+    if quiet >= 10 and (eof or time.time() - t > SELF_EXIT):
+        break
+    rate.sleep()
+`;
+
+/** Validate + clamp a drive command from the browser. Returns {lx, az} or null. */
+function clampTeleopCommand(body) {
+  const lx = Number(body?.lx);
+  const az = Number(body?.az);
+  if (!Number.isFinite(lx) || !Number.isFinite(az)) return null;
+  const clamp = (v, lim) => Math.max(-lim, Math.min(lim, v));
+  return { lx: clamp(lx, TELEOP_MAX_LINEAR), az: clamp(az, TELEOP_MAX_ANGULAR) };
+}
 
 /** Parse rostopic echo text (YAML-ish) for map HUD / tooltips. Percents normalized to 0–100. */
 function extractRosTelemetry(topic, raw) {
@@ -1643,6 +1750,137 @@ function demuxDockerStream(raw) {
     stdout: Buffer.concat(stdoutChunks).toString("utf8"),
     stderr: Buffer.concat(stderrChunks).toString("utf8"),
   };
+}
+
+/**
+ * Start a long-lived docker exec with stdin attached. Docker hands stdin over
+ * by hijacking the HTTP connection (Upgrade: tcp): bytes written to the
+ * socket go to the process's stdin, stdout/stderr come back multiplexed.
+ * Returns { write(str), close(), kill() }; handlers.onStdout/onStderr/onExit.
+ */
+async function startDockerExecWithStdin(container, cmd, handlers) {
+  const create = await dockerApiRequest(
+    "POST",
+    `/containers/${encodeURIComponent(container)}/exec`,
+    { AttachStdin: true, AttachStdout: true, AttachStderr: true, Tty: false, Cmd: cmd }
+  );
+  if (create.statusCode < 200 || create.statusCode >= 300) {
+    throw new Error(`exec create failed (${create.statusCode}): ${create.body}`);
+  }
+  let execId;
+  try {
+    execId = JSON.parse(create.body).Id;
+  } catch (_e) {
+    throw new Error("exec create returned invalid JSON");
+  }
+  if (!execId) throw new Error("exec create missing Id");
+
+  return await new Promise((resolve, reject) => {
+    const req = http.request({
+      socketPath: dockerSocketPath,
+      path: `/exec/${execId}/start`,
+      method: "POST",
+      headers: { "Content-Type": "application/json", Connection: "Upgrade", Upgrade: "tcp" },
+    });
+    req.on("upgrade", (_res, socket, head) => {
+      let buf = Buffer.from(head || []);
+      const drain = () => {
+        while (buf.length >= 8) {
+          const type = buf.readUInt8(0);
+          const len = buf.readUInt32BE(4);
+          if (buf.length < 8 + len) break;
+          const payload = buf.subarray(8, 8 + len);
+          buf = buf.subarray(8 + len);
+          if (type === 2) handlers.onStderr?.(payload);
+          else handlers.onStdout?.(payload);
+        }
+      };
+      drain();
+      socket.on("data", (chunk) => {
+        buf = Buffer.concat([buf, chunk]);
+        drain();
+      });
+      socket.on("end", () => handlers.onExit?.(null));
+      socket.on("error", (err) => handlers.onExit?.(err));
+      resolve({
+        write(text) {
+          if (!socket.destroyed) socket.write(text);
+        },
+        close() {
+          // End stdin: the helper stops the robot and exits on EOF.
+          if (!socket.destroyed) socket.end();
+        },
+        kill() {
+          socket.destroy();
+        },
+      });
+    });
+    req.on("response", (res) => {
+      res.resume();
+      reject(new Error(`exec start did not upgrade (${res.statusCode})`));
+    });
+    req.on("error", reject);
+    req.end(JSON.stringify({ Detach: false, Tty: false }));
+  });
+}
+
+// At most one teleop helper; started lazily by the first drive command.
+const teleop = { handle: null, starting: null, ready: false, idleTimer: null };
+
+function closeTeleop(reason) {
+  if (teleop.idleTimer) {
+    clearTimeout(teleop.idleTimer);
+    teleop.idleTimer = null;
+  }
+  const handle = teleop.handle;
+  teleop.handle = null;
+  teleop.ready = false;
+  if (!handle) return;
+  logInfo("Teleop helper closing", { reason });
+  // Zero first (the helper keeps publishing zeros for ~0.5 s), then end it.
+  handle.write(`${JSON.stringify({ lx: 0, az: 0 })}\n`);
+  handle.close();
+  setTimeout(() => {
+    handle.kill();
+    terminateRosHelper("om_teleop.py");
+  }, 700);
+}
+
+function armTeleopIdleTimer() {
+  if (teleop.idleTimer) clearTimeout(teleop.idleTimer);
+  teleop.idleTimer = setTimeout(() => closeTeleop("idle"), TELEOP_IDLE_CLOSE_MS);
+}
+
+async function ensureTeleop() {
+  if (teleop.handle) return teleop.handle;
+  if (teleop.starting) return teleop.starting;
+  teleop.starting = (async () => {
+    // Never let two helpers publish /joy_vel at once (e.g. one left over
+    // from a previous server run).
+    await terminateRosHelper("om_teleop.py");
+    const bash = buildRosPythonBash(TELEOP_PY, { tmpName: "om_teleop.py", exec: "python3 -u" });
+    const handle = await startDockerExecWithStdin(poseContainerName, ["/bin/bash", "-lc", bash], {
+      onStdout(chunk) {
+        if (/"ready":\s*true/.test(chunk.toString("utf8"))) teleop.ready = true;
+      },
+      onStderr(chunk) {
+        if (verboseLogs) logWarn("Teleop helper stderr", { text: chunk.toString("utf8").slice(0, 300) });
+      },
+      onExit() {
+        if (teleop.handle === handle) {
+          teleop.handle = null;
+          teleop.ready = false;
+        }
+      },
+    });
+    teleop.handle = handle;
+    return handle;
+  })();
+  try {
+    return await teleop.starting;
+  } finally {
+    teleop.starting = null;
+  }
 }
 
 /**
@@ -2879,6 +3117,35 @@ app.post("/api/control", async (req, res) => {
   }
 });
 
+/**
+ * Joystick drive command: { lx: m/s, az: rad/s }. Send repeatedly (~10 Hz)
+ * while the stick is held; the helper's deadman stops the robot when they
+ * stop arriving. Only moves the robot in OpenMower's AREA_RECORDING mode
+ * (enter it with POST /api/control {command:"record_mode"}).
+ */
+app.post("/api/teleop/drive", async (req, res) => {
+  try {
+    if (controlDisabled) {
+      return res.json({ ok: false, error: "Mower control disabled (OPENMOWER_CONTROL_DISABLE=1)" });
+    }
+    const cmd = clampTeleopCommand(req.body);
+    if (!cmd) return res.status(400).json({ ok: false, error: "lx and az must be numbers" });
+    const handle = await ensureTeleop();
+    handle.write(`${JSON.stringify(cmd)}\n`);
+    armTeleopIdleTimer();
+    return res.json({ ok: true, ready: teleop.ready, ...cmd });
+  } catch (error) {
+    logError("teleop drive failed", { error: error.message });
+    return res.status(500).json({ ok: false, error: error.message || "teleop_failed" });
+  }
+});
+
+/** Stop driving now: zero velocity, then end the helper. */
+app.post("/api/teleop/stop", (_req, res) => {
+  closeTeleop("stop requested");
+  res.json({ ok: true });
+});
+
 app.get("/api/wifi-map", async (req, res) => {
   try {
     await ensureWifiSurveyLoaded();
@@ -3242,6 +3509,7 @@ if (require.main === module) {
     if (shuttingDown) return;
     shuttingDown = true;
     logInfo("Shutting down", { signal });
+    closeTeleop("shutdown");
     stopPoseContainerEventWatcher();
     await Promise.all([stopAutonomousWifiCollector(), stopRobotStream()]);
     server.close();
@@ -3265,6 +3533,7 @@ if (require.main === module) {
 // Pure/stateless helpers plus the two in-memory stores, exposed so
 // server.test.js can unit-test them directly without booting a server.
 module.exports = {
+  clampTeleopCommand,
   isDifferentLocalDay,
   classifyTrailPhase,
   normalizeWifiSample,

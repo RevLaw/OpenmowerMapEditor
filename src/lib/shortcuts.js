@@ -5,7 +5,7 @@ import { undo, redo, removePoint, requestSave, nudge, duplicateZoneAction, selec
 import { mapApi } from "./stores/mapApi.js";
 import { editor, setAreaIndex } from "./stores/editor.js";
 import { toggleZoneLocked, toggleZoneHidden } from "./stores/zoneView.js";
-import { contextMenu, saveDialog } from "./stores/ui.js";
+import { contextMenu, saveDialog, sidebarOpen } from "./stores/ui.js";
 import { get } from "svelte/store";
 
 /** Select the previous / next zone in list order. */
@@ -64,6 +64,11 @@ export function initShortcuts(ctx) {
     if (mod && key === "d") {
       e.preventDefault();
       duplicateZoneAction();
+      return;
+    }
+    if (mod && key === "b") {
+      e.preventDefault();
+      sidebarOpen.update((v) => !v);
       return;
     }
     if (mod && key === "a" && !isTyping(e.target)) {

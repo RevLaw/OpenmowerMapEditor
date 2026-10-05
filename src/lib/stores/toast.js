@@ -6,6 +6,7 @@ export const status = writable("Load a map to begin.");
 export const toasts = writable([]);
 
 let nextId = 1;
+const MAX_TOASTS = 3;
 
 /**
  * Show a toast and update the status line.
@@ -16,7 +17,8 @@ let nextId = 1;
 export function notify(text, kind = "info", ttl = 3200) {
   status.set(text);
   const id = nextId++;
-  toasts.update((list) => [...list, { id, text, kind }]);
+  // Keep at most a few on screen; on a phone a pile-up covers the panels.
+  toasts.update((list) => [...list, { id, text, kind }].slice(-MAX_TOASTS));
   if (ttl > 0) {
     setTimeout(() => dismiss(id), ttl);
   }

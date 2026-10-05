@@ -6,7 +6,7 @@ import { toggleTheme } from "./stores/theme.js";
 import { toggleRobotLive } from "./stores/robot.js";
 import { mapApi } from "./stores/mapApi.js";
 import { basemapId, BASEMAPS } from "./stores/basemap.js";
-import { backupsOpen, sidebarTab } from "./stores/ui.js";
+import { backupsOpen, sidebarTab, sidebarOpen } from "./stores/ui.js";
 import { snapEnabled } from "./stores/tools.js";
 import { editor, setAreaIndex } from "./stores/editor.js";
 import { toggleZoneLocked, toggleZoneHidden, showAllZones } from "./stores/zoneView.js";
@@ -101,6 +101,8 @@ export function getCommands(ctx = {}) {
     // View
     { id: "fit", title: "Fit selected zone", group: "View", icon: "fit_screen", shortcut: "F", run: fit },
     { id: "fit-all", title: "Fit whole map", group: "View", icon: "zoom_out_map", shortcut: "⇧ F", run: () => get(mapApi)?.fitAll() },
+    { id: "sidebar", title: "Fold / unfold side panel", group: "View", icon: "left_panel_close", shortcut: "Ctrl B", run: () => sidebarOpen.update((v) => !v) },
+    { id: "drive", title: "Drive the mower (joystick)…", group: "View", icon: "sports_esports", run: () => { sidebarTab.set("robot"); sidebarOpen.set(true); } },
     { id: "theme", title: "Toggle light / dark theme", group: "View", icon: "contrast", run: toggleTheme },
     { id: "robot", title: "Toggle live robot overlay", group: "View", icon: "radar", run: toggleRobotLive },
     { id: "coverage", title: "Toggle mowing coverage preview", group: "View", icon: "grid_on", run: () => coverageOn.update((v) => !v) },
