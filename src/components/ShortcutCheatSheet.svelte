@@ -2,7 +2,7 @@
   import { fade, scale } from "svelte/transition";
   import { getCommands } from "../lib/commands.js";
 
-  export let open = false;
+  let { open = $bindable(false) } = $props();
 
   const extra = [
     { title: "Open command palette", group: "General", shortcut: "Ctrl K" },
@@ -10,8 +10,6 @@
     { title: "Nudge selected point(s)", group: "Edit", shortcut: "Arrows" },
     { title: "Larger nudge", group: "Edit", shortcut: "Shift Arrows" },
   ];
-
-  $: groups = buildGroups();
 
   function buildGroups() {
     const withKeys = getCommands()
@@ -25,6 +23,8 @@
     return Object.entries(byGroup);
   }
 
+  const groups = buildGroups();
+
   function close() {
     open = false;
   }
@@ -33,14 +33,14 @@
 {#if open}
   <div
     class="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 px-4"
-    on:click={close}
+    onclick={close}
     transition:fade={{ duration: 120 }}
     role="presentation"
   >
-    <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions a11y-no-noninteractive-element-interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
     <div
       class="glass glass-strong w-full max-w-md overflow-hidden rounded-2xl"
-      on:click|stopPropagation
+      onclick={(e) => e.stopPropagation()}
       transition:scale={{ duration: 140, start: 0.97 }}
       role="dialog"
       tabindex="-1"
@@ -51,7 +51,7 @@
           <span class="material-symbols-outlined" style="font-size:18px">keyboard</span>
           Keyboard shortcuts
         </h2>
-        <button class="btn-icon" on:click={close} aria-label="Close">
+        <button class="btn-icon" onclick={close} aria-label="Close">
           <span class="material-symbols-outlined" style="font-size:20px">close</span>
         </button>
       </header>

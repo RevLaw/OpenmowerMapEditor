@@ -7,7 +7,7 @@
     class="btn-icon !h-9 !w-9"
     title="Zoom in"
     aria-label="Zoom in"
-    on:click={() => $mapApi?.zoomIn()}
+    onclick={() => $mapApi?.zoomIn()}
   >
     <span class="material-symbols-outlined" style="font-size:22px">add</span>
   </button>
@@ -16,7 +16,7 @@
     class="btn-icon !h-9 !w-9"
     title="Zoom out"
     aria-label="Zoom out"
-    on:click={() => $mapApi?.zoomOut()}
+    onclick={() => $mapApi?.zoomOut()}
   >
     <span class="material-symbols-outlined" style="font-size:22px">remove</span>
   </button>

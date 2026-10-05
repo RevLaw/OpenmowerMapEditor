@@ -2,8 +2,7 @@
   import { getAreaType } from "../lib/format/mapFormat.js";
   import { getEditablePoints } from "../lib/format/outline.js";
 
-  export let map;
-  export let size = 96;
+  let { map, size = 96 } = $props();
 
   const STROKE = { mow: "#e5e7eb", obstacle: "#ef4444", nav: "#38bdf8" };
   const PAD = 0.1;
@@ -46,7 +45,7 @@
     };
   }
 
-  $: data = build(map);
+  let data = $derived(build(map));
 </script>
 
 {#if data}

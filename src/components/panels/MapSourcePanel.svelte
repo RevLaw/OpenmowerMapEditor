@@ -12,14 +12,14 @@
 
 <Collapsible title="Map source" icon="map" key="source">
   <div class="grid grid-cols-2 gap-2">
-    <button class="btn" on:click={() => backupsOpen.set(true)}>
+    <button class="btn" onclick={() => backupsOpen.set(true)}>
       <span class="material-symbols-outlined" style="font-size:18px">history</span>
       Backups…
     </button>
     <label class="btn cursor-pointer">
       <span class="material-symbols-outlined" style="font-size:18px">upload_file</span>
       Upload file
-      <input type="file" accept=".json,application/json" class="hidden" on:change={onFile} />
+      <input type="file" accept=".json,application/json" class="hidden" onchange={onFile} />
     </label>
   </div>
 </Collapsible>

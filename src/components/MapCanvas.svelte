@@ -3,7 +3,7 @@
   import { createMapController } from "../map/mapController.js";
   import { mapApi } from "../lib/stores/mapApi.js";
 
-  let el;
+  let el = $state();
   let controller;
 
   onMount(() => {

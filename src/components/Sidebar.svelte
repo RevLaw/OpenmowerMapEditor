@@ -13,8 +13,7 @@
   import { isDirty } from "../lib/stores/dirty.js";
   import { saveCurrent } from "../lib/actions.js";
 
-  export let onOpenPalette = () => {};
-  export let onClose = null;
+  let { onOpenPalette = () => {}, onClose = null } = $props();
 </script>
 
 <aside class="glass flex h-full w-full flex-col overflow-hidden rounded-2xl">
@@ -32,12 +31,12 @@
       </div>
     </div>
     <div class="flex items-center gap-1">
-      <button class="btn-icon" title="Command palette (Ctrl/Cmd + K)" on:click={onOpenPalette}>
+      <button class="btn-icon" title="Command palette (Ctrl/Cmd + K)" onclick={onOpenPalette}>
         <span class="material-symbols-outlined" style="font-size:20px">bolt</span>
       </button>
       <ThemeToggle />
       {#if onClose}
-        <button class="btn-icon lg:hidden" title="Close" on:click={onClose}>
+        <button class="btn-icon lg:hidden" title="Close" onclick={onClose}>
           <span class="material-symbols-outlined" style="font-size:20px">close</span>
         </button>
       {/if}
@@ -58,11 +57,11 @@
 
   <footer class="space-y-1.5 border-t p-2.5" style="border-color:var(--edge-soft)">
     <div class="grid gap-1.5">
-      <button class="btn btn-accent" on:click={() => saveCurrent({ restart: false })}>
+      <button class="btn btn-accent" onclick={() => saveCurrent({ restart: false })}>
         <span class="material-symbols-outlined" style="font-size:18px">save</span>
         Save map.json
       </button>
-      <button class="btn btn-warn" on:click={() => saveCurrent({ restart: true })}>
+      <button class="btn btn-warn" onclick={() => saveCurrent({ restart: true })}>
         <span class="material-symbols-outlined" style="font-size:18px">restart_alt</span>
         Save + restart ROS
       </button>

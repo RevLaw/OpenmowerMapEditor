@@ -44,7 +44,7 @@
   // per-device, same pattern as the sidebar panels' Collapsible.
   const HUD_EXPANDED_KEY = "openmower-map-editor-hud-expanded";
   let hudExpanded =
-    typeof localStorage === "undefined" || localStorage.getItem(HUD_EXPANDED_KEY) !== "0";
+    $state(typeof localStorage === "undefined" || localStorage.getItem(HUD_EXPANDED_KEY) !== "0");
 
   function toggleHudExpanded() {
     hudExpanded = !hudExpanded;
@@ -53,14 +53,14 @@
     }
   }
 
-  $: ok = $robotLive && $robotPose?.ok;
-  $: signalColor = wifiSignalColor($wifiSurveySummary.signalDbm);
-  $: today = todayDateKey();
-  $: isViewingToday = $robotTrailSelectedDate === today;
+  let ok = $derived($robotLive && $robotPose?.ok);
+  let signalColor = $derived(wifiSignalColor($wifiSurveySummary.signalDbm));
+  let today = $derived(todayDateKey());
+  let isViewingToday = $derived($robotTrailSelectedDate === today);
   // Server truth, not the client-only Live-robot breadcrumb — this must stay
   // accurate even when Live robot is off, since capture itself doesn't
   // depend on it.
-  $: trailCapturing = Boolean($robotTrailHistoryStorage.collector?.capturing);
+  let trailCapturing = $derived(Boolean($robotTrailHistoryStorage.collector?.capturing));
 
   function toggleWifiMap() {
     setWifiMapEnabled(!$wifiMapEnabled);
@@ -122,7 +122,7 @@
     class="flex w-full items-center justify-between gap-2"
     aria-expanded={hudExpanded}
     title={hudExpanded ? "Collapse status panel" : "Expand status panel"}
-    on:click={toggleHudExpanded}
+    onclick={toggleHudExpanded}
   >
     <div class="flex items-center gap-1.5 text-xs font-semibold">
       <span
@@ -158,7 +158,7 @@
       class="btn-icon !h-7 !w-7"
       class:text-accent={$robotLive}
       title="Toggle live robot overlay"
-      on:click={toggleRobotLive}
+      onclick={toggleRobotLive}
     >
       <span class="material-symbols-outlined" style="font-size:22px">
         {$robotLive ? "toggle_on" : "toggle_off"}
@@ -271,7 +271,7 @@
               <button
                 class="btn-icon !h-6 !w-6"
                 title="Previous day"
-                on:click={() => shiftRobotTrailDate(-1)}
+                onclick={() => shiftRobotTrailDate(-1)}
               >
                 <span class="material-symbols-outlined" style="font-size:16px">chevron_left</span>
               </button>
@@ -281,13 +281,13 @@
                 style="border-color:var(--glass-edge)"
                 max={today}
                 value={$robotTrailSelectedDate}
-                on:change={onDateInput}
+                onchange={onDateInput}
               />
               <button
                 class="btn-icon !h-6 !w-6"
                 title="Next day"
                 disabled={isViewingToday}
-                on:click={() => shiftRobotTrailDate(1)}
+                onclick={() => shiftRobotTrailDate(1)}
               >
                 <span class="material-symbols-outlined" style="font-size:16px">chevron_right</span>
               </button>
@@ -295,7 +295,7 @@
                 class="btn-icon !h-6 !w-6"
                 title="Jump to today"
                 disabled={isViewingToday}
-                on:click={() => selectRobotTrailDate(today)}
+                onclick={() => selectRobotTrailDate(today)}
               >
                 <span class="material-symbols-outlined" style="font-size:16px">home</span>
               </button>
