@@ -1,6 +1,7 @@
 <script>
   import Collapsible from "../Collapsible.svelte";
-  import { currentArea, editor, areaList, setAreaIndex } from "../../lib/stores/editor.js";
+  import { currentArea, editor } from "../../lib/stores/editor.js";
+  import { currentLocked } from "../../lib/stores/zoneView.js";
   import { getAreaType, getZoneName } from "../../lib/format/mapFormat.js";
   import {
     changeZoneType,
@@ -8,10 +9,6 @@
     moveZoneOrder,
     removeCurrentZone,
   } from "../../lib/actions.js";
-
-  // Colored emoji type badge in the picker (🟩 mow · 🟥 obstacle · 🟦 nav).
-  const TYPE_BADGE = { mow: "🟩", obstacle: "🟥", nav: "🟦" };
-  const badge = (type) => TYPE_BADGE[type] || "⬜";
 
   let nameDraft = $state("");
   let editingName = $state(false);
@@ -38,26 +35,16 @@
 </script>
 
 {#if $currentArea}
-  <Collapsible title="Selected zone" icon="category" key="zone">
-    <label class="field">
-      Zone
-      <select
-        class="select"
-        value={String(index)}
-        onchange={(e) => setAreaIndex(Number(e.target.value))}
-      >
-        {#each $areaList as a}
-          <option value={String(a.index)}>
-            {badge(a.type)}
-            {a.name || `${a.type} ${a.index + 1}`}
-          </option>
-        {/each}
-      </select>
-    </label>
-
+  <Collapsible title="Zone details" icon="category" key="zone">
+    {#if $currentLocked}
+      <p class="mb-2 flex items-center gap-1.5 text-[11px]" style="color:var(--warn)">
+        <span class="material-symbols-outlined" style="font-size:15px">lock</span>
+        Locked — unlock it in the zone list to edit.
+      </p>
+    {/if}
     <label class="field">
       Type
-      <select class="select" value={type} onchange={(e) => changeZoneType(e.target.value)}>
+      <select class="select" value={type} disabled={$currentLocked} onchange={(e) => changeZoneType(e.target.value)}>
         <option value="mow">mow</option>
         <option value="obstacle">obstacle</option>
         <option value="nav">nav</option>
@@ -69,6 +56,7 @@
       <input
         class="input"
         placeholder={getZoneName($currentArea, index)}
+        disabled={$currentLocked}
         bind:value={nameDraft}
         onfocus={() => (editingName = true)}
         onblur={commitName}
@@ -97,6 +85,7 @@
     <button
       class="btn w-full"
       style="border-color:var(--danger);color:var(--danger)"
+      disabled={$currentLocked}
       onclick={removeCurrentZone}
     >
       <span class="material-symbols-outlined" style="font-size:18px">delete</span>

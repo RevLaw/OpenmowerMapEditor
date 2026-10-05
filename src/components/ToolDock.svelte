@@ -1,100 +1,69 @@
 <script>
-  import { activeTool, setTool, toggleTool } from "../lib/stores/tools.js";
+  import { activeTool, setTool, toggleTool, snapEnabled } from "../lib/stores/tools.js";
   import { history } from "../lib/stores/editor.js";
   import { undo, redo, removePoint } from "../lib/actions.js";
-  import { sendMowerControl, controlSending } from "../lib/stores/control.js";
 
-  const tools = [
-    { id: "none", icon: "near_me", label: "Select / drag (V)" },
-    { id: "add", icon: "add_location_alt", label: "Add point (A)" },
-    { id: "brush", icon: "blur_circular", label: "Push brush (B)" },
-    { id: "snap", icon: "horizontal_rule", label: "Snap line (S)" },
-    { id: "multi", icon: "select_all", label: "Multi-select (M)" },
-    { id: "move", icon: "open_with", label: "Move whole zone (G)" },
+  // Map-editing tools only. Robot motion (Start/Stop/Home) lives in the status
+  // HUD so editing and moving a real robot never share a button cluster.
+  const GROUPS = [
+    [
+      { id: "none", icon: "near_me", label: "Select / drag (V)" },
+      { id: "multi", icon: "select_all", label: "Multi-select (M)" },
+      { id: "add", icon: "add_location_alt", label: "Add point (A)" },
+      { id: "brush", icon: "blur_circular", label: "Push brush (B)" },
+      { id: "snap", icon: "horizontal_rule", label: "Straighten line (S)" },
+      { id: "move", icon: "open_with", label: "Move whole zone (G)" },
+    ],
+    [
+      { id: "poly", icon: "polyline", label: "Draw polygon (P)" },
+      { id: "rect", icon: "crop_square", label: "Draw rectangle (R)" },
+      { id: "circle", icon: "circle", label: "Draw circle (O)" },
+      { id: "split", icon: "content_cut", label: "Split zone (X)" },
+      { id: "ruler", icon: "straighten", label: "Measure distance (D)" },
+    ],
   ];
 
   function pick(id) {
     if (id === "none") setTool("none");
     else toggleTool(id);
   }
-
-  // Mower control (Start/Stop/Home/Reset) used to float as its own separate
-  // glass panel next to this one; merged in as one more grid group so the
-  // whole right-side control stack reads as a single panel instead of two.
-  const MOWER_BUTTONS = [
-    { cmd: "start", icon: "play_arrow", label: "Start", color: "var(--ok)", confirm: true },
-    { cmd: "stop", icon: "e911_emergency", label: "Stop", color: "var(--danger)", confirm: false, stop: true },
-    { cmd: "home", icon: "home", label: "Home", color: "var(--accent)", confirm: true },
-    { cmd: "reset_emergency", icon: "restart_alt", label: "Reset E-stop", color: "var(--warn)", confirm: true },
-  ];
-
-  // Motion-causing mower commands need a 2-step confirm; Stop is one tap.
-  let armed = $state(null);
-  let armTimer = null;
-
-  function disarmMower() {
-    armed = null;
-    if (armTimer) {
-      clearTimeout(armTimer);
-      armTimer = null;
-    }
-  }
-
-  function runMower(cmd) {
-    disarmMower();
-    sendMowerControl(cmd);
-  }
-
-  function clickMower(b) {
-    if (!b.confirm || armed === b.cmd) {
-      runMower(b.cmd);
-      return;
-    }
-    disarmMower();
-    armed = b.cmd;
-    armTimer = setTimeout(() => (armed = null), 3000);
-  }
 </script>
 
-<!-- 2-column grid instead of one tall column — a divider spans both grid
-     columns (grid-column:1/-1), which always forces a new row, keeping the
-     groups (mower control / tools / delete / undo-redo) visually separated.
-     Grid auto-sizes the columns to the buttons' own size, so this doesn't
-     need a guessed pixel width the way flex-wrap would. -->
+<!-- 2-column grid; a divider spans both columns (grid-column:1/-1), which
+     always forces a new row, keeping the groups visually separated. -->
 <div class="glass grid grid-cols-2 gap-1 rounded-2xl p-1.5">
-  {#each MOWER_BUTTONS as b}
-    <div class="hicon" style="--c:{b.color}">
-      <button
-        class="tool-btn mbtn"
-        class:armed={armed === b.cmd}
-        class:stop={b.stop}
-        disabled={$controlSending}
-        aria-label={b.label}
-        onclick={() => clickMower(b)}
-      >
-        <span class="material-symbols-outlined" style="font-size:22px">{b.icon}</span>
-      </button>
-      <span class="hicon-label" class:show={armed === b.cmd}>
-        {armed === b.cmd ? "Confirm?" : b.label}
-      </span>
-    </div>
+  {#each GROUPS as group, gi}
+    {#if gi > 0}
+      <div class="my-1 h-px" style="grid-column:1/-1;background:var(--edge-soft)"></div>
+    {/if}
+    {#each group as t}
+      <div class="hicon">
+        <button
+          class="tool-btn"
+          class:active={$activeTool === t.id}
+          aria-label={t.label}
+          aria-pressed={$activeTool === t.id}
+          onclick={() => pick(t.id)}
+        >
+          <span class="material-symbols-outlined" style="font-size:22px">{t.icon}</span>
+        </button>
+        <span class="hicon-label">{t.label}</span>
+      </div>
+    {/each}
   {/each}
 
-  <div class="my-1 h-px" style="grid-column:1/-1;background:var(--edge-soft)"></div>
-
-  {#each tools as t}
-    <div class="hicon">
-      <button
-        class="tool-btn"
-        class:active={$activeTool === t.id}
-        aria-label={t.label}
-        onclick={() => pick(t.id)}
-      >
-        <span class="material-symbols-outlined" style="font-size:22px">{t.icon}</span>
-      </button>
-      <span class="hicon-label">{t.label}</span>
-    </div>
-  {/each}
+  <div class="hicon">
+    <button
+      class="tool-btn"
+      class:toggled={$snapEnabled}
+      aria-label="Snap to other zones (hold Alt to bypass)"
+      aria-pressed={$snapEnabled}
+      onclick={() => snapEnabled.update((v) => !v)}
+    >
+      <span class="material-symbols-outlined" style="font-size:22px">{$snapEnabled ? "adjust" : "radio_button_unchecked"}</span>
+    </button>
+    <span class="hicon-label">Snapping {$snapEnabled ? "on" : "off"} (Alt bypasses)</span>
+  </div>
 
   <div class="my-1 h-px" style="grid-column:1/-1;background:var(--edge-soft)"></div>
 
@@ -122,27 +91,8 @@
 </div>
 
 <style>
-  /* Command tint on hover (base sizing/shape inherited from .tool-btn). */
-  .mbtn:hover:not(:disabled) {
-    border-color: var(--c);
-    color: var(--c);
-  }
-  /* Armed (awaiting confirm) fills with the command colour. */
-  .mbtn.armed {
-    background: var(--c);
-    border-color: var(--c);
-    color: #04121f;
-    transform: none;
-  }
-  /* Stop stays prominent even icon-only. */
-  .mbtn.stop {
-    background: var(--danger);
-    border-color: var(--danger);
-    color: #fff;
-  }
-  .mbtn.stop:hover:not(:disabled) {
-    filter: brightness(1.1);
-    color: #fff;
-    border-color: var(--danger);
+  .tool-btn.toggled {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   }
 </style>

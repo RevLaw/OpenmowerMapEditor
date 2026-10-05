@@ -564,3 +564,73 @@ input[type="range"].slider::-moz-range-thumb {
 .leaflet-bar a:hover {
   background: var(--surface-2);
 }
+
+/* Edge-midpoint "ghost" handle: drag to insert a vertex. */
+.map-midpoint {
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: 1px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(5, 7, 13, 0.8);
+  cursor: copy;
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+.map-midpoint:hover {
+  transform: scale(1.35);
+  background: #fff;
+}
+@media (pointer: coarse) {
+  .map-midpoint {
+    transform: scale(1.4);
+  }
+}
+
+/* Docking-station heading arrow, orbiting the dock badge. */
+.map-marker--dock {
+  position: relative;
+}
+.dock-heading {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.dock-heading > span {
+  position: absolute;
+  left: 50%;
+  top: -11px;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 10px solid #fb923c;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6));
+}
+
+/* Zone hover label and ruler segment labels. */
+.leaflet-tooltip.zone-tooltip,
+.leaflet-tooltip.ruler-label {
+  background: var(--glass-strong);
+  color: var(--ink);
+  border: 1px solid var(--glass-edge);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+}
+.leaflet-tooltip.zone-tooltip::before,
+.leaflet-tooltip.ruler-label::before {
+  display: none;
+}
+.leaflet-tooltip.ruler-label {
+  color: #facc15;
+  padding: 1px 6px;
+  font-family: theme("fontFamily.mono");
+}
+.leaflet-tooltip.ruler-label--total {
+  color: #04121f;
+  background: #facc15;
+}

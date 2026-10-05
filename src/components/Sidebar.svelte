@@ -1,19 +1,38 @@
 <script>
   import MapSourcePanel from "./panels/MapSourcePanel.svelte";
+  import ZoneListPanel from "./panels/ZoneListPanel.svelte";
   import ZonePanel from "./panels/ZonePanel.svelte";
-  import CreatePanel from "./panels/CreatePanel.svelte";
+  import VertexPanel from "./panels/VertexPanel.svelte";
+  import ShapeOpsPanel from "./panels/ShapeOpsPanel.svelte";
   import ProjectionPanel from "./panels/ProjectionPanel.svelte";
   import ToolSettingsPanel from "./panels/ToolSettingsPanel.svelte";
   import TransformPanel from "./panels/TransformPanel.svelte";
   import MeasurementsPanel from "./panels/MeasurementsPanel.svelte";
   import CoveragePanel from "./panels/CoveragePanel.svelte";
   import ValidationPanel from "./panels/ValidationPanel.svelte";
+  import DockPanel from "./panels/DockPanel.svelte";
+  import RecordPanel from "./panels/RecordPanel.svelte";
+  import TrailZonePanel from "./panels/TrailZonePanel.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
   import { status } from "../lib/stores/toast.js";
   import { isDirty } from "../lib/stores/dirty.js";
-  import { saveCurrent } from "../lib/actions.js";
+  import { sidebarTab } from "../lib/stores/ui.js";
+  import { validationIssues } from "../lib/stores/validation.js";
+  import { recording } from "../lib/stores/recorder.js";
+  import { requestSave } from "../lib/actions.js";
 
   let { onOpenPalette = () => {}, onClose = null } = $props();
+
+  // Three tabs instead of one long stack: what you edit (zones), map-level
+  // setup that's touched rarely, and robot-assisted mapping.
+  const TABS = [
+    { id: "zones", label: "Zones", icon: "layers" },
+    { id: "map", label: "Map", icon: "map" },
+    { id: "robot", label: "Robot", icon: "smart_toy" },
+  ];
+
+  let errorCount = $derived($validationIssues.filter((i) => i.severity === "error").length);
+  let issueCount = $derived($validationIssues.length);
 </script>
 
 <aside class="glass flex h-full w-full flex-col overflow-hidden rounded-2xl">
@@ -43,27 +62,56 @@
     </div>
   </header>
 
-  <div class="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5">
-    <MapSourcePanel />
-    <ProjectionPanel />
-    <ZonePanel />
-    <CoveragePanel />
-    <TransformPanel />
-    <ToolSettingsPanel />
-    <CreatePanel />
-    <MeasurementsPanel />
-    <ValidationPanel />
+  <div class="flex gap-1 border-b px-2.5 pt-2" style="border-color:var(--edge-soft)" role="tablist">
+    {#each TABS as t}
+      <button
+        class="tab flex flex-1 items-center justify-center gap-1.5 rounded-t-lg px-2 py-1.5 text-xs font-semibold"
+        class:active={$sidebarTab === t.id}
+        role="tab"
+        aria-selected={$sidebarTab === t.id}
+        onclick={() => sidebarTab.set(t.id)}
+      >
+        <span class="material-symbols-outlined" style="font-size:17px">{t.icon}</span>
+        {t.label}
+        {#if t.id === "map" && issueCount}
+          <span class="badge" style="background:{errorCount ? 'var(--danger)' : 'var(--warn)'}">{issueCount}</span>
+        {/if}
+        {#if t.id === "robot" && $recording.active}
+          <span class="badge rec" title="Recording a boundary">REC</span>
+        {/if}
+      </button>
+    {/each}
+  </div>
+
+  <div class="scroll-thin min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5" role="tabpanel">
+    {#if $sidebarTab === "zones"}
+      <ZoneListPanel />
+      <ToolSettingsPanel />
+      <ZonePanel />
+      <CoveragePanel />
+      <VertexPanel />
+      <TransformPanel />
+      <ShapeOpsPanel />
+      <MeasurementsPanel />
+    {:else if $sidebarTab === "map"}
+      <MapSourcePanel />
+      <ValidationPanel />
+      <DockPanel />
+      <ProjectionPanel />
+    {:else}
+      <RecordPanel />
+      <TrailZonePanel />
+    {/if}
   </div>
 
   <footer class="space-y-1.5 border-t p-2.5" style="border-color:var(--edge-soft)">
-    <div class="grid gap-1.5">
-      <button class="btn btn-accent" onclick={() => saveCurrent({ restart: false })}>
+    <div class="grid grid-cols-[1fr_auto] gap-1.5">
+      <button class="btn btn-accent" onclick={() => requestSave({ restart: false })}>
         <span class="material-symbols-outlined" style="font-size:18px">save</span>
         Save map.json
       </button>
-      <button class="btn btn-warn" onclick={() => saveCurrent({ restart: true })}>
+      <button class="btn btn-warn !px-2.5" title="Save + restart ROS" onclick={() => requestSave({ restart: true })}>
         <span class="material-symbols-outlined" style="font-size:18px">restart_alt</span>
-        Save + restart ROS
       </button>
     </div>
     <div class="flex items-center gap-2">
@@ -74,3 +122,41 @@
     </div>
   </footer>
 </aside>
+
+<style>
+  .tab {
+    color: var(--subtle);
+    border: 1px solid transparent;
+    border-bottom: none;
+    margin-bottom: -1px;
+  }
+  .tab:hover {
+    color: var(--ink);
+  }
+  .tab.active {
+    color: var(--ink);
+    background: var(--surface);
+    border-color: var(--edge-soft);
+  }
+  .tab.active .material-symbols-outlined {
+    color: var(--accent);
+  }
+  .badge {
+    min-width: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    font-size: 9px;
+    line-height: 15px;
+    color: #04121f;
+    font-weight: 700;
+  }
+  .badge.rec {
+    background: var(--danger);
+    color: #fff;
+  }
+  @media (pointer: coarse) {
+    .tab {
+      min-height: 44px;
+    }
+  }
+</style>

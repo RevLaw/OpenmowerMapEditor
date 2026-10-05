@@ -12,6 +12,10 @@
   import CommandPalette from "./CommandPalette.svelte";
   import ShortcutCheatSheet from "./ShortcutCheatSheet.svelte";
   import BackupsModal from "./BackupsModal.svelte";
+  import ContextMenu from "./ContextMenu.svelte";
+  import SaveDialog from "./SaveDialog.svelte";
+  import DraftBanner from "./DraftBanner.svelte";
+  import SelectionBar from "./SelectionBar.svelte";
   import { backupsOpen } from "../lib/stores/ui.js";
   import { get } from "svelte/store";
   import { bootstrap } from "../lib/actions.js";
@@ -55,9 +59,14 @@
   // BasemapControl needs this to sit flush against the sidebar's real edge
   // instead of assuming it's always exactly 360px wide.
   let sidebarWidth = $state(360);
+  // Wide enough to put the selection bar beside the basemap button (else it
+  // sits one row above it).
+  let wide = $state(typeof window === "undefined" || window.innerWidth >= 900);
+  const BASEMAP_BUTTON_ROOM = 180;
 
   function recomputeLayout() {
     sidebarWidth = Math.min(360, window.innerWidth - 24);
+    wide = window.innerWidth >= 900;
     if (!toolDockWrapEl || !hudWrapEl || !zoomControlWrapEl) return;
     const vh = window.innerHeight;
     const hudBottom = EDGE_GAP + hudNaturalHeight;
@@ -166,10 +175,24 @@
     <ToolDock />
   </div>
 
-  <!-- Active-tool hint (top-center) -->
-  <div class="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2">
+  <!-- Draft-restore banner + active-tool hint (top-center) -->
+  <div class="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
+    <div class="pointer-events-auto">
+      <DraftBanner />
+    </div>
     <div class="pointer-events-auto">
       <ToolHint />
+    </div>
+  </div>
+
+  <!-- Quick actions for the selected zone (bottom-center) -->
+  <div
+    class="pointer-events-none absolute z-20 flex justify-center transition-all duration-200"
+    style="bottom:{wide ? 12 : 60}px;left:{(sidebarOpen && wide ? sidebarWidth + EDGE_GAP + 4 : 12) +
+      (wide ? BASEMAP_BUTTON_ROOM : 0)}px;right:64px"
+  >
+    <div class="pointer-events-auto max-w-full">
+      <SelectionBar />
     </div>
   </div>
 
@@ -203,4 +226,6 @@
   <CommandPalette bind:open={paletteOpen} onCheat={() => (cheatOpen = true)} />
   <ShortcutCheatSheet bind:open={cheatOpen} />
   <BackupsModal bind:open={$backupsOpen} />
+  <SaveDialog />
+  <ContextMenu />
 </div>

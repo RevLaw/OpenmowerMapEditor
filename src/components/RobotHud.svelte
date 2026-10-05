@@ -31,6 +31,7 @@
     todayDateKey,
   } from "../lib/stores/robotTrail.js";
   import CaptureToggleHeader from "./CaptureToggleHeader.svelte";
+  import MowerControl from "./MowerControl.svelte";
   import OverlayToggleRow from "./OverlayToggleRow.svelte";
 
   // Shared on/off colors so the Live robot, WiFi, and Movement trail icons
@@ -143,6 +144,12 @@
       {hudExpanded ? "expand_less" : "expand_more"}
     </span>
   </button>
+
+  <!-- Robot motion commands: always reachable (even collapsed), and kept
+       apart from the map-editing tool dock. -->
+  <div class="mt-2">
+    <MowerControl />
+  </div>
 
   {#if hudExpanded}
   <div transition:slide={{ duration: 160 }}>
