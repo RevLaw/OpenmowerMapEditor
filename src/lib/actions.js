@@ -10,9 +10,7 @@ import {
   currentEditablePoints,
   deleteSelectedPoints,
   nudgeSelection,
-  transformZone,
   simplifyZone,
-  offsetZone,
   duplicateZone,
   setZoneType,
   setZoneName,
@@ -30,13 +28,12 @@ import {
   setDockHeading,
   removeDock,
   setStartPoint,
+  selectAllPoints,
 } from "./stores/editor.js";
 import { markClean } from "./stores/dirty.js";
 import { toggleTool, simplifyTolerance } from "./stores/tools.js";
 import {
   simplify,
-  offsetPolygon,
-  polygonArea,
   nearestEdgeInsertIndex,
   boundingBox,
   boxesOverlap,
@@ -311,32 +308,11 @@ export function simplifyZoneAction() {
   notify(`Simplified: removed ${removed} point(s).`, "success");
 }
 
-export function rotateZone(degrees) {
-  if (!hasZone() || !guardEditable()) return;
-  pushHistory();
-  transformZone("rotate", (degrees * Math.PI) / 180);
-}
-
-export function scaleZone(factor) {
-  if (!hasZone() || !guardEditable()) return;
-  if (!(factor > 0)) {
-    notify("Scale factor must be positive.", "warn");
-    return;
-  }
-  pushHistory();
-  transformZone("scale", factor);
-}
-
-/** Grow (m > 0) or shrink (m < 0) the zone by offsetting every border by m. */
-export function growZone(meters) {
-  if (!hasZone() || !guardEditable()) return;
-  const next = offsetPolygon(currentEditablePoints(), -meters);
-  if (next.length < 3 || polygonArea(next) < 0.01) {
-    notify("Zone too small to resize further.", "warn");
-    return;
-  }
-  pushHistory();
-  offsetZone(meters);
+/** Select every vertex of the current zone. */
+export function selectAllPointsAction() {
+  if (!hasZone()) return;
+  const n = selectAllPoints();
+  setStatus(`Selected all ${n} points — drag one, use the arrows, or Del.`);
 }
 
 export function applyProjection(lat, lng) {

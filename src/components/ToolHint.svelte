@@ -8,8 +8,6 @@
     add: { label: "Add point", text: "Click near an edge to insert a vertex" },
     brush: { label: "Push brush", text: "Drag across the outline to push points along your stroke" },
     snap: { label: "Straighten", text: "Click a start point, then an end point" },
-    multi: { label: "Multi-select", text: "Click points or Shift+drag a box, then drag the handle" },
-    move: { label: "Move zone", text: "Drag the handle to move the whole zone" },
     rect: { label: "Rectangle", text: "Drag on the map to draw a rectangle zone" },
     circle: { label: "Circle", text: "Drag from the center to set the radius" },
     poly: { label: "Polygon", text: "Click to add points · click the first point, double-click or Enter to finish" },

@@ -3,7 +3,6 @@
   import { editor, currentArea } from "../../lib/stores/editor.js";
   import { getAreaType } from "../../lib/format/mapFormat.js";
   import { currentLocked } from "../../lib/stores/zoneView.js";
-  import { activeTool, toggleTool } from "../../lib/stores/tools.js";
   import {
     zoneOperationTargets,
     mergeWithZone,
@@ -37,7 +36,7 @@
 </script>
 
 {#if $currentArea}
-  <Collapsible title="Combine & split" icon="join" key="shapeops" open={false}>
+  <Collapsible title="Combine zones" icon="join" key="shapeops" open={false}>
     <label class="field">
       With zone
       <select class="select" bind:value={target} disabled={!targets.length}>
@@ -48,7 +47,7 @@
       </select>
     </label>
     <p class="-mt-1 mb-2 text-[10px] text-subtle">● overlaps or touches this zone</p>
-    <div class="mb-2 grid grid-cols-3 gap-1.5">
+    <div class="grid grid-cols-3 gap-1.5">
       <button class="btn !px-1 text-xs" {disabled} title="Union: absorb the other zone into this one" onclick={() => run(mergeWithZone)}>
         <span class="material-symbols-outlined" style="font-size:17px">join</span>
         Merge
@@ -62,15 +61,5 @@
         Clip
       </button>
     </div>
-    <button
-      class="btn w-full text-xs"
-      class:btn-accent={$activeTool === "split"}
-      disabled={$currentLocked}
-      title="Click two points on the map to cut this zone along that line"
-      onclick={() => toggleTool("split")}
-    >
-      <span class="material-symbols-outlined" style="font-size:17px">content_cut</span>
-      {$activeTool === "split" ? "Click two points on the map…" : "Split along a line"}
-    </button>
   </Collapsible>
 {/if}

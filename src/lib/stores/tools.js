@@ -23,8 +23,8 @@ function persisted(key, initial) {
 
 // Exactly one editing tool is active at a time. "none" is the default
 // direct-edit mode (drag a vertex, click to select).
-// Tools: none | multi | add | brush | snap | move | rect | circle | poly |
-//        dock | ruler | split
+// Tools: none | add | brush | snap | rect | circle | poly | dock | ruler | split
+// ("none" also does multi-select: Shift+click a point, Shift+drag a box.)
 export const activeTool = writable("none");
 
 export const brushRadius = writable(0.35);

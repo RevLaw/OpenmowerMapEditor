@@ -7,7 +7,6 @@
     changeZoneType,
     renameCurrentZone,
     moveZoneOrder,
-    removeCurrentZone,
   } from "../../lib/actions.js";
 
   let nameDraft = $state("");
@@ -71,7 +70,7 @@
       </p>
     {/if}
 
-    <div class="mb-2 grid grid-cols-2 gap-2">
+    <div class="grid grid-cols-2 gap-2">
       <button class="btn" disabled={index <= 0} onclick={() => moveZoneOrder(-1)}>
         <span class="material-symbols-outlined" style="font-size:18px">arrow_upward</span>
         Move up
@@ -82,14 +81,5 @@
       </button>
     </div>
 
-    <button
-      class="btn w-full"
-      style="border-color:var(--danger);color:var(--danger)"
-      disabled={$currentLocked}
-      onclick={removeCurrentZone}
-    >
-      <span class="material-symbols-outlined" style="font-size:18px">delete</span>
-      Remove this zone
-    </button>
   </Collapsible>
 {/if}

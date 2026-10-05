@@ -13,8 +13,7 @@
     toggleZoneLocked,
     showAllZones,
   } from "../../lib/stores/zoneView.js";
-  import { activeTool, toggleTool, drawZoneType } from "../../lib/stores/tools.js";
-  import { addZoneAtCenter } from "../../lib/actions.js";
+  import { drawZoneType } from "../../lib/stores/tools.js";
   import { mapApi } from "../../lib/stores/mapApi.js";
 
   const TYPES = [
@@ -23,12 +22,6 @@
     { id: "nav", label: "Nav", color: "#38bdf8" },
   ];
   const COLOR = Object.fromEntries(TYPES.map((t) => [t.id, t.color]));
-
-  const DRAW = [
-    { id: "poly", icon: "polyline", label: "Polygon", hint: "click points · Enter / dbl-click to finish" },
-    { id: "rect", icon: "crop_square", label: "Rectangle", hint: "drag on the map" },
-    { id: "circle", icon: "circle", label: "Circle", hint: "drag the radius" },
-  ];
 
   // Read $editor directly: zones are mutated in place, so derived aliases of
   // the areas array would never refresh.
@@ -63,7 +56,7 @@
     <p class="text-[11px] text-subtle">Load a map to see its zones.</p>
   {:else}
     {#if rows.length === 0}
-      <p class="mb-2 text-[11px] text-subtle">No zones yet — draw one below.</p>
+      <p class="mb-2 text-[11px] text-subtle">No zones yet — draw one with the tools on the right.</p>
     {:else}
       <ul class="scroll-thin -mx-1 mb-2 max-h-[34vh] space-y-0.5 overflow-y-auto px-1" role="listbox" aria-label="Zones">
         {#each rows as r (r.index)}
@@ -109,7 +102,7 @@
 
     <div class="border-t pt-2" style="border-color:var(--edge-soft)">
       <div class="mb-1.5 flex items-center justify-between">
-        <span class="text-[10px] font-semibold uppercase tracking-wider text-subtle">New zone</span>
+        <span class="text-[10px] font-semibold uppercase tracking-wider text-subtle">New zones are</span>
         <div class="flex rounded-lg p-0.5" style="background:var(--surface-2)" role="radiogroup" aria-label="New zone type">
           {#each TYPES as t}
             <button
@@ -125,27 +118,9 @@
           {/each}
         </div>
       </div>
-      <div class="grid grid-cols-4 gap-1.5">
-        {#each DRAW as t}
-          <button
-            class="draw-btn flex flex-col items-center gap-0.5 rounded-lg py-1.5 text-[10px] font-medium"
-            class:active={$activeTool === t.id}
-            title={`${t.label} — ${t.hint}`}
-            onclick={() => toggleTool(t.id)}
-          >
-            <span class="material-symbols-outlined" style="font-size:19px">{t.icon}</span>
-            {t.label}
-          </button>
-        {/each}
-        <button
-          class="draw-btn flex flex-col items-center gap-0.5 rounded-lg py-1.5 text-[10px] font-medium"
-          title="Add a small square at the map center"
-          onclick={() => addZoneAtCenter($drawZoneType)}
-        >
-          <span class="material-symbols-outlined" style="font-size:19px">add_box</span>
-          Square
-        </button>
-      </div>
+      <p class="text-[10px] text-subtle">
+        Draw with the polygon / rectangle / circle tools on the right, or right-click the map.
+      </p>
     </div>
   {/if}
 </Collapsible>
@@ -171,18 +146,5 @@
   }
   .zone-row .btn-icon.on {
     color: var(--accent);
-  }
-  .draw-btn {
-    background: var(--surface-2);
-    border: 1px solid var(--edge-soft);
-    color: var(--ink);
-  }
-  .draw-btn:hover {
-    border-color: var(--accent);
-  }
-  .draw-btn.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #04121f;
   }
 </style>

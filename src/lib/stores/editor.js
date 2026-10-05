@@ -11,15 +11,7 @@ import {
 import { getEditablePoints, closeLoop } from "../format/outline.js";
 import { dragBrush } from "../geo/tools/brush.js";
 import { snapEvenly } from "../geo/tools/snap.js";
-import {
-  centroid,
-  translatePoints,
-  rotatePoints,
-  scalePoints,
-  simplify,
-  offsetPolygon,
-  polygonArea,
-} from "../geo/geometry.js";
+import { simplify } from "../geo/geometry.js";
 
 const DEFAULT_ORIGIN = { lat: 52.52, lng: 13.405 };
 const HISTORY_LIMIT = 100;
@@ -187,7 +179,7 @@ export function setAreaIndex(index) {
 }
 
 export function selectPoint(idx) {
-  store.update((s) => ({ ...s, pointIndex: idx, snapPointIndices: [] }));
+  store.update((s) => ({ ...s, pointIndex: idx, selectedPointIndices: [], snapPointIndices: [] }));
 }
 
 export function clearSelection() {
@@ -199,17 +191,26 @@ export function clearSelection() {
   }));
 }
 
+/** Add / remove a point from the multi-selection (a single selected point joins it). */
 export function toggleMultiPoint(idx) {
   store.update((s) => {
     const set = new Set(s.selectedPointIndices);
+    if (s.pointIndex != null) set.add(s.pointIndex);
     if (set.has(idx)) set.delete(idx);
     else set.add(idx);
-    return { ...s, selectedPointIndices: [...set].sort((a, b) => a - b) };
+    return { ...s, pointIndex: null, selectedPointIndices: [...set].sort((a, b) => a - b) };
   });
 }
 
 export function setMultiSelection(indices) {
-  store.update((s) => ({ ...s, selectedPointIndices: [...indices] }));
+  store.update((s) => ({ ...s, pointIndex: null, selectedPointIndices: [...indices] }));
+}
+
+/** Select every vertex of the current zone (then drag / nudge / delete them together). */
+export function selectAllPoints() {
+  const n = currentEditablePoints().length;
+  setMultiSelection(Array.from({ length: n }, (_, i) => i));
+  return n;
 }
 
 /** Move a single vertex to new metric coordinates. */
@@ -384,45 +385,6 @@ export function nudgeSelection(dx, dy) {
     return { ...s, rev: s.rev + 1 };
   });
   return moved;
-}
-
-/** Translate every vertex of the current zone. */
-export function translateZone(dx, dy) {
-  store.update((s) => {
-    if (!s.mapData?.areas?.[s.areaIndex]) return s;
-    setCurrentEditable(translatePoints(currentEditablePoints(), dx, dy), s);
-    return { ...s, rev: s.rev + 1 };
-  });
-}
-
-/** Rotate (radians) or scale (factor) the current zone about its centroid. */
-export function transformZone(kind, amount) {
-  store.update((s) => {
-    if (!s.mapData?.areas?.[s.areaIndex]) return s;
-    const pts = currentEditablePoints();
-    const c = centroid(pts);
-    if (!c) return s;
-    const next = kind === "rotate" ? rotatePoints(pts, c, amount) : scalePoints(pts, c, amount);
-    setCurrentEditable(next, s);
-    return { ...s, rev: s.rev + 1 };
-  });
-}
-
-/**
- * Grow (distMeters > 0) or shrink (< 0) the current zone by offsetting every
- * border perpendicular by a fixed distance — i.e. all borders move outward/
- * inward uniformly (a buffer), unlike Scale which is proportional to distance
- * from the centroid. No-op if the result would collapse.
- */
-export function offsetZone(distMeters) {
-  store.update((s) => {
-    if (!s.mapData?.areas?.[s.areaIndex]) return s;
-    // offsetPolygon insets by a positive distance, so grow = negative inset.
-    const next = offsetPolygon(currentEditablePoints(), -distMeters);
-    if (next.length < 3 || polygonArea(next) < 0.01) return s;
-    setCurrentEditable(next, s);
-    return { ...s, pointIndex: null, selectedPointIndices: [], rev: s.rev + 1 };
-  });
 }
 
 /** Simplify the current zone outline (Douglas–Peucker, tolerance in m). */

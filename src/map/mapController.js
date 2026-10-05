@@ -29,7 +29,6 @@ import {
   addZoneFromPoints,
   moveDock,
   setDock,
-  translateZone,
   setSnapPoints,
   snapBetween,
   applyBrush,
@@ -132,7 +131,8 @@ export function createMapController(container) {
   // own glass zoom buttons instead (see ZoomControl.svelte).
   // tapHold: long-press opens the context menu on every touch browser, not
   // just mobile Safari (Leaflet's default).
-  const map = L.map(container, { zoomControl: false, maxZoom: 24, tapHold: true }).setView(
+  // boxZoom off: Shift+drag is the select tool's box selection.
+  const map = L.map(container, { zoomControl: false, maxZoom: 24, tapHold: true, boxZoom: false }).setView(
     [52.52, 13.405],
     19
   );
@@ -163,7 +163,6 @@ export function createMapController(container) {
     recording: null,
     trailZone: null,
     multiHandle: null,
-    moveHandle: null,
     snapGuide: null,
     boxSelect: null,
     brushCursor: null,
@@ -297,8 +296,6 @@ export function createMapController(container) {
     layers.points = [];
     if (layers.multiHandle) map.removeLayer(layers.multiHandle);
     layers.multiHandle = null;
-    if (layers.moveHandle) map.removeLayer(layers.moveHandle);
-    layers.moveHandle = null;
     if (layers.snapGuide) map.removeLayer(layers.snapGuide);
     layers.snapGuide = null;
     if (layers.dock) map.removeLayer(layers.dock);
@@ -307,7 +304,7 @@ export function createMapController(container) {
 
   // Tools during which zone shapes take clicks (select / context menu). For
   // drawing and placing tools they stay transparent so clicks reach the map.
-  const ZONE_PICK_TOOLS = ["none", "move", "multi"];
+  const ZONE_PICK_TOOLS = ["none"];
   const PLACE_TOOLS = ["poly", "rect", "circle", "dock", "ruler", "split"];
 
   function zoneStyle(type, selected) {
@@ -396,7 +393,6 @@ export function createMapController(container) {
       renderPoints(pts, latlngs);
       if (tool === "none") renderMidpoints(pts, latlngs);
       renderMultiHandle(pts);
-      if (tool === "move") renderMoveHandle(pts);
       renderSnapGuide(pts);
     }
     renderDock();
@@ -713,36 +709,6 @@ export function createMapController(container) {
     }
   }
 
-  function renderMoveHandle(pts) {
-    if (!pts.length) return;
-    const c = centroid(pts);
-    if (!c) return;
-    const handle = L.marker(metersToLatLng(c, origin()), {
-      draggable: true,
-      icon: L.divIcon({
-        className: "map-marker-leaflet",
-        html: `<div class="map-marker--group"><span class="material-symbols-outlined">open_with</span></div>`,
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-      }),
-      title: "Drag to move the whole zone",
-    }).addTo(map);
-    let start = null;
-    handle.on("dragstart", () => {
-      suppressNextClick = true;
-      ignoreClicksUntil = Date.now() + 700;
-      start = latLngToMeters(handle.getLatLng(), origin());
-      pushHistory();
-    });
-    handle.on("dragend", () => {
-      ignoreClicksUntil = Date.now() + 700;
-      if (!start) return;
-      const end = latLngToMeters(handle.getLatLng(), origin());
-      translateZone(end.x - start.x, end.y - start.y);
-    });
-    layers.moveHandle = handle;
-  }
-
   function renderPoints(pts, latlngs) {
     const colorFirst = cssVar("--pt-first", "#22c55e");
     const colorMid = cssVar("--pt-mid", "#f59e0b");
@@ -783,21 +749,27 @@ export function createMapController(container) {
 
       marker.on("click", (e) => {
         L.DomEvent.stopPropagation(e);
-        if (tool === "multi") {
-          toggleMultiPoint(idx);
-          return;
-        }
         if (tool === "snap") {
           handleSnapClick(idx);
           return;
         }
-        selectPoint(idx);
+        // Shift+click adds / removes a point from the multi-selection.
+        if (e.originalEvent?.shiftKey) toggleMultiPoint(idx);
+        else selectPoint(idx);
       });
       marker.on("contextmenu", (e) => openVertexMenu(e, idx));
+
+      // Dragging a point that's part of a multi-selection moves the whole
+      // selection (e.g. Ctrl+A then drag = move the zone).
+      let group = null;
       marker.on("dragstart", () => {
         suppressNextClick = true;
         ignoreClicksUntil = Date.now() + 700;
         pushHistory();
+        group =
+          selected.has(idx) && selected.size > 1
+            ? { indices: [...selected], original: [...selected].map((i) => ({ ...pts[i] })), from: pts[idx] }
+            : null;
       });
       // Snap onto neighbouring zones and redraw the outline live while dragging.
       marker.on("drag", (e) => {
@@ -810,13 +782,27 @@ export function createMapController(container) {
           marker.setLatLng(ll);
           showSnapIndicator(hit.point, hit.snapped);
         } else hideSnapIndicator();
-        previewLatLngs[idx] = ll;
+        if (group) {
+          const at = latLngToMeters(L.latLng(ll), origin());
+          const dx = at.x - group.from.x;
+          const dy = at.y - group.from.y;
+          group.indices.forEach((i, k) => {
+            const moved = toLatLng({ x: group.original[k].x + dx, y: group.original[k].y + dy });
+            previewLatLngs[i] = moved;
+            if (i !== idx) layers.points[i]?.setLatLng(moved);
+          });
+        } else {
+          previewLatLngs[idx] = ll;
+        }
         layers.areaLine?.setLatLngs(previewLatLngs);
       });
       marker.on("dragend", (e) => {
         ignoreClicksUntil = Date.now() + 700;
         hideSnapIndicator();
-        movePoint(idx, latLngToMeters(e.target.getLatLng(), origin()));
+        const end = latLngToMeters(e.target.getLatLng(), origin());
+        if (group) movePointsBy(group.indices, end.x - group.from.x, end.y - group.from.y, group.original);
+        else movePoint(idx, end);
+        group = null;
       });
       layers.points.push(marker);
     });
@@ -1342,24 +1328,71 @@ export function createMapController(container) {
 
   // ---- box select ----------------------------------------------------------
 
-  function finishBox(end) {
-    if (!boxStart) return;
-    const bounds = L.latLngBounds(boxStart, end);
-    const pts = currentEditablePoints();
-    const selected = [];
-    pts.forEach((p, i) => {
-      if (bounds.contains(metersToLatLng(p, origin()))) selected.push(i);
-    });
-    setMultiSelection(selected);
+  // Shift+drag in the select tool draws a selection box. Listened on the
+  // container in the capture phase so it also starts on top of a zone shape
+  // (which stops Leaflet event bubbling) and before map panning kicks in.
+  // A Shift+click on a point handle is left alone (that toggles the point).
+  const BOX_START_PX = 4;
+  let boxDown = null; // {x, y} client px of a pending Shift+mousedown
+
+  function onBoxDown(e) {
+    if (tool !== "none" || !e.shiftKey || e.button !== 0 || !s.mapData?.areas?.[s.areaIndex]) return;
+    if (e.target.closest?.(".leaflet-marker-icon")) return;
+    boxDown = { x: e.clientX, y: e.clientY };
+    map.dragging.disable();
+    document.addEventListener("mousemove", onBoxMove);
+    document.addEventListener("mouseup", onBoxUp);
+  }
+
+  function onBoxMove(e) {
+    if (!boxDown) return;
+    if (!boxActive && Math.hypot(e.clientX - boxDown.x, e.clientY - boxDown.y) < BOX_START_PX) return;
+    const end = map.mouseEventToLatLng(e);
+    if (!boxActive) {
+      boxActive = true;
+      boxStart = map.mouseEventToLatLng({ clientX: boxDown.x, clientY: boxDown.y });
+      layers.boxSelect = L.rectangle(L.latLngBounds(boxStart, end), {
+        color: "#22d3ee",
+        weight: 1,
+        fillOpacity: 0.12,
+        dashArray: "4,4",
+        interactive: false,
+      }).addTo(map);
+    }
+    layers.boxSelect.setBounds(L.latLngBounds(boxStart, end));
+  }
+
+  function cancelBox() {
+    document.removeEventListener("mousemove", onBoxMove);
+    document.removeEventListener("mouseup", onBoxUp);
+    if (layers.boxSelect) map.removeLayer(layers.boxSelect);
+    layers.boxSelect = null;
     boxActive = false;
     boxStart = null;
-    if (layers.boxSelect) {
-      map.removeLayer(layers.boxSelect);
-      layers.boxSelect = null;
-    }
+    boxDown = null;
     map.dragging.enable();
-    setStatus(`Box selected ${selected.length} point(s).`);
   }
+
+  function onBoxUp(e) {
+    if (!boxActive) {
+      cancelBox();
+      return;
+    }
+    const bounds = L.latLngBounds(boxStart, map.mouseEventToLatLng(e));
+    cancelBox();
+    suppressNextClick = true;
+    ignoreClicksUntil = Date.now() + 250;
+    const picked = [];
+    currentEditablePoints().forEach((p, i) => {
+      if (bounds.contains(toLatLng(p))) picked.push(i);
+    });
+    // Shift+drag again adds to the existing selection.
+    const merged = [...new Set([...s.selectedPointIndices, ...(s.pointIndex != null ? [s.pointIndex] : []), ...picked])];
+    setMultiSelection(merged.sort((a, b) => a - b));
+    setStatus(`Selected ${merged.length} point(s) — drag one to move them all, Del removes them.`);
+  }
+
+  map.getContainer().addEventListener("mousedown", onBoxDown, true);
 
   // ---- map-level handlers --------------------------------------------------
 
@@ -1403,7 +1436,10 @@ export function createMapController(container) {
       pushHistory();
       const idx = nearestEdgeInsertIndex(currentEditablePoints(), meters);
       insertPointAtIndex(idx, meters);
+      return;
     }
+    // Select tool: a click on empty map drops the point selection.
+    if (tool === "none" && (s.pointIndex != null || s.selectedPointIndices.length)) clearSelection();
   });
 
   map.on("dblclick", (e) => {
@@ -1443,18 +1479,6 @@ export function createMapController(container) {
       startDraw(e.latlng);
       return;
     }
-    if (tool !== "multi") return;
-    if (!e.originalEvent?.shiftKey) return;
-    boxActive = true;
-    boxStart = e.latlng;
-    map.dragging.disable();
-    if (layers.boxSelect) map.removeLayer(layers.boxSelect);
-    layers.boxSelect = L.rectangle(L.latLngBounds(e.latlng, e.latlng), {
-      color: "#22d3ee",
-      weight: 1,
-      fillOpacity: 0.12,
-      dashArray: "4,4",
-    }).addTo(map);
   });
 
   map.on("mousemove", (e) => {
@@ -1473,13 +1497,7 @@ export function createMapController(container) {
       if (tool === "split" && splitStart) renderSplit();
       return;
     }
-    if (drawActive) {
-      updateDraw(e.latlng);
-      return;
-    }
-    if (boxActive && boxStart && layers.boxSelect) {
-      layers.boxSelect.setBounds(L.latLngBounds(boxStart, e.latlng));
-    }
+    if (drawActive) updateDraw(e.latlng);
   });
 
   map.on("mouseup", (e) => {
@@ -1487,11 +1505,7 @@ export function createMapController(container) {
       endBrush();
       return;
     }
-    if (drawActive) {
-      finishDraw(e.latlng);
-      return;
-    }
-    if (boxActive) finishBox(e.latlng);
+    if (drawActive) finishDraw(e.latlng);
   });
 
   map.on("mouseout", () => {
@@ -1686,9 +1700,9 @@ export function createMapController(container) {
     const pts = currentEditablePoints();
     if (!pts.length) return;
     const bounds = L.latLngBounds(pts.map((p) => metersToLatLng(p, origin())));
-    // Cap the fit zoom so tiny areas don't overshoot into blank imagery
-    // (Esri's detailed tiles run out at lower zoom in rural regions).
-    if (bounds.isValid()) map.fitBounds(bounds.pad(0.2), { maxZoom: 20 });
+    // Zoom in close on the zone; past the imagery's native zoom the tile
+    // layer upscales (maxNativeZoom) instead of showing blank tiles.
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.06), { maxZoom: 22 });
   }
 
   /** Fit every zone plus the dock. */
@@ -1775,15 +1789,7 @@ export function createMapController(container) {
       // Double-click finishes a polygon instead of zooming.
       if (value === "poly") map.doubleClickZoom.disable();
       else map.doubleClickZoom.enable();
-      if (prev === "multi" && value !== "multi") {
-        boxActive = false;
-        boxStart = null;
-        if (layers.boxSelect) {
-          map.removeLayer(layers.boxSelect);
-          layers.boxSelect = null;
-        }
-        map.dragging.enable();
-      }
+      if (prev === "none" && value !== "none" && (boxDown || boxActive)) cancelBox();
       // Crosshair cursor for click/drag-to-place tools.
       const crosshair = ["add", "brush", "snap", "rect", "circle", "dock", "poly", "ruler", "split"].includes(value);
       map.getContainer().style.cursor = crosshair ? "crosshair" : "";

@@ -7,12 +7,10 @@
   // HUD so editing and moving a real robot never share a button cluster.
   const GROUPS = [
     [
-      { id: "none", icon: "near_me", label: "Select / drag (V)" },
-      { id: "multi", icon: "select_all", label: "Multi-select (M)" },
+      { id: "none", icon: "near_me", label: "Select (V) · Shift: multi / box" },
       { id: "add", icon: "add_location_alt", label: "Add point (A)" },
       { id: "brush", icon: "blur_circular", label: "Push brush (B)" },
       { id: "snap", icon: "horizontal_rule", label: "Straighten line (S)" },
-      { id: "move", icon: "open_with", label: "Move whole zone (G)" },
     ],
     [
       { id: "poly", icon: "polyline", label: "Draw polygon (P)" },

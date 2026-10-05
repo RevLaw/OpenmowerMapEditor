@@ -7,6 +7,7 @@
   const extra = [
     { title: "Open command palette", group: "General", shortcut: "Ctrl K" },
     { title: "Box-select points", group: "Tools", shortcut: "Shift drag" },
+    { title: "Add / remove point from selection", group: "Tools", shortcut: "Shift click" },
     { title: "Nudge selected point(s)", group: "Edit", shortcut: "Arrows" },
     { title: "Larger nudge", group: "Edit", shortcut: "Shift Arrows" },
     { title: "Bypass snapping while dragging", group: "Tools", shortcut: "Alt" },

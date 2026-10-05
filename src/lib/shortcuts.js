@@ -1,7 +1,7 @@
 // Global keyboard shortcuts -> editor actions / tool changes. Suppressed while
 // typing in form fields (except global Ctrl/Cmd combos).
 import { setTool, toggleTool } from "./stores/tools.js";
-import { undo, redo, removePoint, requestSave, nudge, duplicateZoneAction } from "./actions.js";
+import { undo, redo, removePoint, requestSave, nudge, duplicateZoneAction, selectAllPointsAction } from "./actions.js";
 import { mapApi } from "./stores/mapApi.js";
 import { editor, setAreaIndex } from "./stores/editor.js";
 import { toggleZoneLocked, toggleZoneHidden } from "./stores/zoneView.js";
@@ -66,6 +66,11 @@ export function initShortcuts(ctx) {
       duplicateZoneAction();
       return;
     }
+    if (mod && key === "a" && !isTyping(e.target)) {
+      e.preventDefault();
+      selectAllPointsAction();
+      return;
+    }
 
     if (isTyping(e.target) || mod || e.altKey) return;
     // Menus and dialogs own the keyboard while open.
@@ -109,12 +114,6 @@ export function initShortcuts(ctx) {
         break;
       case "s":
         toggleTool("snap");
-        break;
-      case "m":
-        toggleTool("multi");
-        break;
-      case "g":
-        toggleTool("move");
         break;
       case "r":
         toggleTool("rect");

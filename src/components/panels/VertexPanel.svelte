@@ -2,7 +2,7 @@
   import Collapsible from "../Collapsible.svelte";
   import { editor, currentArea } from "../../lib/stores/editor.js";
   import { getEditablePoints } from "../../lib/format/outline.js";
-  import { setVertexCoords, makeStartPoint, removePoint, addRobotPointToZone } from "../../lib/actions.js";
+  import { setVertexCoords, makeStartPoint, addRobotPointToZone } from "../../lib/actions.js";
   import { currentLocked } from "../../lib/stores/zoneView.js";
   import { robotLive } from "../../lib/stores/robot.js";
 
@@ -45,13 +45,9 @@
 {#if $currentArea}
   <Collapsible title="Vertex" icon="edit_location_alt" key="vertex" open={false}>
     {#if multi > 0}
-      <p class="mb-2 text-[11px] text-subtle">
-        {multi} point{multi === 1 ? "" : "s"} selected — drag the handle to move them, arrows to nudge.
+      <p class="text-[11px] text-subtle">
+        {multi} point{multi === 1 ? "" : "s"} selected — drag any of them to move all, arrows nudge, Del removes.
       </p>
-      <button class="btn w-full" disabled={$currentLocked} onclick={removePoint}>
-        <span class="material-symbols-outlined" style="font-size:18px">delete</span>
-        Delete selected
-      </button>
     {:else if point}
       <p class="mb-2 text-[11px] text-subtle">
         Point {idx + 1} of {pts.length}{idx === 0 ? " · start point" : ""}. Coordinates in map meters.
@@ -84,24 +80,18 @@
           />
         </label>
       </div>
-      <div class="grid grid-cols-2 gap-2">
-        <button
-          class="btn !px-2 text-xs"
-          disabled={$currentLocked || idx === 0}
-          title="OpenMower measures the automatic mow angle from the first outline edge"
-          onclick={() => makeStartPoint(idx)}
-        >
-          <span class="material-symbols-outlined" style="font-size:17px">flag</span>
-          Make start
-        </button>
-        <button class="btn !px-2 text-xs" disabled={$currentLocked || pts.length <= 3} onclick={removePoint}>
-          <span class="material-symbols-outlined" style="font-size:17px">delete</span>
-          Delete
-        </button>
-      </div>
+      <button
+        class="btn w-full !px-2 text-xs"
+        disabled={$currentLocked || idx === 0}
+        title="OpenMower measures the automatic mow angle from the first outline edge"
+        onclick={() => makeStartPoint(idx)}
+      >
+        <span class="material-symbols-outlined" style="font-size:17px">flag</span>
+        Make start point
+      </button>
     {:else}
       <p class="mb-2 text-[11px] text-subtle">
-        Click a vertex to edit its exact coordinates. Drag the small dots on edges to add points.
+        Click a vertex to edit its exact coordinates. Shift+click or Shift+drag selects several; Ctrl+A selects all.
       </p>
     {/if}
     <button

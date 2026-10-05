@@ -42,9 +42,6 @@
     if (e.key === "Enter") e.currentTarget.blur();
   }
 
-  function rotate(delta) {
-    setDockExact({ headingDeg: (headingDeg ?? 0) + delta });
-  }
 </script>
 
 <Collapsible title="Docking station" icon="ev_station" key="dock">
@@ -69,13 +66,7 @@
       <p class="mb-2 text-[10px] text-subtle">
         Heading is the direction the mower faces when docked (0° = east, 90° = north).
       </p>
-      <div class="mb-2 grid grid-cols-4 gap-1.5">
-        <button class="btn !px-0" title="Rotate heading −15° (clockwise)" onclick={() => rotate(-15)}>
-          <span class="material-symbols-outlined" style="font-size:18px">rotate_right</span>
-        </button>
-        <button class="btn !px-0" title="Rotate heading +15° (counter-clockwise)" onclick={() => rotate(15)}>
-          <span class="material-symbols-outlined" style="font-size:18px">rotate_left</span>
-        </button>
+      <div class="mb-2 grid grid-cols-2 gap-1.5">
         <button class="btn !px-0" title="Pan to the dock" onclick={() => $mapApi?.panToPoint(station.position)}>
           <span class="material-symbols-outlined" style="font-size:18px">center_focus_strong</span>
         </button>

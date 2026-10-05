@@ -6,7 +6,7 @@
   import { polygonArea } from "../lib/geo/geometry.js";
   import { formatArea } from "../lib/measurements.js";
   import { mapApi } from "../lib/stores/mapApi.js";
-  import { lockedZones, hiddenZones, zoneKey, toggleZoneLocked, toggleZoneHidden } from "../lib/stores/zoneView.js";
+  import { lockedZones, zoneKey } from "../lib/stores/zoneView.js";
   import { duplicateZoneAction, removeCurrentZone } from "../lib/actions.js";
   import { sidebarTab } from "../lib/stores/ui.js";
 
@@ -19,7 +19,6 @@
   let pts = $derived($currentArea ? getEditablePoints($currentArea.outline || []) : []);
   let key = $derived($currentArea ? zoneKey($currentArea, index) : "");
   let isLocked = $derived($lockedZones.has(key));
-  let isHidden = $derived($hiddenZones.has(key));
 </script>
 
 {#if $currentArea}
@@ -38,8 +37,9 @@
           {getZoneName($currentArea, index)}
         </span>
         <span class="block text-[10px] text-subtle">
-          {type} · {formatArea(polygonArea(pts))} · {pts.length} pts
+          {#if isLocked}🔒 {/if}{type} · {formatArea(polygonArea(pts))} · {pts.length} pts
           {#if $editor.pointIndex != null}· vertex {$editor.pointIndex + 1}{/if}
+          {#if $editor.selectedPointIndices.length}· {$editor.selectedPointIndices.length} selected{/if}
         </span>
       </span>
     </button>
@@ -49,21 +49,6 @@
     </button>
     <button class="btn-icon !h-8 !w-8" title="Duplicate (Ctrl+D)" onclick={duplicateZoneAction}>
       <span class="material-symbols-outlined" style="font-size:19px">content_copy</span>
-    </button>
-    <button
-      class="btn-icon !h-8 !w-8"
-      class:text-accent={isLocked}
-      title={isLocked ? "Unlock zone" : "Lock zone (prevent edits)"}
-      onclick={() => toggleZoneLocked($currentArea, index)}
-    >
-      <span class="material-symbols-outlined" style="font-size:19px">{isLocked ? "lock" : "lock_open"}</span>
-    </button>
-    <button
-      class="btn-icon !h-8 !w-8"
-      title={isHidden ? "Show zone" : "Hide zone on the map"}
-      onclick={() => toggleZoneHidden($currentArea, index)}
-    >
-      <span class="material-symbols-outlined" style="font-size:19px">{isHidden ? "visibility_off" : "visibility"}</span>
     </button>
     <button
       class="btn-icon !h-8 !w-8 hover:!text-[var(--danger)]"

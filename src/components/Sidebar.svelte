@@ -105,13 +105,14 @@
   </div>
 
   <footer class="space-y-1.5 border-t p-2.5" style="border-color:var(--edge-soft)">
-    <div class="grid grid-cols-[1fr_auto] gap-1.5">
-      <button class="btn btn-accent" onclick={() => requestSave({ restart: false })}>
+    <div class="grid grid-cols-2 gap-1.5">
+      <button class="btn btn-accent" title="Save map.json (Ctrl+S)" onclick={() => requestSave({ restart: false })}>
         <span class="material-symbols-outlined" style="font-size:18px">save</span>
-        Save map.json
+        Save
       </button>
-      <button class="btn btn-warn !px-2.5" title="Save + restart ROS" onclick={() => requestSave({ restart: true })}>
+      <button class="btn btn-warn" title="Save map.json, then restart ROS so the robot loads it" onclick={() => requestSave({ restart: true })}>
         <span class="material-symbols-outlined" style="font-size:18px">restart_alt</span>
+        Save + restart
       </button>
     </div>
     <div class="flex items-center gap-2">

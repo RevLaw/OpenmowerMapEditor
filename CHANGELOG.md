@@ -29,7 +29,8 @@ lock, save dialog, draft restore, import, recording, trail → zone).
 - **New validation checks** — mow zones unreachable from the dock, dock
   outside every drivable zone, obstacles crossing a mow edge, zones narrower
   than the cutting width. Validation now runs debounced.
-- Shortcuts: `[` / `]` cycle zones, `L` lock, `H` hide, `Shift + F` fit map.
+- Shortcuts: `[` / `]` cycle zones, `L` lock, `H` hide, `Ctrl + A` select
+  all points, `Shift + F` fit map.
 
 ### Changed
 - **Sidebar split into Zones / Map / Robot tabs**; the zone dropdown and the
@@ -37,6 +38,19 @@ lock, save dialog, draft restore, import, recording, trail → zone).
 - **Mower control moved into the robot status panel** (always visible), so
   the tool dock only holds map-editing tools.
 - Floating **selection bar** for the selected zone's quick actions.
+- **One home per action** — map tools in the dock, zone actions (fit,
+  duplicate, delete) in the selection bar, settings in the sidebar; the
+  duplicated draw / split / delete / lock / hide buttons were removed.
+- **Select and multi-select merged** — `Shift + click` / `Shift + drag` in
+  the select tool, `Ctrl + A` selects all points, and dragging any selected
+  point moves the whole selection. Clicking empty map clears it.
+- Equal-width **Save** / **Save + restart** buttons; focusing a zone zooms in
+  closer.
+
+### Removed
+- The **multi-select** and **move whole zone** tools (use `Ctrl + A` and
+  drag), and **rotate / scale / grow / shrink** — only **Simplify** remains
+  in the outline tools.
 
 ## v2.7.1 — Svelte 5 runes & dependency refresh
 

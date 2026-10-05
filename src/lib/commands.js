@@ -22,9 +22,7 @@ import {
   removeCurrentZone,
   duplicateZoneAction,
   simplifyZoneAction,
-  rotateZone,
-  scaleZone,
-  growZone,
+  selectAllPointsAction,
   changeZoneType,
   moveZoneOrder,
 } from "./actions.js";
@@ -62,12 +60,11 @@ export function getCommands(ctx = {}) {
     { id: "remove-point", title: "Remove selected point(s)", group: "Edit", icon: "delete", shortcut: "Del", run: removePoint },
 
     // Tools
-    { id: "tool-select", title: "Tool: Select / drag", group: "Tools", icon: "near_me", shortcut: "V", run: () => setTool("none") },
+    { id: "tool-select", title: "Tool: Select / drag (Shift: add to selection / box)", group: "Tools", icon: "near_me", shortcut: "V", run: () => setTool("none") },
+    { id: "select-all", title: "Select all points of the zone", group: "Edit", icon: "select_all", shortcut: "Ctrl A", run: selectAllPointsAction },
     { id: "tool-add", title: "Tool: Add point", group: "Tools", icon: "add_location_alt", shortcut: "A", run: () => toggleTool("add") },
     { id: "tool-brush", title: "Tool: Push brush", group: "Tools", icon: "blur_circular", shortcut: "B", run: () => toggleTool("brush") },
     { id: "tool-snap", title: "Tool: Snap line", group: "Tools", icon: "horizontal_rule", shortcut: "S", run: () => toggleTool("snap") },
-    { id: "tool-multi", title: "Tool: Multi-select", group: "Tools", icon: "select_all", shortcut: "M", run: () => toggleTool("multi") },
-    { id: "tool-move", title: "Tool: Move whole zone", group: "Tools", icon: "open_with", shortcut: "G", run: () => toggleTool("move") },
     { id: "tool-split", title: "Tool: Split zone along a line", group: "Tools", icon: "content_cut", shortcut: "X", run: () => toggleTool("split") },
     { id: "tool-ruler", title: "Tool: Measure distance", group: "Tools", icon: "straighten", shortcut: "D", run: () => toggleTool("ruler") },
     { id: "snap-toggle", title: "Toggle snapping to other zones", group: "Tools", icon: "adjust", run: () => snapEnabled.update((v) => !v) },
@@ -98,14 +95,8 @@ export function getCommands(ctx = {}) {
     { id: "zone-hide", title: "Hide / show selected zone", group: "Zones", icon: "visibility_off", shortcut: "H", run: () => withZone(toggleZoneHidden) },
     { id: "zone-show-all", title: "Show all hidden zones", group: "Zones", icon: "visibility", run: showAllZones },
 
-    // Transform
-    { id: "zone-rotate-cw", title: "Rotate zone +15°", group: "Transform", icon: "rotate_right", run: () => rotateZone(15) },
-    { id: "zone-rotate-ccw", title: "Rotate zone −15°", group: "Transform", icon: "rotate_left", run: () => rotateZone(-15) },
-    { id: "zone-scale-up", title: "Scale zone +5%", group: "Transform", icon: "zoom_out_map", run: () => scaleZone(1.05) },
-    { id: "zone-scale-down", title: "Scale zone −5%", group: "Transform", icon: "zoom_in_map", run: () => scaleZone(0.95) },
-    { id: "zone-grow", title: "Grow zone border +0.2 m", group: "Transform", icon: "open_in_full", run: () => growZone(0.2) },
-    { id: "zone-shrink", title: "Shrink zone border −0.2 m", group: "Transform", icon: "close_fullscreen", run: () => growZone(-0.2) },
-    { id: "zone-simplify", title: "Simplify zone outline", group: "Transform", icon: "compress", run: simplifyZoneAction },
+    // Outline
+    { id: "zone-simplify", title: "Simplify zone outline", group: "Edit", icon: "compress", run: simplifyZoneAction },
 
     // View
     { id: "fit", title: "Fit selected zone", group: "View", icon: "fit_screen", shortcut: "F", run: fit },
