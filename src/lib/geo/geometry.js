@@ -36,6 +36,17 @@ export function polygonArea(polygon) {
   return Math.abs(areaTwice) / 2;
 }
 
+/** Signed shoelace area (m²): positive for counter-clockwise rings. */
+export function signedArea(polygon) {
+  if (!polygon || polygon.length < 3) return 0;
+  let areaTwice = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const j = (i + 1) % polygon.length;
+    areaTwice += polygon[i].x * polygon[j].y - polygon[j].x * polygon[i].y;
+  }
+  return areaTwice / 2;
+}
+
 /** Perimeter length (m) of an outline. Treats it as a closed ring. */
 export function polygonPerimeter(polygon) {
   if (!polygon || polygon.length < 2) return 0;
@@ -137,6 +148,41 @@ export function nearestEdgeInsertIndex(points, p) {
     }
   }
   return bestI + 1; // splice position after vertex bestI
+}
+
+/** Do two axis-aligned bounding boxes overlap (optionally grown by `pad`)? */
+export function boxesOverlap(a, b, pad = 0) {
+  if (!a || !b) return false;
+  return (
+    a.minX - pad <= b.maxX && b.minX - pad <= a.maxX && a.minY - pad <= b.maxY && b.minY - pad <= a.maxY
+  );
+}
+
+/**
+ * Smallest distance between the borders of two closed rings (0 when edges
+ * cross). Does not detect one ring nested inside the other — pair it with a
+ * point-in-polygon test when containment matters.
+ */
+export function minRingDistance(a, b) {
+  if (!a?.length || !b?.length) return Number.POSITIVE_INFINITY;
+  let best = Number.POSITIVE_INFINITY;
+  const n = a.length;
+  const m = b.length;
+  for (let i = 0; i < n; i += 1) {
+    const a1 = a[i];
+    const a2 = a[(i + 1) % n];
+    for (let j = 0; j < m; j += 1) {
+      const b1 = b[j];
+      const b2 = b[(j + 1) % m];
+      if (segmentsIntersect(a1, a2, b1, b2)) return 0;
+      const d = Math.min(
+        pointToSegmentDistance(a1, b1, b2),
+        pointToSegmentDistance(b1, a1, a2)
+      );
+      if (d < best) best = d;
+    }
+  }
+  return best;
 }
 
 export function translatePoints(points, dx, dy) {
