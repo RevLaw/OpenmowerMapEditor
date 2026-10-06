@@ -1,108 +1,68 @@
 # Changelog
 
-## Unreleased — Editor redesign & map-editor essentials
+## Unreleased — Editor redesign
 
-A UI restructure plus the editing features a map editor was still missing.
-Verified with unit tests for all new geometry/format logic and a scripted
-browser run against a copy of a real map (draw, split, merge, clip, snap,
-lock, save dialog, draft restore, import, recording, trail → zone).
+A reworked interface plus the editing, robot and safety features a map
+editor was still missing. The `map.json` format is unchanged.
 
 ### Added
-- **All zones visible and click-to-select** — every zone is drawn with a
-  type-colored fill and hover label; click one on the map to select it.
-- **Zone list** with per-zone **hide** / **lock** (editor-only, per browser).
-- **Draw polygon** tool (`P`), **split zone** tool (`X`), **ruler** (`D`).
-- **Midpoint handles** to insert vertices by dragging, with live outline
-  preview while dragging vertices.
-- **Magnetic snapping** to other zones' vertices/edges and the dock (toggle in
-  the dock, `Alt` bypasses).
-- **Context menus** (right-click / long-press) for zones, vertices, the dock
+- **Zones on the map** — every zone is drawn with a type-coloured fill and is
+  click-to-select; a zone list shows type and area with per-zone **lock** /
+  **hide** (editor-only, never written to `map.json`).
+- **Inline zone editor** — a pencil on each zone row opens name, type, list
+  order, zone id (click to copy) and, for mow zones, the mowing parameters,
+  coverage preview and exact path.
+- **Drawing & geometry tools** — polygon (`P`), split along a line (`X`),
+  ruler (`D`), edge-midpoint handles to insert points, magnetic snapping to
+  neighbouring zones and the dock (`Alt` bypasses), merge / cut out / clip
+  zones (via `polygon-clipping`), and a live preview for Simplify.
+- **Selection** — `Shift` + click / `Shift` + drag / `Ctrl + A` in the select
+  tool; dragging any selected point moves the whole selection.
+- **Precise values** — exact vertex coordinates, make-start-point, and
+  docking-station position and **heading** (drawn as an arrow).
+- **Context menus** (right-click / long-press) for zones, points, the dock
   and the map.
-- **Combine & split** — merge, cut out, clip to zone (via `polygon-clipping`).
-- **Exact values** — vertex X/Y, rotate by any angle, scale to any %, dock
-  position and **heading** (drawn as an arrow), make-start-point.
-- **Robot-assisted mapping** — record a boundary by driving, trail → zone,
-  robot position as vertex, dock from robot pose.
+- **Robot-assisted mapping** — drive the mower with an on-screen joystick
+  (touch / mouse / `W A S D`; puts OpenMower into area-recording mode, blade
+  off, 0.4 s deadman and speed caps, gated by `OPENMOWER_CONTROL_DISABLE`),
+  record a zone by driving, turn a stretch of the movement trail into a
+  zone, add the robot's position as a point, set the dock from its pose.
+- **Find & follow robot** and a **show trail** button in a map control stack
+  above the base-map switcher.
+- **Trail calendar** — days with recorded trail data are marked; the ‹ ›
+  arrows jump between them.
 - **GeoJSON / KML import & export**.
-- **Confirm-before-save dialog** with a zone-level diff and validation results.
-- **Draft autosave** to local storage with a restore prompt after reload.
-- **New validation checks** — mow zones unreachable from the dock, dock
-  outside every drivable zone, zones narrower
-  than the cutting width. Validation now runs debounced.
-- Shortcuts: `[` / `]` cycle zones, `L` lock, `H` hide, `Ctrl + A` select
-  all points, `Shift + F` fit map.
-
-- **Drive the mower from the editor** — on-screen joystick (touch / mouse /
-  `W A S D`) in the Robot tab. Puts OpenMower into area-recording mode (the
-  only mode that accepts `/joy_vel`, blade off) and streams commands to a
-  persistent helper in the ROS container with a 0.4 s deadman, speed caps,
-  stop-on-release / blur / hidden tab, and self-cleanup. Gated by
-  `OPENMOWER_CONTROL_DISABLE`.
-- **Foldable sidebar** — collapses to a slim icon rail (`Ctrl + B`); phones
-  start folded and picking a zone folds it again. At most three toasts show
-  at once.
+- **Confirm-before-save dialog** with a zone-level diff, validation results
+  and an optional ROS restart.
+- **Draft autosave** — unsaved edits survive a reload or crash and are
+  offered for restore.
+- **Validation** — mow zones unreachable from the dock, a dock outside every
+  drivable zone, mow zones narrower than the cutting width.
+- **Shortcuts** — `[` / `]` cycle zones, `L` lock, `H` hide, `Shift + F` fit
+  map, `Ctrl + B` fold the sidebar.
+- Backend: `POST /api/teleop/drive` and `/api/teleop/stop`; control commands
+  `record_mode` / `record_exit`.
 
 ### Changed
-- **Sidebar split into Zones / Map / Robot tabs**; the zone dropdown and the
-  Create panel are replaced by the zone list.
-- **Mower control moved into the robot status panel** (always visible), so
-  the tool dock only holds map-editing tools.
-- Floating **selection bar** for the selected zone's quick actions.
-- **One home per action** — map tools in the dock, zone actions (fit,
-  duplicate, delete) in the selection bar, settings in the sidebar; the
-  duplicated draw / split / delete / lock / hide buttons were removed.
-- **Select and multi-select merged** — `Shift + click` / `Shift + drag` in
-  the select tool, `Ctrl + A` selects all points, and dragging any selected
-  point moves the whole selection. Clicking empty map clears it.
-- Equal-width **Save** / **Save + restart** buttons; focusing a zone zooms in
-  closer.
-
-- **Inline zone editor** — a pencil on each zone row (or double-click)
-  opens name, type, order, zone id (click to copy) and, for mow zones, the
-  mowing parameters / coverage preview / exact path right under the zone.
-  Replaces the separate Zone details and Mowing panels.
-- **Live simplify preview** — while the Simplify panel is open, the map
-  shows the simplified outline at the slider's tolerance (dashed, with the
-  kept points) and the panel shows the resulting point count / area change;
-  **Apply** commits exactly what was previewed.
-- **Brush settings in the top hint bar** — radius / strength sliders sit next
-  to the active brush instead of in a sidebar panel.
-- **Calmer phone view** — phones open in a view mode (zones, robot, trail;
-  no vertex handles, tool dock or selection bar) with a single **Edit**
-  button; **Done** in the tool dock goes back. New map control stack above
-  the base-map button: **find & follow robot**, **show trail**, zoom (zoom
-  moved there from the bottom-right). The status panel starts collapsed on
-  phones.
-- **Trail calendar with data dots** — the movement-trail date picker is a
-  month calendar where days with a recorded trail have a dot; the ‹ › arrows
-  jump straight to the previous / next day with data.
-- **One Save button** — "Save + restart" is the checkbox in the save dialog.
-- **Compact sidebar panels** — smaller buttons, fields and spacing inside the
-  panels; Zone details puts name and type on one row with small reorder
-  arrows. The HUD's reset button reads **Reset** so it fits.
-
-### Fixed
-- Removed the "obstacle crosses the edge of a mow zone" warning: OpenMower's
-  coverage planner clips every obstacle to the area it plans, so a border
-  obstacle (tree, bed) that sticks out is fine — the warning was a false
-  alarm. Combine zones → Clip remains for tidy outlines.
-- **Push brush lag** — a stroke over a 768-point zone ran at ~11 fps (89 ms
-  frames, spikes to 160 ms). Brush steps are now batched per animation frame
-  into one store update, the stroke patches the outline and moved handles in
-  place instead of rebuilding every layer (one full redraw at stroke end),
-  the WiFi heatmap / trail overlays only redraw when the projection origin
-  changes, and the Combine-zones panel only computes while open. Now ~5 ms
-  frames.
-- The split tool's dashed guide was drawn ~2 km long; Leaflet renders each
-  segment straight in Web Mercator, so it bowed visibly off the actual cut
-  line at high zoom. It now only extends just across the zone.
-- The docking-station panel didn't follow the dock when it was dragged on
-  the map (it read a mutated-in-place object through a `$derived`).
+- **Layout** — sidebar tabs **Zones · Map · Robot**, foldable into a slim icon
+  rail; compact panels. Each action has one home: map tools in the tool dock,
+  zone actions (fit, duplicate, delete) in a floating selection bar,
+  settings in the sidebar.
+- **Phones** open in a calm view mode (map, zones, robot, trail) with a
+  single **Edit** button; the sidebar and status panel start folded.
+- **Mower control** moved into the robot status panel, apart from the
+  editing tools.
+- **One Save button** — restarting ROS is a checkbox in the save dialog.
+- Brush settings sit in the top hint bar; zoom moved to the bottom-left
+  control stack; focusing a zone zooms in closer.
+- The push brush stays smooth on large zones (strokes are batched per frame
+  and patch the map in place instead of redrawing everything).
 
 ### Removed
-- The **multi-select** and **move whole zone** tools (use `Ctrl + A` and
-  drag), and **rotate / scale / grow / shrink** — only **Simplify** remains
-  in the outline tools.
+- The multi-select and move-whole-zone tools (use `Ctrl + A` and drag), and
+  rotate / scale / grow / shrink — Simplify remains.
+- The zone dropdown, the Create, Zone details and Mowing panels (replaced by
+  the zone list and its inline editor).
 
 ## v2.7.1 — Svelte 5 runes & dependency refresh
 

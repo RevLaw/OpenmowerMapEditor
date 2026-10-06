@@ -40,14 +40,18 @@ light — there's no server-side rendering or bundling in production.
   operating on the `map.json` shape and on `{x,y}` meter coordinates. No
   Svelte/Leaflet/DOM imports. This is the core editing logic and the bulk of
   the test suite.
+- `src/lib/robot/` — pure robot-side helpers (telemetry formatting, pose
+  interpolation, breadcrumb trail, boundary recording, joystick mapping,
+  trail-calendar days).
 - `src/lib/stores/editor.js` — the single source of truth for the in-memory
   map, selection, and undo/redo history, built as a Svelte store on top of
-  the `lib/format` + `lib/geo` helpers.
+  the `lib/format` + `lib/geo` helpers. Other stores hold one concern each
+  (UI/edit mode, hidden/locked zones, validation, draft autosave, teleop, …).
 - `src/map/mapController.js` — Leaflet rendering + interaction layer;
   subscribes to the editor store and converts pointer/touch events into
   store actions.
-- `src/components/` — Svelte UI (shell, sidebar panels, tool dock, command
-  palette, robot HUD).
+- `src/components/` — Svelte UI (shell, tabbed sidebar, inline zone editor,
+  tool dock, map controls, command palette, robot HUD, save dialog).
 
 **Backend (`server.js`, single file)** serves the map API and, when the Docker
 socket is mounted, bridges to the mower's ROS container:
@@ -62,8 +66,12 @@ socket is mounted, bridges to the mower's ROS container:
   subscriber streamed out of the ROS container, with a `tf_echo`/topic-poll
   fallback for non-xbot setups.
 - Control: `POST /api/control` wraps OpenMower's real
-  `high_level_control`/`emergency` services — this can move a physical
-  robot; gated by `OPENMOWER_CONTROL_DISABLE`.
+  `high_level_control`/`emergency` services (plus `record_mode` /
+  `record_exit` for area-recording mode) — this can move a physical robot;
+  gated by `OPENMOWER_CONTROL_DISABLE`.
+- Joystick: `POST /api/teleop/drive` / `/api/teleop/stop` stream `{lx, az}`
+  to one persistent helper in the ROS container that publishes `/joy_vel`
+  (deadman-protected, speed-clamped); same disable flag.
 - Path planning: `POST /api/plan_path` runs OpenMower's own
   `slic3r_coverage_planner` inside the ROS container for an exact (not
   approximated) coverage path preview. Read-only — never commands motion.
@@ -77,7 +85,7 @@ socket is mounted, bridges to the mower's ROS container:
   appended from the same live-pose subscriber used for robot telemetry,
   persisted to `ROBOT_TRAIL_PATH`, and auto-archived to a dated file
   whenever a new mow starts (or the history is cleared) so past sessions
-  stay browsable via the date picker.
+  stay browsable via the trail calendar.
 
 All Docker/ROS interaction goes through `dockerApiRequest` (raw Docker Engine
 API over the mounted socket) and small fixed shell-script templates piped
@@ -85,6 +93,6 @@ into `docker exec` — see AGENTS.md's security notes before changing any of
 this.
 
 **Data contract**: the on-disk `map.json` format (`areas[].outline[]`,
-`docking_stations[0].position`, per-area `properties` overrides) is a stable
-contract shared with OpenMower's firmware — changes to `src/lib/format/` must
-stay backward compatible with existing saved maps.
+`docking_stations[0].position` / `heading`, per-area `properties` overrides)
+is a stable contract shared with OpenMower's firmware — changes to
+`src/lib/format/` must stay backward compatible with existing saved maps.
