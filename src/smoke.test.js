@@ -8,6 +8,17 @@ import { mount, unmount, flushSync } from "svelte";
 
 const modules = import.meta.glob("./components/**/*.svelte", { eager: true });
 
+// Unmounting a component mid-transition cancels its animation. Browsers mark
+// the resulting `finished` rejection as handled (Web Animations spec);
+// happy-dom doesn't, which surfaces as a timing-dependent unhandled
+// AbortError. Mirror the browser behaviour.
+const nativeAnimate = Element.prototype.animate;
+Element.prototype.animate = function (...args) {
+  const animation = nativeAnimate.apply(this, args);
+  animation.finished?.catch(() => {});
+  return animation;
+};
+
 const noop = () => {};
 // Required props (no default) and non-default states worth rendering.
 const PROPS = {
