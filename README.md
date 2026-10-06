@@ -4,7 +4,14 @@ A browser-based map editor for [OpenMower](https://github.com/ClemensElflein/ope
 
 Built with **Svelte 5 + Vite 8 + Tailwind CSS 4** (compiled at Docker build time) and a small **Express 5** backend — the Pi only serves the prebuilt `dist/` plus `/api/*`.
 
-![OpenMower Map Editor Screenshot](./screenshot1.jpg)
+![Desktop: zone list with the inline zone editor, mowing coverage preview on the selected lawn, tool dock and robot status](docs/screenshots/desktop.jpeg)
+
+<p align="center">
+  <img src="docs/screenshots/mobile-view.jpeg" alt="Phone view mode: the live robot mid-mow, with the area it has already mowed" width="280">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/screenshots/mobile-drive.jpeg" alt="Phone: driving the mower with the on-screen joystick" width="280">
+</p>
+<p align="center"><sub><b>Phone:</b> where the robot is and how it drove (view mode) · driving it with the joystick</sub><br><sub>Screenshots use a demo map in a public park.</sub></p>
 
 ## Quick start
 
