@@ -131,7 +131,7 @@ function buildTileLayer(cfg) {
 
 export function createMapController(container) {
   // Native zoom control is hidden behind the sidebar (top-left); we render our
-  // own glass zoom buttons instead (see ZoomControl.svelte).
+  // own glass zoom buttons instead (see MapControls.svelte).
   // tapHold: long-press opens the context menu on every touch browser, not
   // just mobile Safari (Leaflet's default).
   // boxZoom off: Shift+drag is the select tool's box selection.

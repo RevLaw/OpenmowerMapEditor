@@ -4,7 +4,6 @@ import {
   parseMap,
   readEditorMeta,
   writeEditorMeta,
-  getAreaType,
   generateZoneId,
   createDefaultZoneOutline,
 } from "../format/mapFormat.js";
@@ -76,15 +75,6 @@ export const currentArea = derived(store, ($s) => {
   if (!$s.mapData?.areas?.length) return null;
   return $s.mapData.areas[$s.areaIndex] || null;
 });
-
-export const areaList = derived(store, ($s) =>
-  ($s.mapData?.areas || []).map((area, i) => ({
-    index: i,
-    id: area.id,
-    type: getAreaType(area),
-    name: area.properties?.name?.trim() || "",
-  }))
-);
 
 /** Editable points (open) of the current area. */
 export function currentEditablePoints() {

@@ -1,4 +1,4 @@
-import { writable, derived, get } from "svelte/store";
+import { writable, derived } from "svelte/store";
 import { editor } from "./editor.js";
 
 // Editor-only per-zone view state: hidden zones aren't drawn on the map,
@@ -52,14 +52,6 @@ export function toggleZoneHidden(area, index) {
 
 export function toggleZoneLocked(area, index) {
   toggleIn(lockedZones, zoneKey(area, index));
-}
-
-export function isZoneHidden(area, index) {
-  return get(hiddenZones).has(zoneKey(area, index));
-}
-
-export function isZoneLocked(area, index) {
-  return get(lockedZones).has(zoneKey(area, index));
 }
 
 /** Show every zone again. */
