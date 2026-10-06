@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Editor redesign
+## v2.8.0 — Editor redesign
 
 A reworked interface plus the editing, robot and safety features a map
 editor was still missing. The `map.json` format is unchanged.
