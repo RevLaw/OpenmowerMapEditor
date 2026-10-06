@@ -1,7 +1,7 @@
 import L from "leaflet";
 import { get } from "svelte/store";
 import { metersToLatLng, latLngToMeters } from "../lib/geo/projection.js";
-import { getAreaType, getZoneOverrides } from "../lib/format/mapFormat.js";
+import { getAreaType, getZoneOverrides, getZoneName } from "../lib/format/mapFormat.js";
 import {
   nearestEdgeInsertIndex,
   distance,
@@ -10,11 +10,13 @@ import {
   offsetPolygon,
   polygonArea,
   simplify,
+  boundingBox,
 } from "../lib/geo/geometry.js";
 import { coverageLines } from "../lib/geo/coverage.js";
 import { resolveMowSettings } from "../lib/coverage/mowSettings.js";
 import { rectangleOutline, circleOutline } from "../lib/format/shapes.js";
 import { getEditablePoints } from "../lib/format/outline.js";
+import { magnetSnap } from "../lib/geo/tools/magnet.js";
 import {
   editor,
   currentEditablePoints,
@@ -28,11 +30,11 @@ import {
   addZoneFromPoints,
   moveDock,
   setDock,
-  translateZone,
   setSnapPoints,
   snapBetween,
-  applyBrush,
+  applyBrushSteps,
   pushHistory,
+  setAreaIndex,
 } from "../lib/stores/editor.js";
 import {
   activeTool,
@@ -40,7 +42,31 @@ import {
   brushStrength,
   drawZoneType,
   coverageOn,
+  snapEnabled,
+  SNAP_TOLERANCE_PX,
+  simplifyTolerance,
+  simplifyPreviewOn,
+  polyDraftCount,
+  rulerInfo,
 } from "../lib/stores/tools.js";
+import { hiddenZones, lockedZones, zoneKey, toggleZoneHidden, toggleZoneLocked } from "../lib/stores/zoneView.js";
+import { contextMenu, sidebarTab, editMode, followRobot } from "../lib/stores/ui.js";
+import { recording } from "../lib/stores/recorder.js";
+import { trailZonePath, trailZoneOutline } from "../lib/stores/trailZone.js";
+import {
+  removePoint,
+  makeStartPoint,
+  duplicateZoneAction,
+  removeCurrentZone,
+  changeZoneType,
+  splitCurrentZone,
+  addZoneAtCenter,
+  setDockFromRobot,
+  removeDockAction,
+  setDockExact,
+  guardEditable,
+} from "../lib/actions.js";
+import { formatArea, formatLength } from "../lib/measurements.js";
 import { mowParams } from "../lib/stores/mowParams.js";
 import { robotLive, robotPose } from "../lib/stores/robot.js";
 import { exactPath } from "../lib/stores/exactPath.js";
@@ -105,8 +131,11 @@ function buildTileLayer(cfg) {
 
 export function createMapController(container) {
   // Native zoom control is hidden behind the sidebar (top-left); we render our
-  // own glass zoom buttons instead (see ZoomControl.svelte).
-  const map = L.map(container, { zoomControl: false, maxZoom: 24 }).setView(
+  // own glass zoom buttons instead (see MapControls.svelte).
+  // tapHold: long-press opens the context menu on every touch browser, not
+  // just mobile Safari (Leaflet's default).
+  // boxZoom off: Shift+drag is the select tool's box selection.
+  const map = L.map(container, { zoomControl: false, maxZoom: 24, tapHold: true, boxZoom: false }).setView(
     [52.52, 13.405],
     19
   );
@@ -127,10 +156,17 @@ export function createMapController(container) {
 
   const layers = {
     areaLine: null,
-    overlays: [],
+    zones: [],
     points: [],
+    midpoints: [],
+    snapIndicator: null,
+    poly: null,
+    ruler: null,
+    split: null,
+    recording: null,
+    trailZone: null,
+    simplifyPreview: null,
     multiHandle: null,
-    moveHandle: null,
     snapGuide: null,
     boxSelect: null,
     brushCursor: null,
@@ -159,88 +195,330 @@ export function createMapController(container) {
   let boxStart = null;
   let drawActive = false;
   let drawStart = null;
+  // Multi-click tools (meters): polygon draft, ruler points, split start.
+  let polyPts = [];
+  let rulerPts = [];
+  let splitStart = null;
+  let hoverMeters = null;
+  // Alt held = bypass magnetic snapping for this drag / click.
+  let altHeld = false;
+  let hidden = get(hiddenZones);
+  let locked = get(lockedZones);
+  let snapOn = get(snapEnabled);
+  // View mode (editing off): zones, robot and trail only — no handles / menus.
+  let editing = get(editMode);
+  // Preview latlngs of the selected outline, patched live while dragging.
+  let previewLatLngs = [];
+  // Selected-zone points as last drawn (lets a brush stroke patch, not rebuild).
+  let renderedPts = [];
 
   const origin = () => s.origin;
+  const toLatLng = (p) => metersToLatLng(p, origin());
+
+  // ---- helpers -------------------------------------------------------------
+
+  function zoneHiddenAt(i) {
+    const a = s.mapData?.areas?.[i];
+    return Boolean(a && hidden.has(zoneKey(a, i)));
+  }
+
+  function currentIsLocked() {
+    const a = s.mapData?.areas?.[s.areaIndex];
+    return Boolean(a && locked.has(zoneKey(a, s.areaIndex)));
+  }
+
+  /** Ground meters per screen pixel at the current zoom/center. */
+  function metersPerPixel() {
+    const lat = map.getCenter().lat;
+    return (40075016.686 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, map.getZoom() + 8);
+  }
+
+  /** Visible zone rings (open point arrays), optionally excluding one zone. */
+  function snapRings(excludeIndex) {
+    const rings = [];
+    (s.mapData?.areas || []).forEach((a, i) => {
+      if (i === excludeIndex || zoneHiddenAt(i)) return;
+      const pts = getEditablePoints(a.outline || []);
+      if (pts.length >= 2) rings.push(pts);
+    });
+    return rings;
+  }
+
+  /**
+   * Magnetic snap for a point being placed/dragged. Returns
+   * { point, snapped: null | 'vertex' | 'edge' }.
+   */
+  function snapMeters(meters, { exclude = null, extra = [], event = null } = {}) {
+    if (!snapOn || altHeld || event?.altKey) return { point: meters, snapped: null };
+    const dock = s.mapData?.docking_stations?.[0]?.position;
+    const hit = magnetSnap(
+      meters,
+      snapRings(exclude),
+      SNAP_TOLERANCE_PX * metersPerPixel(),
+      dock ? [...extra, dock] : extra
+    );
+    return hit ? { point: hit.point, snapped: hit.kind } : { point: meters, snapped: null };
+  }
+
+  function showSnapIndicator(meters, kind) {
+    const ll = toLatLng(meters);
+    if (!layers.snapIndicator) {
+      layers.snapIndicator = L.circleMarker(ll, {
+        radius: 8,
+        color: "#f0abfc",
+        weight: 2,
+        fill: false,
+        interactive: false,
+      }).addTo(map);
+    }
+    layers.snapIndicator.setLatLng(ll);
+    layers.snapIndicator.setStyle({ dashArray: kind === "edge" ? "3,3" : undefined });
+  }
+
+  function hideSnapIndicator() {
+    if (layers.snapIndicator) {
+      map.removeLayer(layers.snapIndicator);
+      layers.snapIndicator = null;
+    }
+  }
+
+  function openMenu(e, title, items) {
+    const oe = e.originalEvent || e;
+    if (oe?.preventDefault) oe.preventDefault();
+    if (!editing) return; // view mode: no editing menus
+    if (e.originalEvent) L.DomEvent.stopPropagation(e);
+    contextMenu.set({ x: oe.clientX ?? 0, y: oe.clientY ?? 0, title, items });
+  }
 
   // ---- rendering -----------------------------------------------------------
 
   function clearEditLayers() {
     if (layers.areaLine) map.removeLayer(layers.areaLine);
     layers.areaLine = null;
-    layers.overlays.forEach((l) => map.removeLayer(l));
-    layers.overlays = [];
+    layers.zones.forEach((l) => map.removeLayer(l));
+    layers.zones = [];
+    layers.midpoints.forEach((m) => map.removeLayer(m));
+    layers.midpoints = [];
+    if (layers.simplifyPreview) map.removeLayer(layers.simplifyPreview);
+    layers.simplifyPreview = null;
     layers.coverage.forEach((l) => map.removeLayer(l));
     layers.coverage = [];
     layers.points.forEach((m) => map.removeLayer(m));
     layers.points = [];
     if (layers.multiHandle) map.removeLayer(layers.multiHandle);
     layers.multiHandle = null;
-    if (layers.moveHandle) map.removeLayer(layers.moveHandle);
-    layers.moveHandle = null;
     if (layers.snapGuide) map.removeLayer(layers.snapGuide);
     layers.snapGuide = null;
     if (layers.dock) map.removeLayer(layers.dock);
     layers.dock = null;
   }
 
-  function drawOverlay(area, color) {
-    const outline = area.outline || [];
-    if (outline.length < 2) return;
-    const latlngs = outline.map((p) => metersToLatLng(p, origin()));
-    const closed = latlngs.length > 1 ? [...latlngs, latlngs[0]] : latlngs;
-    const line = L.polyline(closed, {
-      color,
-      weight: 1.2,
-      opacity: 0.95,
-      dashArray: "4,4",
-    }).addTo(map);
-    layers.overlays.push(line);
+  // Tools during which zone shapes take clicks (select / context menu). For
+  // drawing and placing tools they stay transparent so clicks reach the map.
+  const ZONE_PICK_TOOLS = ["none"];
+  const PLACE_TOOLS = ["poly", "rect", "circle", "dock", "ruler", "split"];
+
+  function zoneStyle(type, selected) {
+    const mowColor = cssVar("--map-line-mow", "#ffffff");
+    const obstacleColor = cssVar("--map-line-obstacle", "#ef4444");
+    const navColor = cssVar("--map-line-nav", "#38bdf8");
+    if (type === "obstacle") {
+      return { color: obstacleColor, fillColor: obstacleColor, fillOpacity: selected ? 0.3 : 0.18, weight: selected ? 2.2 : 1.4 };
+    }
+    if (type === "nav") {
+      return { color: navColor, fillColor: navColor, fillOpacity: selected ? 0.16 : 0.07, weight: selected ? 2.2 : 1.4, dashArray: "6,4" };
+    }
+    return { color: mowColor, fillColor: "#22c55e", fillOpacity: selected ? 0.16 : 0.07, weight: selected ? 2.2 : 1.2 };
+  }
+
+  /** Draw every visible zone (selected one highlighted); others are click-to-select. */
+  function renderZones() {
+    const areas = s.mapData?.areas || [];
+    const pickable = ZONE_PICK_TOOLS.includes(tool);
+    // Mow first, then nav, obstacles on top, so the small shapes stay clickable.
+    const rank = { mow: 0, area: 0, nav: 1, obstacle: 2 };
+    const order = areas
+      .map((a, i) => i)
+      .filter((i) => i !== s.areaIndex && !zoneHiddenAt(i))
+      .sort((a, b) => (rank[getAreaType(areas[a])] ?? 0) - (rank[getAreaType(areas[b])] ?? 0));
+    for (const i of order) {
+      const area = areas[i];
+      const pts = getEditablePoints(area.outline || []);
+      if (pts.length < 2) continue;
+      const type = getAreaType(area);
+      const isLocked = locked.has(zoneKey(area, i));
+      const poly = L.polygon(pts.map(toLatLng), {
+        ...zoneStyle(type, false),
+        opacity: 0.85,
+        interactive: pickable,
+        bubblingMouseEvents: false,
+      }).addTo(map);
+      if (pickable) {
+        poly.bindTooltip(
+          `${escapeHtml(getZoneName(area, i))} · ${type} · ${formatArea(polygonArea(pts))}${isLocked ? " · 🔒" : ""}`,
+          { sticky: true, direction: "top", className: "zone-tooltip", opacity: 0.95 }
+        );
+        poly.on("click", (e) => {
+          L.DomEvent.stopPropagation(e);
+          if (Date.now() < ignoreClicksUntil) return;
+          setAreaIndex(i);
+        });
+        poly.on("contextmenu", (e) => {
+          setAreaIndex(i);
+          openZoneMenu(e, i);
+        });
+      }
+      layers.zones.push(poly);
+    }
   }
 
   function render() {
     clearEditLayers();
+    renderZones();
     const area = s.mapData?.areas?.[s.areaIndex];
     if (!area) {
       renderDock();
       return;
     }
     const type = getAreaType(area);
-    const mowColor = cssVar("--map-line-mow", "#ffffff");
-    const obstacleColor = cssVar("--map-line-obstacle", "#ef4444");
-    const navColor = cssVar("--map-line-nav", "#38bdf8");
-    const overlayMow = cssVar("--map-line-overlay-mow", mowColor);
+    const isLocked = currentIsLocked();
 
     const pts = currentEditablePoints();
-    const latlngs = pts.map((p) => metersToLatLng(p, origin()));
-    const closed = latlngs.length > 1 ? [...latlngs, latlngs[0]] : latlngs;
+    const latlngs = pts.map(toLatLng);
+    renderedPts = pts;
+    previewLatLngs = latlngs.slice();
 
-    layers.areaLine = L.polyline(closed, {
-      color: type === "obstacle" ? obstacleColor : type === "nav" ? navColor : mowColor,
-      weight: type === "mow" ? 0.2 : 1.2,
-      opacity: 0.95,
-      dashArray: type === "mow" ? undefined : "4,4",
+    layers.areaLine = L.polygon(latlngs, {
+      ...zoneStyle(type, true),
+      opacity: 1,
+      dashArray: isLocked ? "2,5" : zoneStyle(type, true).dashArray,
+      interactive: ZONE_PICK_TOOLS.includes(tool),
+      bubblingMouseEvents: false,
     }).addTo(map);
-
-    // Type-aware overlays of the other zones.
-    (s.mapData?.areas || []).forEach((other, i) => {
-      if (i === s.areaIndex) return;
-      const ot = getAreaType(other);
-      if (type === "mow" && (ot === "obstacle" || ot === "nav")) {
-        drawOverlay(other, ot === "nav" ? navColor : obstacleColor);
-      } else if (type === "obstacle" && (ot === "mow" || ot === "nav")) {
-        drawOverlay(other, ot === "nav" ? navColor : overlayMow);
-      } else if (type === "nav" && (ot === "mow" || ot === "obstacle")) {
-        drawOverlay(other, ot === "obstacle" ? obstacleColor : overlayMow);
-      }
-    });
+    if (ZONE_PICK_TOOLS.includes(tool)) {
+      layers.areaLine.on("click", (e) => L.DomEvent.stopPropagation(e));
+      layers.areaLine.on("contextmenu", (e) => openZoneMenu(e, s.areaIndex));
+    }
 
     if (get(coverageOn) && type === "mow") renderCoverage(pts, area);
-    renderPoints(pts, latlngs);
-    renderMultiHandle(pts);
-    if (tool === "move") renderMoveHandle(pts);
-    renderSnapGuide(pts);
+    const previewing = get(simplifyPreviewOn);
+    renderSimplifyPreview(pts);
+    // While previewing a simplify, the dense vertex handles would hide it.
+    if (editing && !isLocked && !previewing) {
+      renderPoints(pts, latlngs);
+      if (tool === "none") renderMidpoints(pts, latlngs);
+      renderMultiHandle(pts);
+      renderSnapGuide(pts);
+    }
     renderDock();
     if (tool === "brush" && brushCursorLatLng) updateBrushCursor(brushCursorLatLng);
+  }
+
+  // ---- simplify preview -------------------------------------------------------
+
+  /** Dashed outline + kept vertices of the current zone simplified at the slider tolerance. */
+  function renderSimplifyPreview(pts = currentEditablePoints()) {
+    if (layers.simplifyPreview) map.removeLayer(layers.simplifyPreview);
+    layers.simplifyPreview = null;
+    if (!get(simplifyPreviewOn) || pts.length < 3) return;
+    const kept = simplify(pts, get(simplifyTolerance)).map(toLatLng);
+    const group = L.layerGroup();
+    L.polygon(kept, {
+      color: "#e879f9",
+      weight: 2,
+      dashArray: "6,4",
+      fillColor: "#e879f9",
+      fillOpacity: 0.08,
+      interactive: false,
+    }).addTo(group);
+    kept.forEach((ll) =>
+      L.circleMarker(ll, { radius: 3, color: "#fff", weight: 1, fillColor: "#e879f9", fillOpacity: 1, interactive: false }).addTo(group)
+    );
+    layers.simplifyPreview = group.addTo(map);
+  }
+
+  // ---- context menus -------------------------------------------------------
+
+  function openZoneMenu(e, index) {
+    const area = s.mapData?.areas?.[index];
+    if (!area) return;
+    const type = getAreaType(area);
+    const isLocked = locked.has(zoneKey(area, index));
+    const types = ["mow", "obstacle", "nav"].filter((t) => t !== type);
+    openMenu(e, getZoneName(area, index), [
+      { label: "Fit to view", icon: "fit_screen", run: () => fitCurrentArea() },
+      { label: "Edit details…", icon: "edit", run: () => sidebarTab.set("zones") },
+      "divider",
+      ...types.map((t) => ({
+        label: `Make ${t} zone`,
+        icon: t === "mow" ? "grass" : t === "obstacle" ? "block" : "route",
+        disabled: isLocked,
+        run: () => changeZoneType(t),
+      })),
+      { label: "Duplicate", icon: "content_copy", run: duplicateZoneAction },
+      { label: "Split along a line", icon: "content_cut", disabled: isLocked, run: () => activeTool.set("split") },
+      "divider",
+      { label: isLocked ? "Unlock" : "Lock", icon: isLocked ? "lock_open" : "lock", run: () => toggleZoneLocked(area, index) },
+      { label: "Hide", icon: "visibility_off", run: () => toggleZoneHidden(area, index) },
+      { label: "Delete zone", icon: "delete", danger: true, disabled: isLocked, run: removeCurrentZone },
+    ]);
+  }
+
+  function openVertexMenu(e, idx) {
+    selectPoint(idx);
+    const pts = currentEditablePoints();
+    const p = pts[idx];
+    openMenu(e, `Vertex ${idx + 1}${p ? ` · ${p.x.toFixed(2)}, ${p.y.toFixed(2)} m` : ""}`, [
+      { label: "Edit coordinates…", icon: "edit_location_alt", run: () => sidebarTab.set("zones") },
+      { label: "Make start point", icon: "flag", disabled: idx === 0, run: () => makeStartPoint(idx) },
+      { label: "Delete point", icon: "delete", danger: true, disabled: pts.length <= 3, run: removePoint },
+    ]);
+  }
+
+  function openMapMenu(e) {
+    const meters = latLngToMeters(e.latlng, origin());
+    const hasMap = Boolean(s.mapData);
+    const type = get(drawZoneType);
+    openMenu(e, `${meters.x.toFixed(2)}, ${meters.y.toFixed(2)} m`, [
+      {
+        label: `Draw ${type} polygon from here`,
+        icon: "polyline",
+        disabled: !hasMap,
+        run: () => {
+          activeTool.set("poly");
+          addPolyPoint(meters);
+        },
+      },
+      {
+        label: `Add ${type} square here`,
+        icon: "add_box",
+        disabled: !hasMap,
+        run: () => {
+          map.panTo(e.latlng, { animate: false });
+          addZoneAtCenter(type);
+        },
+      },
+      {
+        label: "Place dock here",
+        icon: "ev_station",
+        disabled: !hasMap,
+        run: () => {
+          pushHistory();
+          setDock(meters);
+          notify("Docking station placed.", "success");
+        },
+      },
+      {
+        label: "Measure from here",
+        icon: "straighten",
+        run: () => {
+          activeTool.set("ruler");
+          addRulerPoint(meters);
+        },
+      },
+      "divider",
+      { label: "Fit whole map", icon: "zoom_out_map", disabled: !hasMap, run: () => fitAll() },
+    ]);
   }
 
   function renderWifiHeatmap(enabled, samples) {
@@ -469,36 +747,6 @@ export function createMapController(container) {
     }
   }
 
-  function renderMoveHandle(pts) {
-    if (!pts.length) return;
-    const c = centroid(pts);
-    if (!c) return;
-    const handle = L.marker(metersToLatLng(c, origin()), {
-      draggable: true,
-      icon: L.divIcon({
-        className: "map-marker-leaflet",
-        html: `<div class="map-marker--group"><span class="material-symbols-outlined">open_with</span></div>`,
-        iconSize: [40, 40],
-        iconAnchor: [20, 20],
-      }),
-      title: "Drag to move the whole zone",
-    }).addTo(map);
-    let start = null;
-    handle.on("dragstart", () => {
-      suppressNextClick = true;
-      ignoreClicksUntil = Date.now() + 700;
-      start = latLngToMeters(handle.getLatLng(), origin());
-      pushHistory();
-    });
-    handle.on("dragend", () => {
-      ignoreClicksUntil = Date.now() + 700;
-      if (!start) return;
-      const end = latLngToMeters(handle.getLatLng(), origin());
-      translateZone(end.x - start.x, end.y - start.y);
-    });
-    layers.moveHandle = handle;
-  }
-
   function renderPoints(pts, latlngs) {
     const colorFirst = cssVar("--pt-first", "#22c55e");
     const colorMid = cssVar("--pt-mid", "#f59e0b");
@@ -508,6 +756,9 @@ export function createMapController(container) {
     const selected = new Set(s.selectedPointIndices);
     const snap = new Set(s.snapPointIndices);
     const draggable = tool === "none";
+    // While drawing / placing / measuring, handles must not swallow clicks
+    // meant for the map (e.g. a polygon corner placed right on a vertex).
+    const interactive = !PLACE_TOOLS.includes(tool);
 
     latlngs.forEach((latlng, idx) => {
       const isSel = idx === s.pointIndex;
@@ -524,6 +775,7 @@ export function createMapController(container) {
       const border = isSel ? 2 : 1;
       const marker = L.marker(latlng, {
         draggable,
+        interactive,
         icon: L.divIcon({
           className: "",
           html: `<span class="map-point" style="width:${size}px;height:${size}px;background:${color};border-width:${border}px;"></span>`,
@@ -535,27 +787,121 @@ export function createMapController(container) {
 
       marker.on("click", (e) => {
         L.DomEvent.stopPropagation(e);
-        if (tool === "multi") {
-          toggleMultiPoint(idx);
-          return;
-        }
         if (tool === "snap") {
           handleSnapClick(idx);
           return;
         }
-        selectPoint(idx);
+        // Shift+click adds / removes a point from the multi-selection.
+        if (e.originalEvent?.shiftKey) toggleMultiPoint(idx);
+        else selectPoint(idx);
       });
+      marker.on("contextmenu", (e) => openVertexMenu(e, idx));
+
+      // Dragging a point that's part of a multi-selection moves the whole
+      // selection (e.g. Ctrl+A then drag = move the zone).
+      let group = null;
       marker.on("dragstart", () => {
         suppressNextClick = true;
         ignoreClicksUntil = Date.now() + 700;
         pushHistory();
+        group =
+          selected.has(idx) && selected.size > 1
+            ? { indices: [...selected], original: [...selected].map((i) => ({ ...pts[i] })), from: pts[idx] }
+            : null;
+      });
+      // Snap onto neighbouring zones and redraw the outline live while dragging.
+      marker.on("drag", (e) => {
+        const hit = snapMeters(latLngToMeters(e.latlng, origin()), {
+          exclude: s.areaIndex,
+          event: e.originalEvent,
+        });
+        const ll = hit.snapped ? toLatLng(hit.point) : e.latlng;
+        if (hit.snapped) {
+          marker.setLatLng(ll);
+          showSnapIndicator(hit.point, hit.snapped);
+        } else hideSnapIndicator();
+        if (group) {
+          const at = latLngToMeters(L.latLng(ll), origin());
+          const dx = at.x - group.from.x;
+          const dy = at.y - group.from.y;
+          group.indices.forEach((i, k) => {
+            const moved = toLatLng({ x: group.original[k].x + dx, y: group.original[k].y + dy });
+            previewLatLngs[i] = moved;
+            if (i !== idx) layers.points[i]?.setLatLng(moved);
+          });
+        } else {
+          previewLatLngs[idx] = ll;
+        }
+        layers.areaLine?.setLatLngs(previewLatLngs);
       });
       marker.on("dragend", (e) => {
         ignoreClicksUntil = Date.now() + 700;
-        movePoint(idx, latLngToMeters(e.target.getLatLng(), origin()));
+        hideSnapIndicator();
+        const end = latLngToMeters(e.target.getLatLng(), origin());
+        if (group) movePointsBy(group.indices, end.x - group.from.x, end.y - group.from.y, group.original);
+        else movePoint(idx, end);
+        group = null;
       });
       layers.points.push(marker);
     });
+  }
+
+  // Ghost handles on edge midpoints: drag one to insert a vertex there. Only
+  // drawn for edges long enough on screen (and in view), which keeps dense
+  // traced outlines from turning into a carpet of handles.
+  const MIDPOINT_MIN_EDGE_PX = 36;
+  const MIDPOINT_MAX = 400;
+
+  function renderMidpoints(pts, latlngs) {
+    if (pts.length < 2) return;
+    const view = map.getBounds().pad(0.1);
+    const n = pts.length;
+    for (let i = 0; i < n && layers.midpoints.length < MIDPOINT_MAX; i += 1) {
+      const a = latlngs[i];
+      const b = latlngs[(i + 1) % n];
+      const pa = map.latLngToContainerPoint(a);
+      const pb = map.latLngToContainerPoint(b);
+      if (pa.distanceTo(pb) < MIDPOINT_MIN_EDGE_PX) continue;
+      const mid = L.latLng((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+      if (!view.contains(mid)) continue;
+      const insertAt = i + 1;
+      const handle = L.marker(mid, {
+        draggable: true,
+        icon: L.divIcon({
+          className: "",
+          html: `<span class="map-midpoint"></span>`,
+          iconSize: [12, 12],
+          iconAnchor: [6, 6],
+        }),
+        title: "Drag to add a point here",
+        zIndexOffset: -100,
+      }).addTo(map);
+      let base = null;
+      handle.on("click", (e) => L.DomEvent.stopPropagation(e));
+      handle.on("dragstart", () => {
+        suppressNextClick = true;
+        ignoreClicksUntil = Date.now() + 700;
+        base = previewLatLngs.slice();
+        base.splice(insertAt, 0, mid);
+      });
+      handle.on("drag", (e) => {
+        const hit = snapMeters(latLngToMeters(e.latlng, origin()), { exclude: s.areaIndex, event: e.originalEvent });
+        const ll = hit.snapped ? toLatLng(hit.point) : e.latlng;
+        if (hit.snapped) {
+          handle.setLatLng(ll);
+          showSnapIndicator(hit.point, hit.snapped);
+        } else hideSnapIndicator();
+        base[insertAt] = ll;
+        layers.areaLine?.setLatLngs(base);
+      });
+      handle.on("dragend", () => {
+        ignoreClicksUntil = Date.now() + 700;
+        hideSnapIndicator();
+        pushHistory();
+        insertPointAtIndex(insertAt, latLngToMeters(handle.getLatLng(), origin()));
+      });
+      layers.midpoints.push(handle);
+    }
   }
 
   function renderMultiHandle(pts) {
@@ -615,17 +961,34 @@ export function createMapController(container) {
     }
     const station = s.mapData?.docking_stations?.[0];
     if (!station?.position) return;
+    // Heading arrow: map-frame radians (0 = east, CCW) → CSS clockwise degrees
+    // for an arrow that points up by default.
+    const headingArrow = Number.isFinite(station.heading)
+      ? `<span class="dock-heading" style="transform:rotate(${90 - (station.heading * 180) / Math.PI}deg)"><span></span></span>`
+      : "";
     const dock = L.marker(metersToLatLng(station.position, origin()), {
-      draggable: true,
+      draggable: editing,
+      interactive: !PLACE_TOOLS.includes(tool),
       icon: L.divIcon({
         className: "map-marker-leaflet",
-        html: `<div class="map-marker--dock"><span class="material-symbols-outlined">ev_station</span></div>`,
+        html: `<div class="map-marker--dock">${headingArrow}<span class="material-symbols-outlined">ev_station</span></div>`,
         iconSize: [40, 40],
         iconAnchor: [20, 20],
       }),
-      title: "Dock / charging station (drag to move)",
+      title: "Dock / charging station (drag to move, right-click for options)",
     }).addTo(map);
     dock.on("click", (e) => L.DomEvent.stopPropagation(e));
+    dock.on("contextmenu", (e) => {
+      const deg = Number.isFinite(station.heading) ? (station.heading * 180) / Math.PI : 0;
+      openMenu(e, "Docking station", [
+        { label: "Set from robot pose", icon: "my_location", run: setDockFromRobot },
+        { label: "Rotate heading +15°", icon: "rotate_left", run: () => setDockExact({ headingDeg: deg + 15 }) },
+        { label: "Rotate heading −15°", icon: "rotate_right", run: () => setDockExact({ headingDeg: deg - 15 }) },
+        { label: "Edit position / heading…", icon: "edit", run: () => sidebarTab.set("map") },
+        "divider",
+        { label: "Remove dock", icon: "delete", danger: true, run: removeDockAction },
+      ]);
+    });
     dock.on("dragstart", () => {
       ignoreClicksUntil = Date.now() + 700;
       pushHistory();
@@ -701,20 +1064,60 @@ export function createMapController(container) {
   }
 
   // Drag-direction smear: move points under the brush along the cursor motion.
+  // Pointer moves are queued and applied once per animation frame (one store
+  // update + one cheap redraw per frame instead of per mouse event).
+  let brushSteps = [];
+  let brushFrame = 0;
+
+  function flushBrush() {
+    brushFrame = 0;
+    if (!brushSteps.length) return;
+    const steps = brushSteps;
+    brushSteps = [];
+    brushMoved += applyBrushSteps(steps, get(brushRadius), get(brushStrength));
+  }
+
   function moveBrush(latlng) {
     updateBrushCursor(latlng);
     if (!brushPainting || !brushPrev) return;
     const cur = latLngToMeters(latlng, origin());
     const delta = { x: cur.x - brushPrev.x, y: cur.y - brushPrev.y };
     if (delta.x !== 0 || delta.y !== 0) {
-      brushMoved += applyBrush(cur, delta, get(brushRadius), get(brushStrength));
+      brushSteps.push({ center: cur, delta });
+      if (!brushFrame) brushFrame = requestAnimationFrame(flushBrush);
     }
     brushPrev = cur;
   }
 
+  /**
+   * Mid-stroke redraw: the brush only moves existing vertices, so patch the
+   * selected outline and the moved handles in place instead of rebuilding
+   * every layer. Returns false when a full render is needed instead.
+   */
+  function brushFastRedraw() {
+    const area = s.mapData?.areas?.[s.areaIndex];
+    if (!area || !layers.areaLine) return false;
+    const pts = currentEditablePoints();
+    if (pts.length !== renderedPts.length) return false;
+    const hasHandles = layers.points.length === pts.length;
+    const latlngs = new Array(pts.length);
+    for (let i = 0; i < pts.length; i += 1) {
+      latlngs[i] = toLatLng(pts[i]);
+      const old = renderedPts[i];
+      if (hasHandles && (old.x !== pts[i].x || old.y !== pts[i].y)) layers.points[i].setLatLng(latlngs[i]);
+    }
+    renderedPts = pts;
+    previewLatLngs = latlngs.slice();
+    layers.areaLine.setLatLngs(latlngs);
+    return true;
+  }
+
   function endBrush() {
     if (!brushPainting) return;
+    if (brushFrame) cancelAnimationFrame(brushFrame);
+    flushBrush();
     brushPainting = false;
+    render(); // full redraw (coverage, other zones, …) once the stroke ends
     brushPrev = null;
     map.dragging.enable();
     suppressNextClick = true;
@@ -802,26 +1205,285 @@ export function createMapController(container) {
     map.dragging.enable();
   }
 
+  // ---- polygon draw (click vertices, finish on first point / dbl-click / Enter)
+
+  const DRAFT_STYLE = { color: "#22d3ee", weight: 2, opacity: 0.95, interactive: false };
+
+  function renderPolyDraft() {
+    if (layers.poly) map.removeLayer(layers.poly);
+    layers.poly = null;
+    polyDraftCount.set(polyPts.length);
+    if (!polyPts.length) return;
+    const group = L.layerGroup();
+    const lls = polyPts.map(toLatLng);
+    if (lls.length >= 3) {
+      L.polygon(lls, { ...DRAFT_STYLE, weight: 0, fillColor: "#22d3ee", fillOpacity: 0.12 }).addTo(group);
+    }
+    L.polyline(lls, DRAFT_STYLE).addTo(group);
+    if (hoverMeters) {
+      const h = toLatLng(hoverMeters);
+      L.polyline([lls[lls.length - 1], h], { ...DRAFT_STYLE, dashArray: "5,5" }).addTo(group);
+      if (lls.length >= 2) L.polyline([h, lls[0]], { ...DRAFT_STYLE, weight: 1, dashArray: "2,6" }).addTo(group);
+    }
+    lls.forEach((ll, i) => {
+      L.circleMarker(ll, {
+        radius: i === 0 ? 7 : 4,
+        color: "#fff",
+        weight: 1.5,
+        fillColor: i === 0 ? "#22c55e" : "#22d3ee",
+        fillOpacity: 1,
+        interactive: false,
+      }).addTo(group);
+    });
+    layers.poly = group.addTo(map);
+  }
+
+  /** Is `meters` on top of the draft's first vertex (→ close the polygon)? */
+  function nearPolyStart(meters) {
+    if (polyPts.length < 3) return false;
+    return distance(meters, polyPts[0]) <= SNAP_TOLERANCE_PX * metersPerPixel();
+  }
+
+  function addPolyPoint(meters) {
+    if (!s.mapData) {
+      setStatus("Load a map first.");
+      return;
+    }
+    const last = polyPts[polyPts.length - 1];
+    if (last && distance(last, meters) < 0.01) return; // double-click repeat
+    polyPts = [...polyPts, { x: meters.x, y: meters.y }];
+    renderPolyDraft();
+  }
+
+  function undoPolyPoint() {
+    if (!polyPts.length) return false;
+    polyPts = polyPts.slice(0, -1);
+    renderPolyDraft();
+    return true;
+  }
+
+  function cancelPoly() {
+    polyPts = [];
+    hoverMeters = null;
+    renderPolyDraft();
+  }
+
+  function finishPoly() {
+    if (polyPts.length < 3) {
+      setStatus("A zone needs at least 3 points.");
+      return false;
+    }
+    const pts = polyPts;
+    const type = get(drawZoneType);
+    polyPts = [];
+    hoverMeters = null;
+    renderPolyDraft();
+    pushHistory();
+    addZoneFromPoints(type, pts);
+    activeTool.set("none");
+    notify(`Drew ${type} zone with ${pts.length} points.`, "success");
+    return true;
+  }
+
+  // ---- ruler -----------------------------------------------------------------
+
+  function updateRulerInfo() {
+    let total = 0;
+    for (let i = 1; i < rulerPts.length; i += 1) total += distance(rulerPts[i - 1], rulerPts[i]);
+    const last = rulerPts.length && hoverMeters ? distance(rulerPts[rulerPts.length - 1], hoverMeters) : 0;
+    rulerInfo.set({ points: rulerPts.length, total, last });
+  }
+
+  function renderRuler() {
+    if (layers.ruler) map.removeLayer(layers.ruler);
+    layers.ruler = null;
+    updateRulerInfo();
+    if (!rulerPts.length) return;
+    const group = L.layerGroup();
+    const style = { color: "#facc15", weight: 2.5, opacity: 1, interactive: false };
+    const lls = rulerPts.map(toLatLng);
+    L.polyline(lls, style).addTo(group);
+    if (hoverMeters) {
+      L.polyline([lls[lls.length - 1], toLatLng(hoverMeters)], { ...style, dashArray: "5,5" }).addTo(group);
+    }
+    let total = 0;
+    for (let i = 1; i < rulerPts.length; i += 1) {
+      const d = distance(rulerPts[i - 1], rulerPts[i]);
+      total += d;
+      const mid = toLatLng({ x: (rulerPts[i - 1].x + rulerPts[i].x) / 2, y: (rulerPts[i - 1].y + rulerPts[i].y) / 2 });
+      L.tooltip({ permanent: true, direction: "center", className: "ruler-label", interactive: false })
+        .setLatLng(mid)
+        .setContent(formatLength(d))
+        .addTo(group);
+    }
+    lls.forEach((ll) =>
+      L.circleMarker(ll, { radius: 4, color: "#000", weight: 1, fillColor: "#facc15", fillOpacity: 1, interactive: false }).addTo(group)
+    );
+    if (rulerPts.length > 2) {
+      L.tooltip({ permanent: true, direction: "right", offset: [10, 0], className: "ruler-label ruler-label--total", interactive: false })
+        .setLatLng(lls[lls.length - 1])
+        .setContent(`Σ ${formatLength(total)}`)
+        .addTo(group);
+    }
+    layers.ruler = group.addTo(map);
+  }
+
+  function addRulerPoint(meters) {
+    rulerPts = [...rulerPts, { x: meters.x, y: meters.y }];
+    renderRuler();
+  }
+
+  function clearRuler() {
+    rulerPts = [];
+    hoverMeters = null;
+    renderRuler();
+  }
+
+  // ---- split (click two points to cut the selected zone along a line) -------
+
+  function renderSplit() {
+    if (layers.split) map.removeLayer(layers.split);
+    layers.split = null;
+    if (!splitStart) return;
+    const end = hoverMeters || splitStart;
+    // Extend the preview past both clicks so it reads as an infinite cut line
+    // — but only just across the zone: Leaflet draws each segment straight in
+    // Web Mercator, so a km-long guide would visibly bow off the true (local
+    // metric) line the split actually uses.
+    const dx = end.x - splitStart.x;
+    const dy = end.y - splitStart.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const box = boundingBox(currentEditablePoints());
+    const reach = box
+      ? Math.max(
+          ...[
+            { x: box.minX, y: box.minY },
+            { x: box.maxX, y: box.maxY },
+            { x: box.minX, y: box.maxY },
+            { x: box.maxX, y: box.minY },
+          ].map((c) => distance(c, splitStart))
+        ) + 5
+      : 20;
+    const a = { x: splitStart.x - (dx / len) * reach, y: splitStart.y - (dy / len) * reach };
+    const b = { x: splitStart.x + (dx / len) * reach, y: splitStart.y + (dy / len) * reach };
+    const group = L.layerGroup();
+    if (hoverMeters) L.polyline([toLatLng(a), toLatLng(b)], { color: "#f43f5e", weight: 1, dashArray: "6,6", interactive: false }).addTo(group);
+    L.polyline([toLatLng(splitStart), toLatLng(end)], { color: "#f43f5e", weight: 2.5, interactive: false }).addTo(group);
+    L.circleMarker(toLatLng(splitStart), { radius: 5, color: "#fff", weight: 1.5, fillColor: "#f43f5e", fillOpacity: 1, interactive: false }).addTo(group);
+    layers.split = group.addTo(map);
+  }
+
+  function handleSplitClick(meters) {
+    if (!splitStart) {
+      if (!s.mapData?.areas?.[s.areaIndex]) {
+        setStatus("Select a zone to split first.");
+        return;
+      }
+      splitStart = meters;
+      renderSplit();
+      setStatus("Now click the second point of the cut line.");
+      return;
+    }
+    const p1 = splitStart;
+    splitStart = null;
+    hoverMeters = null;
+    renderSplit();
+    if (splitCurrentZone(p1, meters)) activeTool.set("none");
+  }
+
+  // ---- recording / trail-to-zone previews --------------------------------------
+
+  function renderRecording(r) {
+    if (layers.recording) map.removeLayer(layers.recording);
+    layers.recording = null;
+    if (!r?.active || !r.points.length) return;
+    const group = L.layerGroup();
+    const lls = r.points.map(toLatLng);
+    L.polyline(lls, { color: "#fb923c", weight: 3, opacity: 0.95, interactive: false }).addTo(group);
+    if (lls.length > 2) L.polyline([lls[lls.length - 1], lls[0]], { color: "#fb923c", weight: 1.5, dashArray: "4,6", interactive: false }).addTo(group);
+    L.circleMarker(lls[0], { radius: 6, color: "#fff", weight: 2, fillColor: "#fb923c", fillOpacity: 1, interactive: false }).addTo(group);
+    layers.recording = group.addTo(map);
+  }
+
+  function renderTrailZone(path, outline) {
+    if (layers.trailZone) map.removeLayer(layers.trailZone);
+    layers.trailZone = null;
+    if (!path?.length) return;
+    const group = L.layerGroup();
+    L.polyline(path.map(toLatLng), { color: "#facc15", weight: 2, opacity: 0.7, interactive: false }).addTo(group);
+    if (outline) {
+      L.polygon(outline.map(toLatLng), { color: "#22d3ee", weight: 2, dashArray: "5,4", fillColor: "#22d3ee", fillOpacity: 0.15, interactive: false }).addTo(group);
+    }
+    layers.trailZone = group.addTo(map);
+  }
+
   // ---- box select ----------------------------------------------------------
 
-  function finishBox(end) {
-    if (!boxStart) return;
-    const bounds = L.latLngBounds(boxStart, end);
-    const pts = currentEditablePoints();
-    const selected = [];
-    pts.forEach((p, i) => {
-      if (bounds.contains(metersToLatLng(p, origin()))) selected.push(i);
-    });
-    setMultiSelection(selected);
+  // Shift+drag in the select tool draws a selection box. Listened on the
+  // container in the capture phase so it also starts on top of a zone shape
+  // (which stops Leaflet event bubbling) and before map panning kicks in.
+  // A Shift+click on a point handle is left alone (that toggles the point).
+  const BOX_START_PX = 4;
+  let boxDown = null; // {x, y} client px of a pending Shift+mousedown
+
+  function onBoxDown(e) {
+    if (tool !== "none" || !e.shiftKey || e.button !== 0 || !s.mapData?.areas?.[s.areaIndex]) return;
+    if (e.target.closest?.(".leaflet-marker-icon")) return;
+    boxDown = { x: e.clientX, y: e.clientY };
+    map.dragging.disable();
+    document.addEventListener("mousemove", onBoxMove);
+    document.addEventListener("mouseup", onBoxUp);
+  }
+
+  function onBoxMove(e) {
+    if (!boxDown) return;
+    if (!boxActive && Math.hypot(e.clientX - boxDown.x, e.clientY - boxDown.y) < BOX_START_PX) return;
+    const end = map.mouseEventToLatLng(e);
+    if (!boxActive) {
+      boxActive = true;
+      boxStart = map.mouseEventToLatLng({ clientX: boxDown.x, clientY: boxDown.y });
+      layers.boxSelect = L.rectangle(L.latLngBounds(boxStart, end), {
+        color: "#22d3ee",
+        weight: 1,
+        fillOpacity: 0.12,
+        dashArray: "4,4",
+        interactive: false,
+      }).addTo(map);
+    }
+    layers.boxSelect.setBounds(L.latLngBounds(boxStart, end));
+  }
+
+  function cancelBox() {
+    document.removeEventListener("mousemove", onBoxMove);
+    document.removeEventListener("mouseup", onBoxUp);
+    if (layers.boxSelect) map.removeLayer(layers.boxSelect);
+    layers.boxSelect = null;
     boxActive = false;
     boxStart = null;
-    if (layers.boxSelect) {
-      map.removeLayer(layers.boxSelect);
-      layers.boxSelect = null;
-    }
+    boxDown = null;
     map.dragging.enable();
-    setStatus(`Box selected ${selected.length} point(s).`);
   }
+
+  function onBoxUp(e) {
+    if (!boxActive) {
+      cancelBox();
+      return;
+    }
+    const bounds = L.latLngBounds(boxStart, map.mouseEventToLatLng(e));
+    cancelBox();
+    suppressNextClick = true;
+    ignoreClicksUntil = Date.now() + 250;
+    const picked = [];
+    currentEditablePoints().forEach((p, i) => {
+      if (bounds.contains(toLatLng(p))) picked.push(i);
+    });
+    // Shift+drag again adds to the existing selection.
+    const merged = [...new Set([...s.selectedPointIndices, ...(s.pointIndex != null ? [s.pointIndex] : []), ...picked])];
+    setMultiSelection(merged.sort((a, b) => a - b));
+    setStatus(`Selected ${merged.length} point(s) — drag one to move them all, Del removes them.`);
+  }
+
+  map.getContainer().addEventListener("mousedown", onBoxDown, true);
 
   // ---- map-level handlers --------------------------------------------------
 
@@ -831,7 +1493,24 @@ export function createMapController(container) {
       suppressNextClick = false;
       return;
     }
-    const meters = latLngToMeters(e.latlng, origin());
+    const raw = latLngToMeters(e.latlng, origin());
+    if (tool === "poly") {
+      if (nearPolyStart(raw)) {
+        finishPoly();
+        return;
+      }
+      addPolyPoint(snapMeters(raw, { event: e.originalEvent }).point);
+      return;
+    }
+    if (tool === "ruler") {
+      addRulerPoint(snapMeters(raw, { event: e.originalEvent }).point);
+      return;
+    }
+    if (tool === "split") {
+      handleSplitClick(raw);
+      return;
+    }
+    const meters = tool === "dock" || tool === "add" ? snapMeters(raw, { exclude: s.areaIndex, event: e.originalEvent }).point : raw;
     if (tool === "dock") {
       if (!s.mapData) {
         setStatus("Load a map first.");
@@ -844,16 +1523,45 @@ export function createMapController(container) {
       return;
     }
     if (tool === "add") {
-      if (!s.mapData?.areas?.[s.areaIndex]) return;
+      if (!s.mapData?.areas?.[s.areaIndex] || !guardEditable()) return;
       pushHistory();
       const idx = nearestEdgeInsertIndex(currentEditablePoints(), meters);
       insertPointAtIndex(idx, meters);
+      return;
     }
+    // Select tool: a click on empty map drops the point selection.
+    if (tool === "none" && (s.pointIndex != null || s.selectedPointIndices.length)) clearSelection();
+  });
+
+  map.on("dblclick", (e) => {
+    if (tool === "poly") {
+      L.DomEvent.stopPropagation(e);
+      finishPoly();
+    }
+  });
+
+  map.on("contextmenu", (e) => {
+    if (tool === "poly" && polyPts.length) {
+      // Right-click while drawing finishes the polygon, like most GIS tools.
+      if (e.originalEvent?.preventDefault) e.originalEvent.preventDefault();
+      finishPoly();
+      return;
+    }
+    if (tool === "ruler" && rulerPts.length) {
+      if (e.originalEvent?.preventDefault) e.originalEvent.preventDefault();
+      clearRuler();
+      return;
+    }
+    openMapMenu(e);
   });
 
   map.on("mousedown", (e) => {
     if (tool === "brush") {
       if (e.originalEvent?.button != null && e.originalEvent.button !== 0) return;
+      if (currentIsLocked()) {
+        guardEditable();
+        return;
+      }
       startBrush(e.latlng);
       return;
     }
@@ -862,18 +1570,6 @@ export function createMapController(container) {
       startDraw(e.latlng);
       return;
     }
-    if (tool !== "multi") return;
-    if (!e.originalEvent?.shiftKey) return;
-    boxActive = true;
-    boxStart = e.latlng;
-    map.dragging.disable();
-    if (layers.boxSelect) map.removeLayer(layers.boxSelect);
-    layers.boxSelect = L.rectangle(L.latLngBounds(e.latlng, e.latlng), {
-      color: "#22d3ee",
-      weight: 1,
-      fillOpacity: 0.12,
-      dashArray: "4,4",
-    }).addTo(map);
   });
 
   map.on("mousemove", (e) => {
@@ -881,13 +1577,18 @@ export function createMapController(container) {
       moveBrush(e.latlng);
       return;
     }
-    if (drawActive) {
-      updateDraw(e.latlng);
+    if (tool === "poly" || tool === "ruler" || tool === "split") {
+      const raw = latLngToMeters(e.latlng, origin());
+      const hit = tool === "split" ? { point: raw, snapped: null } : snapMeters(raw, { event: e.originalEvent });
+      hoverMeters = hit.point;
+      if (hit.snapped) showSnapIndicator(hit.point, hit.snapped);
+      else hideSnapIndicator();
+      if (tool === "poly" && polyPts.length) renderPolyDraft();
+      if (tool === "ruler" && rulerPts.length) renderRuler();
+      if (tool === "split" && splitStart) renderSplit();
       return;
     }
-    if (boxActive && boxStart && layers.boxSelect) {
-      layers.boxSelect.setBounds(L.latLngBounds(boxStart, e.latlng));
-    }
+    if (drawActive) updateDraw(e.latlng);
   });
 
   map.on("mouseup", (e) => {
@@ -895,11 +1596,7 @@ export function createMapController(container) {
       endBrush();
       return;
     }
-    if (drawActive) {
-      finishDraw(e.latlng);
-      return;
-    }
-    if (boxActive) finishBox(e.latlng);
+    if (drawActive) finishDraw(e.latlng);
   });
 
   map.on("mouseout", () => {
@@ -981,6 +1678,7 @@ export function createMapController(container) {
 
     const target = { x: pose.x, y: pose.y, yaw: pose.yaw };
     robotAnim.target = target;
+    if (get(followRobot)) keepInView(target);
     const visual = resolveRobotVisualMode(pose.ros);
     robotAnim.rotate = visual === "nav";
 
@@ -1084,6 +1782,25 @@ export function createMapController(container) {
     layers.exactPath = group;
   }
 
+  // ---- follow robot -----------------------------------------------------------
+
+  /** Pan so `pt` stays in the middle half of the view (no jitter while it's well inside). */
+  function keepInView(pt) {
+    const ll = toLatLng(pt);
+    if (!map.getBounds().pad(-0.25).contains(ll)) map.panTo(ll, { animate: true, duration: 0.4 });
+  }
+
+  /** Center on the live robot. Returns false when there's no live position yet. */
+  function locateRobot() {
+    const pose = get(robotPose);
+    if (!get(robotLive) || !pose?.ok) return false;
+    map.setView(toLatLng(pose), Math.max(map.getZoom(), 20));
+    return true;
+  }
+
+  // Panning by hand means "let me look elsewhere" — stop following.
+  map.on("dragstart", () => followRobot.set(false));
+
   // ---- public helpers ------------------------------------------------------
 
   function getCenterMeters() {
@@ -1094,9 +1811,39 @@ export function createMapController(container) {
     const pts = currentEditablePoints();
     if (!pts.length) return;
     const bounds = L.latLngBounds(pts.map((p) => metersToLatLng(p, origin())));
-    // Cap the fit zoom so tiny areas don't overshoot into blank imagery
-    // (Esri's detailed tiles run out at lower zoom in rural regions).
-    if (bounds.isValid()) map.fitBounds(bounds.pad(0.2), { maxZoom: 20 });
+    // Zoom in close on the zone; past the imagery's native zoom the tile
+    // layer upscales (maxNativeZoom) instead of showing blank tiles.
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.06), { maxZoom: 22 });
+  }
+
+  /** Fit every zone plus the dock. */
+  function fitAll() {
+    const pts = [];
+    for (const a of s.mapData?.areas || []) pts.push(...getEditablePoints(a.outline || []));
+    const dock = s.mapData?.docking_stations?.[0]?.position;
+    if (dock) pts.push(dock);
+    if (!pts.length) return;
+    const bounds = L.latLngBounds(pts.map(toLatLng));
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.1), { maxZoom: 20 });
+  }
+
+  /**
+   * Keys for the multi-click tools (Enter / Backspace). Returns true when the
+   * key was consumed so the global shortcut handler skips its default.
+   */
+  function handleKey(key) {
+    if (tool === "poly") {
+      if (key === "enter") return finishPoly() || true;
+      if (key === "backspace" || key === "delete") return undoPolyPoint() || true;
+    }
+    if (tool === "ruler" && (key === "backspace" || key === "delete")) {
+      if (rulerPts.length) {
+        rulerPts = rulerPts.slice(0, -1);
+        renderRuler();
+      }
+      return true;
+    }
+    return false;
   }
 
   function panToPoint(meters, zoom) {
@@ -1111,17 +1858,17 @@ export function createMapController(container) {
   unsubs.push(
     editor.subscribe((value) => {
       s = value;
-      render();
-      // The exact-path overlay uses absolute map metres, so it only needs a
-      // redraw when the projection origin moves — not on every vertex edit.
+      if (!(brushPainting && brushFastRedraw())) render();
+      // These overlays use absolute map metres, so they only need a redraw
+      // when the projection origin moves — not on every vertex edit.
       const key = `${value.origin?.lat},${value.origin?.lng}`;
       if (key !== prevOriginKey) {
         prevOriginKey = key;
         renderExactPath(get(exactPath));
+        renderWifiHeatmap(get(wifiOverlayEnabled), get(wifiSamples));
+        renderRobotTrail(get(robotTrailEnabled), get(robotTrail));
+        renderRobotTrailHistory(get(robotTrailHistoryEnabled), get(robotTrailDisplayPoints));
       }
-      renderWifiHeatmap(get(wifiOverlayEnabled), get(wifiSamples));
-      renderRobotTrail(get(robotTrailEnabled), get(robotTrail));
-      renderRobotTrailHistory(get(robotTrailHistoryEnabled), get(robotTrailDisplayPoints));
     })
   );
   unsubs.push(
@@ -1140,17 +1887,22 @@ export function createMapController(container) {
       if ((prev === "rect" || prev === "circle") && value !== prev) {
         cancelDraw();
       }
-      if (prev === "multi" && value !== "multi") {
-        boxActive = false;
-        boxStart = null;
-        if (layers.boxSelect) {
-          map.removeLayer(layers.boxSelect);
-          layers.boxSelect = null;
-        }
-        map.dragging.enable();
+      if (prev === "poly" && value !== "poly") cancelPoly();
+      if (prev === "ruler" && value !== "ruler") clearRuler();
+      if (prev === "split" && value !== "split") {
+        splitStart = null;
+        renderSplit();
       }
+      if (prev !== value) {
+        hoverMeters = null;
+        hideSnapIndicator();
+      }
+      // Double-click finishes a polygon instead of zooming.
+      if (value === "poly") map.doubleClickZoom.disable();
+      else map.doubleClickZoom.enable();
+      if (prev === "none" && value !== "none" && (boxDown || boxActive)) cancelBox();
       // Crosshair cursor for click/drag-to-place tools.
-      const crosshair = ["add", "brush", "snap", "rect", "circle", "dock"].includes(value);
+      const crosshair = ["add", "brush", "snap", "rect", "circle", "dock", "poly", "ruler", "split"].includes(value);
       map.getContainer().style.cursor = crosshair ? "crosshair" : "";
       render();
     })
@@ -1185,6 +1937,59 @@ export function createMapController(container) {
     )
   );
   unsubs.push(coverageOn.subscribe(() => render()));
+  unsubs.push(
+    hiddenZones.subscribe((v) => {
+      hidden = v;
+      render();
+    })
+  );
+  unsubs.push(
+    lockedZones.subscribe((v) => {
+      locked = v;
+      render();
+    })
+  );
+  unsubs.push(snapEnabled.subscribe((v) => (snapOn = v)));
+  unsubs.push(
+    editMode.subscribe((v) => {
+      const was = editing;
+      editing = v;
+      if (was && !v) {
+        activeTool.set("none");
+        clearSelection();
+      }
+      render();
+    })
+  );
+  unsubs.push(followRobot.subscribe((on) => on && locateRobot()));
+  // Toggling the preview changes which handles are drawn (full re-render);
+  // moving the slider only redraws the preview layer.
+  unsubs.push(simplifyPreviewOn.subscribe(() => render()));
+  unsubs.push(simplifyTolerance.subscribe(() => renderSimplifyPreview()));
+  unsubs.push(recording.subscribe((r) => renderRecording(r)));
+  unsubs.push(trailZonePath.subscribe((path) => renderTrailZone(path, get(trailZoneOutline))));
+  unsubs.push(trailZoneOutline.subscribe((outline) => renderTrailZone(get(trailZonePath), outline)));
+  // Midpoint handles depend on on-screen edge length and the view, so rebuild
+  // just them (not the whole edit layer) after panning / zooming.
+  function refreshMidpoints() {
+    layers.midpoints.forEach((m) => map.removeLayer(m));
+    layers.midpoints = [];
+    if (!editing || tool !== "none" || !s.mapData?.areas?.[s.areaIndex] || currentIsLocked()) return;
+    const pts = currentEditablePoints();
+    renderMidpoints(pts, pts.map(toLatLng));
+  }
+  map.on("moveend", refreshMidpoints);
+
+  const onKeyDown = (e) => {
+    if (e.key === "Alt") altHeld = true;
+  };
+  const onKeyUp = (e) => {
+    if (e.key === "Alt") altHeld = false;
+  };
+  const onBlur = () => (altHeld = false);
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
+  window.addEventListener("blur", onBlur);
   unsubs.push(mowParams.subscribe(() => render()));
   unsubs.push(exactPath.subscribe((d) => renderExactPath(d)));
 
@@ -1195,13 +2000,23 @@ export function createMapController(container) {
     map,
     getCenterMeters,
     fitCurrentArea,
+    fitAll,
     panToPoint,
+    locateRobot,
+    handleKey,
+    finishPolygon: finishPoly,
+    undoPolygonPoint: undoPolyPoint,
+    addPolyPoint,
+    clearRuler,
     zoomIn: () => map.zoomIn(),
     zoomOut: () => map.zoomOut(),
     invalidateSize: () => map.invalidateSize(),
     destroy() {
       stopRobotAnim();
       unsubs.forEach((u) => u());
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
       map.remove();
     },
   };

@@ -29,28 +29,41 @@ Read files in roughly this order when getting oriented:
    you're adding a new editing action, it goes here.
 3. **`src/lib/geo/`** — framework-free, unit-tested geometry: projection
    (lat/lng ⟷ local meters), polygon math, offset/simplify, coverage-path
-   approximation, and the interactive tools (`geo/tools/brush.js`,
-   `geo/tools/snap.js`). No DOM or Leaflet imports here by design — this is
+   approximation, the interactive tools (`geo/tools/brush.js`,
+   `geo/tools/snap.js`, magnetic snapping in `geo/tools/magnet.js`), and
+   polygon boolean ops (`geo/boolean.js` — merge/cut/clip/split on top of
+   `polygon-clipping`, reduced to hole-free outer rings because `map.json`
+   outlines can't have holes). GeoJSON/KML exchange lives in
+   `format/exchange.js`. No DOM or Leaflet imports here by design — this is
    what `npm test` covers most heavily.
 4. **`src/map/mapController.js`** — the Leaflet integration layer. Subscribes
    to the editor store and renders/updates markers, polylines, and overlays;
    translates raw mouse/touch events into store actions. This is the seam
    between "pure logic" and "browser rendering."
 5. **`src/components/`** — Svelte UI: `AppShell.svelte` is the root layout;
-   `components/panels/` holds sidebar panels (Mowing, Transform, Create,
-   etc.); `ToolDock.svelte`, `CommandPalette.svelte`, `RobotHud.svelte` are
-   the other major interactive surfaces.
+   `components/panels/` holds sidebar panels (the zone list with its inline
+   `ZoneEditor` / `MowingSettings`, Vertex, Simplify, Combine zones, Dock,
+   Drive, Record, …), grouped into Zones / Map / Robot tabs by
+   `Sidebar.svelte` (foldable into `SidebarRail.svelte`). `ToolDock.svelte`,
+   `MapControls.svelte` (follow robot / trail / zoom), `CommandPalette.svelte`
+   and `RobotHud.svelte` (status + mower control) are the other major
+   surfaces. `ContextMenu.svelte`, `SaveDialog.svelte` and `DraftBanner.svelte`
+   are driven by stores (`stores/ui.js`, `stores/draft.js`). `ui.js` also
+   holds `editMode` — off is the calm view mode (no tool dock, handles or
+   edit menus), the default on phones. Editor-only view state (hidden /
+   locked zones) lives in `stores/zoneView.js` and is never written to
+   `map.json`.
 6. **`server.js`** — single-file Express backend. It's long but organized
    top-to-bottom as: logging helpers → WiFi-survey merge/persistence →
    Docker Engine API client (`dockerApiRequest`) → shell scripts that get
    piped into `docker exec` for ROS interaction (pose probe, live pose
-   stream, path planning, mow params, control) → the autonomous WiFi
+   stream, path planning, mow params, control, joystick teleop) → the autonomous WiFi
    collector + Docker container-event watcher → route handlers at the
    bottom (`app.get`/`app.post`/`app.delete`). When adding a backend
    feature, find the nearest existing route handler and follow its pattern
    rather than inventing a new one.
 
-Two request lifecycles worth understanding end-to-end before touching robot
+Request lifecycles worth understanding end-to-end before touching robot
 features:
 
 - **Live pose**: browser opens `GET /api/robot_pose/stream` (SSE) →
@@ -78,7 +91,20 @@ features:
   dated file (`GET /api/robot-trail/archive[/:id]`) and starts a fresh
   history, so re-mowing the same area doesn't pile up on old passes.
   `src/lib/stores/robotTrail.js` mirrors the WiFi store's shared-state/local-toggle
-  split and revision-aware polling pattern.
+  split and revision-aware polling pattern; `src/lib/robot/trailDays.js`
+  derives which days have data for the trail calendar.
+- **Joystick driving**: OpenMower only obeys `/joy_vel` in its
+  `AREA_RECORDING` behavior, so the Drive panel first sends control command
+  `record_mode` (high-level `COMMAND_S1`) and later `record_exit` (the
+  `exit_recording_mode` action on `/xbot/action`, which saves nothing on the
+  robot). While the stick is held, `src/lib/stores/teleop.js` posts
+  `{lx, az}` ~10×/s to `POST /api/teleop/drive`; the server feeds them over
+  stdin (`startDockerExecWithStdin`, a hijacked Docker exec) to one
+  persistent helper that publishes `geometry_msgs/Twist` at 20 Hz. Safety
+  lives in layers: the helper's 0.4 s deadman publishes zero velocity when
+  commands stop, speeds are clamped on both sides, the browser stops on
+  release / blur / hidden tab, and stale helpers are killed before a new
+  one starts (plus a 30 s self-exit).
 
 A third mower-side persisted/shared-state feature should build on the two
 factories this pattern was refactored into rather than re-copying it:
@@ -158,4 +184,7 @@ modifying these paths:
   follow the existing pattern of fixed script templates with narrowly
   validated parameters (see `isValidMapFileName`, `shouldRestartFromQuery`).
 - Keep new remote-control-capable endpoints behind a disable flag, following
-  `OPENMOWER_CONTROL_DISABLE`.
+  `OPENMOWER_CONTROL_DISABLE` (control and joystick driving both honour it).
+- Anything that can move the robot must fail safe: keep the teleop helper's
+  deadman, the server- and helper-side speed clamps, and the
+  kill-before-start cleanup intact when touching that code.

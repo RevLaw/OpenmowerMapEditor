@@ -6,13 +6,19 @@
   import ToolDock from "./ToolDock.svelte";
   import RobotHud from "./RobotHud.svelte";
   import ToolHint from "./ToolHint.svelte";
-  import ZoomControl from "./ZoomControl.svelte";
+  import MapControls from "./MapControls.svelte";
   import BasemapControl from "./BasemapControl.svelte";
   import StatusToasts from "./StatusToasts.svelte";
   import CommandPalette from "./CommandPalette.svelte";
   import ShortcutCheatSheet from "./ShortcutCheatSheet.svelte";
   import BackupsModal from "./BackupsModal.svelte";
-  import { backupsOpen } from "../lib/stores/ui.js";
+  import ContextMenu from "./ContextMenu.svelte";
+  import SaveDialog from "./SaveDialog.svelte";
+  import DraftBanner from "./DraftBanner.svelte";
+  import SelectionBar from "./SelectionBar.svelte";
+  import { backupsOpen, sidebarOpen, editMode } from "../lib/stores/ui.js";
+  import SidebarRail from "./SidebarRail.svelte";
+  import { initTeleopSafety } from "../lib/stores/teleop.js";
   import { get } from "svelte/store";
   import { bootstrap } from "../lib/actions.js";
   import { initRobotLifecycle } from "../lib/stores/robot.js";
@@ -24,27 +30,24 @@
   let paletteOpen = $state(false);
   let cheatOpen = $state(false);
   // Open by default on desktop; collapsed on small screens (toggle via FAB).
-  let sidebarOpen = $state(typeof window === "undefined" || window.innerWidth >= 1024);
   const cleanups = [];
 
-  // The control dock (mower control + edit tools, merged into one panel —
-  // see ToolDock.svelte) normally floats vertically centered on the same
-  // right edge as the robot HUD above it. The HUD's height varies (it has
+  // The right-side control (the edit tool dock, or just an "Edit" button in
+  // view mode) normally floats vertically centered on the same right edge as
+  // the robot HUD above it. The HUD's height varies (it has
   // its own collapse toggle, but can still be expanded), so instead of a
   // fixed cap, the two are coordinated live: as the HUD grows past the
   // centered dock's top edge, the dock is pushed down to make room; only if
   // it still doesn't fit does the HUD's own content start scrolling, as a
   // last resort.
   const EDGE_GAP = 12; // matches right-3 / top-3 (0.75rem)
-  const ZOOM_BOTTOM_OFFSET = 28; // matches bottom-7 (1.75rem) on the zoom control
+  const ATTRIBUTION_ROOM = 24; // keep clear of the map attribution (bottom-right)
 
   let hudWrapEl = $state();
   let toolDockWrapEl = $state();
-  let zoomControlWrapEl = $state();
 
   let toolDockHeight = 0;
   let hudNaturalHeight = 0;
-  let zoomControlHeight = 0;
 
   let controlStackTop = $state(0);
   let robotHudMaxHeight = $state(null);
@@ -55,15 +58,18 @@
   // BasemapControl needs this to sit flush against the sidebar's real edge
   // instead of assuming it's always exactly 360px wide.
   let sidebarWidth = $state(360);
+  // Wide enough to put the selection bar beside the basemap button (else it
+  // sits one row above it).
+  let wide = $state(typeof window === "undefined" || window.innerWidth >= 900);
+  const BASEMAP_BUTTON_ROOM = 180;
 
   function recomputeLayout() {
     sidebarWidth = Math.min(360, window.innerWidth - 24);
-    if (!toolDockWrapEl || !hudWrapEl || !zoomControlWrapEl) return;
+    wide = window.innerWidth >= 900;
+    if (!toolDockWrapEl || !hudWrapEl) return;
     const vh = window.innerHeight;
     const hudBottom = EDGE_GAP + hudNaturalHeight;
-    // The zoom buttons are independently pinned near the bottom-right; the
-    // control dock must never be pushed low enough to reach them.
-    const maxStackBottom = vh - ZOOM_BOTTOM_OFFSET - zoomControlHeight - EDGE_GAP;
+    const maxStackBottom = vh - ATTRIBUTION_ROOM - EDGE_GAP;
 
     // 1) Original layout: dock centered, HUD shown in full.
     const centeredTop = (vh - toolDockHeight) / 2;
@@ -81,7 +87,7 @@
       return;
     }
 
-    // 3) Last resort: bottom-aligned just above the zoom buttons — that
+    // 3) Last resort: bottom-aligned just above the attribution — that
     // boundary is a hard requirement, so it's never clamped back down to
     // stay below the HUD. The HUD still gets whatever room remains above
     // it, if any (its own collapse toggle handles the common case).
@@ -99,6 +105,7 @@
   onMount(() => {
     bootstrap();
     cleanups.push(initRobotLifecycle());
+    cleanups.push(initTeleopSafety());
     cleanups.push(initWifiSurveyLifecycle());
     cleanups.push(initRobotTrailHistoryLifecycle());
     cleanups.push(
@@ -115,13 +122,11 @@
         const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
         if (entry.target === toolDockWrapEl) toolDockHeight = height;
         else if (entry.target === hudWrapEl) hudNaturalHeight = height;
-        else if (entry.target === zoomControlWrapEl) zoomControlHeight = height;
       }
       recomputeLayout();
     });
     resizeObserver.observe(toolDockWrapEl);
     resizeObserver.observe(hudWrapEl);
-    resizeObserver.observe(zoomControlWrapEl);
     window.addEventListener("resize", recomputeLayout);
     cleanups.push(() => {
       resizeObserver.disconnect();
@@ -136,40 +141,62 @@
   <MapCanvas />
 
   <!-- Sidebar (left). Slides off-canvas when closed (mobile). -->
-  {#if sidebarOpen}
+  {#if $sidebarOpen}
     <div
       class="absolute bottom-3 left-3 top-3 z-30 w-[360px] max-w-[calc(100vw-1.5rem)]"
       transition:fly={{ x: -380, duration: 220 }}
     >
       <Sidebar
         onOpenPalette={() => (paletteOpen = true)}
-        onClose={() => (sidebarOpen = false)}
+        onClose={() => sidebarOpen.set(false)}
       />
     </div>
   {/if}
 
   <!-- FAB to reopen the sidebar (mobile / after closing) -->
-  {#if !sidebarOpen}
-    <button
-      class="glass absolute left-3 top-3 z-30 grid h-11 w-11 place-items-center rounded-xl"
-      title="Open panel"
-      onclick={() => (sidebarOpen = true)}
-    >
-      <span class="material-symbols-outlined text-accent" style="font-size:24px">tune</span>
-    </button>
+  <!-- Folded sidebar: a slim icon rail (keeps the map free on phones) -->
+  {#if !$sidebarOpen}
+    <div class="absolute left-3 top-3 z-30">
+      <SidebarRail />
+    </div>
   {/if}
 
-  <!-- Right-side control dock: mower control + edit tools merged into one
-       panel (see ToolDock.svelte), coordinated with the robot HUD above it
-       (see recomputeLayout) so neither ever overlaps the other. -->
+  <!-- Right side: the edit tool dock, or just an "Edit" button in view mode
+       (the default on phones), coordinated with the robot HUD above it (see
+       recomputeLayout) so neither ever overlaps the other. -->
   <div bind:this={toolDockWrapEl} class="absolute right-3 z-20" style="top:{controlStackTop}px">
-    <ToolDock />
+    {#if $editMode}
+      <ToolDock />
+    {:else}
+      <button
+        class="glass flex flex-col items-center gap-0.5 rounded-2xl px-3 py-2 text-[11px] font-semibold text-accent"
+        title="Edit the map (tools, vertex handles)"
+        onclick={() => editMode.set(true)}
+      >
+        <span class="material-symbols-outlined" style="font-size:22px">edit</span>
+        Edit
+      </button>
+    {/if}
   </div>
 
-  <!-- Active-tool hint (top-center) -->
-  <div class="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2">
+  <!-- Draft-restore banner + active-tool hint (top-center) -->
+  <div class="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
+    <div class="pointer-events-auto">
+      <DraftBanner />
+    </div>
     <div class="pointer-events-auto">
       <ToolHint />
+    </div>
+  </div>
+
+  <!-- Quick actions for the selected zone (bottom-center) -->
+  <div
+    class="pointer-events-none absolute z-20 flex justify-center transition-all duration-200"
+    style="bottom:{wide ? 12 : 60}px;left:{($sidebarOpen && wide ? sidebarWidth + EDGE_GAP + 4 : 12) +
+      (wide ? BASEMAP_BUTTON_ROOM : 0)}px;right:64px"
+  >
+    <div class="pointer-events-auto max-w-full">
+      {#if $editMode}<SelectionBar />{/if}
     </div>
   </div>
 
@@ -185,17 +212,13 @@
     </div>
   </div>
 
-  <!-- Zoom buttons (bottom-right, above the map attribution) — a fixed anchor
-       the control stack above must never be pushed down far enough to reach. -->
-  <div bind:this={zoomControlWrapEl} class="absolute bottom-7 right-3 z-20">
-    <ZoomControl />
-  </div>
-
-  <!-- Base-map switcher (bottom-left, clears the sidebar when open) -->
+  <!-- Map view controls (follow robot, trail, zoom) stacked above the
+       base-map switcher, bottom-left — clears the sidebar when open. -->
   <div
-    class="absolute bottom-3 z-30 transition-all duration-200"
-    style="left:{sidebarOpen ? `${sidebarWidth + EDGE_GAP + 4}px` : '12px'}"
+    class="absolute bottom-3 z-30 flex flex-col items-start gap-2 transition-all duration-200"
+    style="left:{$sidebarOpen ? `${sidebarWidth + EDGE_GAP + 4}px` : '12px'}"
   >
+    <MapControls />
     <BasemapControl />
   </div>
 
@@ -203,4 +226,6 @@
   <CommandPalette bind:open={paletteOpen} onCheat={() => (cheatOpen = true)} />
   <ShortcutCheatSheet bind:open={cheatOpen} />
   <BackupsModal bind:open={$backupsOpen} />
+  <SaveDialog />
+  <ContextMenu />
 </div>

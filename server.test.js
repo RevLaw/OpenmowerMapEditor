@@ -17,6 +17,7 @@ process.env.WIFI_MAP_CELL_SIZE_M = "1";
 process.env.ROBOT_TRAIL_MIN_DISTANCE_M = "1";
 
 const {
+  clampTeleopCommand,
   isDifferentLocalDay,
   classifyTrailPhase,
   normalizeWifiSample,
@@ -189,5 +190,22 @@ describe("appendRobotTrailPoint", () => {
     expect(appendRobotTrailPoint(NaN, 0, 1000, false)).toBe(false);
     expect(appendRobotTrailPoint(200000, 0, 1000, false)).toBe(false);
     expect(robotTrailHistory).toHaveLength(0);
+  });
+});
+
+describe("clampTeleopCommand", () => {
+  it("passes valid commands through", () => {
+    expect(clampTeleopCommand({ lx: 0.2, az: -0.5 })).toEqual({ lx: 0.2, az: -0.5 });
+  });
+
+  it("clamps to the max linear / angular speed", () => {
+    expect(clampTeleopCommand({ lx: 5, az: -9 })).toEqual({ lx: 0.5, az: -1.5 });
+  });
+
+  it("rejects missing or non-numeric values", () => {
+    expect(clampTeleopCommand({ lx: "fast", az: 0 })).toBeNull();
+    expect(clampTeleopCommand({ lx: 0.1 })).toBeNull();
+    expect(clampTeleopCommand(null)).toBeNull();
+    expect(clampTeleopCommand({ lx: Infinity, az: 0 })).toBeNull();
   });
 });

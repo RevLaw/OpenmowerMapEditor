@@ -1,18 +1,23 @@
 <script>
   import { get } from "svelte/store";
   import { editor, setAreaIndex, selectPoint } from "../../lib/stores/editor.js";
-  import { validateMap } from "../../lib/validation.js";
+  import { validationIssues } from "../../lib/stores/validation.js";
   import { getEditablePoints } from "../../lib/format/outline.js";
   import { mapApi } from "../../lib/stores/mapApi.js";
   import Collapsible from "../Collapsible.svelte";
 
-  let issues = $derived($editor.mapData ? validateMap($editor.mapData) : []);
+  let issues = $derived($validationIssues);
   let errors = $derived(issues.filter((i) => i.severity === "error").length);
   let warnings = $derived(issues.length - errors);
 
   function goto(issue) {
-    if (issue.areaIndex != null) setAreaIndex(issue.areaIndex);
     const api = get(mapApi);
+    const dock = get(editor).mapData?.docking_stations?.[0]?.position;
+    if (issue.dock && dock) {
+      api?.panToPoint(dock);
+      return;
+    }
+    if (issue.areaIndex != null) setAreaIndex(issue.areaIndex);
     const area = get(editor).mapData?.areas?.[issue.areaIndex];
     if (issue.pointIndex != null && area) {
       const pts = getEditablePoints(area.outline || []);

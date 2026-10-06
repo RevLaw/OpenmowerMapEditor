@@ -7,8 +7,13 @@
   const extra = [
     { title: "Open command palette", group: "General", shortcut: "Ctrl K" },
     { title: "Box-select points", group: "Tools", shortcut: "Shift drag" },
+    { title: "Add / remove point from selection", group: "Tools", shortcut: "Shift click" },
     { title: "Nudge selected point(s)", group: "Edit", shortcut: "Arrows" },
     { title: "Larger nudge", group: "Edit", shortcut: "Shift Arrows" },
+    { title: "Bypass snapping while dragging", group: "Tools", shortcut: "Alt" },
+    { title: "Finish polygon", group: "Create", shortcut: "Enter / dbl-click" },
+    { title: "Remove last polygon / ruler point", group: "Create", shortcut: "Backspace" },
+    { title: "Context menu (zone, vertex, dock, map)", group: "General", shortcut: "Right-click / long-press" },
   ];
 
   function buildGroups() {

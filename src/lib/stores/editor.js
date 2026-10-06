@@ -4,22 +4,13 @@ import {
   parseMap,
   readEditorMeta,
   writeEditorMeta,
-  getAreaType,
   generateZoneId,
   createDefaultZoneOutline,
 } from "../format/mapFormat.js";
 import { getEditablePoints, closeLoop } from "../format/outline.js";
 import { dragBrush } from "../geo/tools/brush.js";
 import { snapEvenly } from "../geo/tools/snap.js";
-import {
-  centroid,
-  translatePoints,
-  rotatePoints,
-  scalePoints,
-  simplify,
-  offsetPolygon,
-  polygonArea,
-} from "../geo/geometry.js";
+import { simplify } from "../geo/geometry.js";
 
 const DEFAULT_ORIGIN = { lat: 52.52, lng: 13.405 };
 const HISTORY_LIMIT = 100;
@@ -84,15 +75,6 @@ export const currentArea = derived(store, ($s) => {
   if (!$s.mapData?.areas?.length) return null;
   return $s.mapData.areas[$s.areaIndex] || null;
 });
-
-export const areaList = derived(store, ($s) =>
-  ($s.mapData?.areas || []).map((area, i) => ({
-    index: i,
-    id: area.id,
-    type: getAreaType(area),
-    name: area.properties?.name?.trim() || "",
-  }))
-);
 
 /** Editable points (open) of the current area. */
 export function currentEditablePoints() {
@@ -187,7 +169,7 @@ export function setAreaIndex(index) {
 }
 
 export function selectPoint(idx) {
-  store.update((s) => ({ ...s, pointIndex: idx, snapPointIndices: [] }));
+  store.update((s) => ({ ...s, pointIndex: idx, selectedPointIndices: [], snapPointIndices: [] }));
 }
 
 export function clearSelection() {
@@ -199,17 +181,26 @@ export function clearSelection() {
   }));
 }
 
+/** Add / remove a point from the multi-selection (a single selected point joins it). */
 export function toggleMultiPoint(idx) {
   store.update((s) => {
     const set = new Set(s.selectedPointIndices);
+    if (s.pointIndex != null) set.add(s.pointIndex);
     if (set.has(idx)) set.delete(idx);
     else set.add(idx);
-    return { ...s, selectedPointIndices: [...set].sort((a, b) => a - b) };
+    return { ...s, pointIndex: null, selectedPointIndices: [...set].sort((a, b) => a - b) };
   });
 }
 
 export function setMultiSelection(indices) {
-  store.update((s) => ({ ...s, selectedPointIndices: [...indices] }));
+  store.update((s) => ({ ...s, pointIndex: null, selectedPointIndices: [...indices] }));
+}
+
+/** Select every vertex of the current zone (then drag / nudge / delete them together). */
+export function selectAllPoints() {
+  const n = currentEditablePoints().length;
+  setMultiSelection(Array.from({ length: n }, (_, i) => i));
+  return n;
 }
 
 /** Move a single vertex to new metric coordinates. */
@@ -275,14 +266,26 @@ export function removeZone() {
 
 /** Apply one drag-brush step (history is pushed once at stroke start). */
 export function applyBrush(centerMeters, deltaMeters, radius, strength) {
+  return applyBrushSteps([{ center: centerMeters, delta: deltaMeters }], radius, strength);
+}
+
+/**
+ * Apply several brush steps in order with a single store update — the map
+ * batches a frame's worth of pointer moves into one call. Same result as
+ * applying them one by one.
+ */
+export function applyBrushSteps(steps, radius, strength) {
   let moved = 0;
   store.update((s) => {
-    if (!s.mapData) return s;
-    const pts = currentEditablePoints();
-    const result = dragBrush(pts, centerMeters, deltaMeters, radius, strength);
-    moved = result.moved;
+    if (!s.mapData?.areas?.[s.areaIndex] || !steps.length) return s;
+    let pts = currentEditablePoints();
+    for (const step of steps) {
+      const result = dragBrush(pts, step.center, step.delta, radius, strength);
+      moved += result.moved;
+      pts = result.points;
+    }
     if (!moved) return s;
-    setCurrentEditable(result.points, s);
+    setCurrentEditable(pts, s);
     return { ...s, rev: s.rev + 1 };
   });
   return moved;
@@ -386,45 +389,6 @@ export function nudgeSelection(dx, dy) {
   return moved;
 }
 
-/** Translate every vertex of the current zone. */
-export function translateZone(dx, dy) {
-  store.update((s) => {
-    if (!s.mapData?.areas?.[s.areaIndex]) return s;
-    setCurrentEditable(translatePoints(currentEditablePoints(), dx, dy), s);
-    return { ...s, rev: s.rev + 1 };
-  });
-}
-
-/** Rotate (radians) or scale (factor) the current zone about its centroid. */
-export function transformZone(kind, amount) {
-  store.update((s) => {
-    if (!s.mapData?.areas?.[s.areaIndex]) return s;
-    const pts = currentEditablePoints();
-    const c = centroid(pts);
-    if (!c) return s;
-    const next = kind === "rotate" ? rotatePoints(pts, c, amount) : scalePoints(pts, c, amount);
-    setCurrentEditable(next, s);
-    return { ...s, rev: s.rev + 1 };
-  });
-}
-
-/**
- * Grow (distMeters > 0) or shrink (< 0) the current zone by offsetting every
- * border perpendicular by a fixed distance — i.e. all borders move outward/
- * inward uniformly (a buffer), unlike Scale which is proportional to distance
- * from the centroid. No-op if the result would collapse.
- */
-export function offsetZone(distMeters) {
-  store.update((s) => {
-    if (!s.mapData?.areas?.[s.areaIndex]) return s;
-    // offsetPolygon insets by a positive distance, so grow = negative inset.
-    const next = offsetPolygon(currentEditablePoints(), -distMeters);
-    if (next.length < 3 || polygonArea(next) < 0.01) return s;
-    setCurrentEditable(next, s);
-    return { ...s, pointIndex: null, selectedPointIndices: [], rev: s.rev + 1 };
-  });
-}
-
 /** Simplify the current zone outline (Douglas–Peucker, tolerance in m). */
 export function simplifyZone(tolerance) {
   let removed = 0;
@@ -462,14 +426,14 @@ export function duplicateZone(offset = { x: 0.5, y: 0.5 }) {
   });
 }
 
-/** Add a new zone from an open editable-point array (rectangle / circle draw). */
-export function addZoneFromPoints(type, points) {
+/** Add a new zone from an open editable-point array (draw tools, recording, import). */
+export function addZoneFromPoints(type, points, extraProps = {}) {
   store.update((s) => {
     if (!s.mapData) return s;
     if (!Array.isArray(s.mapData.areas)) s.mapData.areas = [];
     s.mapData.areas.push({
       id: generateZoneId(),
-      properties: { type },
+      properties: { ...extraProps, type },
       outline: closeLoop(points),
     });
     return {
@@ -482,17 +446,70 @@ export function addZoneFromPoints(type, points) {
   });
 }
 
-/** Place / move the docking station (creating the array if needed). */
-export function setDock(meters) {
+/**
+ * Place / move the docking station (creating the array if needed). `heading`
+ * (radians, map frame, 0 = east) is only written when given.
+ */
+export function setDock(meters, heading) {
   store.update((s) => {
     if (!s.mapData) return s;
     if (!Array.isArray(s.mapData.docking_stations) || !s.mapData.docking_stations.length) {
-      s.mapData.docking_stations = [{ position: { x: meters.x, y: meters.y } }];
+      s.mapData.docking_stations = [{ id: generateZoneId(), properties: {}, position: { x: meters.x, y: meters.y } }];
     } else {
       const st = s.mapData.docking_stations[0];
       st.position = { x: meters.x, y: meters.y };
     }
+    if (Number.isFinite(heading)) s.mapData.docking_stations[0].heading = heading;
     return { ...s, rev: s.rev + 1 };
+  });
+}
+
+/** Set the docking station heading (radians, map frame, 0 = east). */
+export function setDockHeading(heading) {
+  store.update((s) => {
+    const st = s.mapData?.docking_stations?.[0];
+    if (!st?.position || !Number.isFinite(heading)) return s;
+    st.heading = Math.atan2(Math.sin(heading), Math.cos(heading)); // wrap to (-π, π]
+    return { ...s, rev: s.rev + 1 };
+  });
+}
+
+/** Remove the docking station entirely. */
+export function removeDock() {
+  store.update((s) => {
+    if (!s.mapData?.docking_stations?.length) return s;
+    s.mapData.docking_stations = [];
+    return { ...s, rev: s.rev + 1 };
+  });
+}
+
+/**
+ * Replace the whole zone list in one step (boolean ops, import) and select
+ * `areaIndex`. `areas` must already be valid map.json area objects.
+ */
+export function replaceAreas(areas, areaIndex = 0) {
+  store.update((s) => {
+    if (!s.mapData) return s;
+    s.mapData.areas = areas;
+    return {
+      ...s,
+      areaIndex: Math.max(0, Math.min(areaIndex, areas.length - 1)),
+      pointIndex: null,
+      selectedPointIndices: [],
+      snapPointIndices: [],
+      rev: s.rev + 1,
+    };
+  });
+}
+
+/** Make vertex `idx` the outline's first point (OpenMower starts the auto mow angle there). */
+export function setStartPoint(idx) {
+  store.update((s) => {
+    if (!s.mapData?.areas?.[s.areaIndex]) return s;
+    const pts = currentEditablePoints();
+    if (idx <= 0 || idx >= pts.length) return s;
+    setCurrentEditable([...pts.slice(idx), ...pts.slice(0, idx)], s);
+    return { ...s, pointIndex: 0, selectedPointIndices: [], rev: s.rev + 1 };
   });
 }
 

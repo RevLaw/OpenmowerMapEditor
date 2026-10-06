@@ -41,3 +41,55 @@ describe("validateMap", () => {
     expect(validateMap(map)).toEqual([]);
   });
 });
+
+const rect = (x, y, w, h) => [
+  { x, y },
+  { x: x + w, y },
+  { x: x + w, y: y + h },
+  { x, y: y + h },
+  { x, y },
+];
+const zone = (type, outline) => ({ properties: { type }, outline });
+
+describe("validateMap — connectivity, dock and overlap checks", () => {
+  it("flags a dock outside every mow and nav zone", () => {
+    const map = { areas: [zone("mow", rect(0, 0, 10, 10))], docking_stations: [{ position: { x: 20, y: 20 } }] };
+    expect(validateMap(map).some((i) => i.id === "dock-outside")).toBe(true);
+  });
+
+  it("flags a mow zone with no nav link to the dock's zone", () => {
+    const map = {
+      areas: [zone("mow", rect(0, 0, 10, 10)), zone("mow", rect(30, 0, 10, 10))],
+      docking_stations: [{ position: { x: 5, y: 5 } }],
+    };
+    const ids = validateMap(map).map((i) => i.id);
+    expect(ids).toContain("unreachable-1");
+    expect(ids).not.toContain("unreachable-0");
+  });
+
+  it("accepts zones linked by a nav corridor (touching borders count)", () => {
+    const map = {
+      areas: [
+        zone("mow", rect(0, 0, 10, 10)),
+        zone("nav", rect(10, 4, 20, 2)), // touches both mow zones edge-to-edge
+        zone("mow", rect(30, 0, 10, 10)),
+      ],
+      docking_stations: [{ position: { x: 5, y: 5 } }],
+    };
+    expect(validateMap(map).filter((i) => i.id.startsWith("unreachable"))).toEqual([]);
+  });
+
+  it("does not flag an obstacle sticking out over a mow edge (OpenMower clips it)", () => {
+    const map = {
+      areas: [zone("mow", rect(0, 0, 10, 10)), zone("obstacle", rect(8.5, 4, 2, 2))], // 25% sticks out
+    };
+    expect(validateMap(map)).toEqual([]);
+  });
+
+  it("flags a mow strip narrower than the cutting width", () => {
+    const map = { areas: [zone("mow", rect(0, 0, 10, 0.1)), zone("mow", rect(0, 5, 10, 3))] };
+    const ids = validateMap(map, { toolWidth: 0.2 }).map((i) => i.id);
+    expect(ids).toContain("narrow-0");
+    expect(ids).not.toContain("narrow-1");
+  });
+});

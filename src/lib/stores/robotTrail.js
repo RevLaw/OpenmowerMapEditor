@@ -8,6 +8,7 @@ import {
   setRobotTrailCapture,
 } from "../api.js";
 import { createCaptureSync } from "./captureSync.js";
+import { dateKeyOf, dataDayKeys, adjacentDataDay } from "../robot/trailDays.js";
 import { notify } from "./toast.js";
 
 // "Enabled" here means capture is on — a shared, mower-side setting (every
@@ -56,14 +57,6 @@ export const robotTrailHistoryStorage = writable({
   collector: { enabled: true, capturing: false },
 });
 
-/** Local "YYYY-MM-DD" calendar-day key for a timestamp — the unit the date picker navigates by. */
-function dateKeyOf(timestamp) {
-  const d = new Date(timestamp);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 export function todayDateKey() {
   return dateKeyOf(Date.now());
@@ -203,12 +196,18 @@ export async function selectRobotTrailDate(dateKey) {
   }
 }
 
-/** Move the date picker by `deltaDays` (e.g. -1/+1 for the prev/next arrows); never past today. */
-export function shiftRobotTrailDate(deltaDays) {
-  const [y, m, d] = get(robotTrailSelectedDate).split("-").map(Number);
-  const nextKey = dateKeyOf(new Date(y, m - 1, d + deltaDays).getTime());
-  if (nextKey > todayDateKey()) return;
-  selectRobotTrailDate(nextKey).catch(() => {});
+/** Local days that have recorded trail data (archived sessions + today's live history). */
+export const robotTrailDataDays = derived(
+  [robotTrailArchiveList, robotTrailHistoryPoints],
+  ([$sessions, $history]) => dataDayKeys($sessions, todayDateKey(), $history.length > 0)
+);
+
+/** Jump to the previous (dir < 0) / next (dir > 0) day that has trail data. Returns false if none. */
+export function jumpToRobotTrailDataDay(dir) {
+  const key = adjacentDataDay(get(robotTrailDataDays), get(robotTrailSelectedDate), dir);
+  if (!key) return false;
+  selectRobotTrailDate(key).catch(() => {});
+  return true;
 }
 
 /**

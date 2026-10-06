@@ -1,5 +1,69 @@
 # Changelog
 
+## v2.8.0 — Editor redesign
+
+A reworked interface plus the editing, robot and safety features a map
+editor was still missing. The `map.json` format is unchanged.
+
+### Added
+- **Zones on the map** — every zone is drawn with a type-coloured fill and is
+  click-to-select; a zone list shows type and area with per-zone **lock** /
+  **hide** (editor-only, never written to `map.json`).
+- **Inline zone editor** — a pencil on each zone row opens name, type, list
+  order, zone id (click to copy) and, for mow zones, the mowing parameters,
+  coverage preview and exact path.
+- **Drawing & geometry tools** — polygon (`P`), split along a line (`X`),
+  ruler (`D`), edge-midpoint handles to insert points, magnetic snapping to
+  neighbouring zones and the dock (`Alt` bypasses), merge / cut out / clip
+  zones (via `polygon-clipping`), and a live preview for Simplify.
+- **Selection** — `Shift` + click / `Shift` + drag / `Ctrl + A` in the select
+  tool; dragging any selected point moves the whole selection.
+- **Precise values** — exact vertex coordinates, make-start-point, and
+  docking-station position and **heading** (drawn as an arrow).
+- **Context menus** (right-click / long-press) for zones, points, the dock
+  and the map.
+- **Robot-assisted mapping** — drive the mower with an on-screen joystick
+  (touch / mouse / `W A S D`; puts OpenMower into area-recording mode, blade
+  off, 0.4 s deadman and speed caps, gated by `OPENMOWER_CONTROL_DISABLE`),
+  record a zone by driving, turn a stretch of the movement trail into a
+  zone, add the robot's position as a point, set the dock from its pose.
+- **Find & follow robot** and a **show trail** button in a map control stack
+  above the base-map switcher.
+- **Trail calendar** — days with recorded trail data are marked; the ‹ ›
+  arrows jump between them.
+- **GeoJSON / KML import & export**.
+- **Confirm-before-save dialog** with a zone-level diff, validation results
+  and an optional ROS restart.
+- **Draft autosave** — unsaved edits survive a reload or crash and are
+  offered for restore.
+- **Validation** — mow zones unreachable from the dock, a dock outside every
+  drivable zone, mow zones narrower than the cutting width.
+- **Shortcuts** — `[` / `]` cycle zones, `L` lock, `H` hide, `Shift + F` fit
+  map, `Ctrl + B` fold the sidebar.
+- Backend: `POST /api/teleop/drive` and `/api/teleop/stop`; control commands
+  `record_mode` / `record_exit`.
+
+### Changed
+- **Layout** — sidebar tabs **Zones · Map · Robot**, foldable into a slim icon
+  rail; compact panels. Each action has one home: map tools in the tool dock,
+  zone actions (fit, duplicate, delete) in a floating selection bar,
+  settings in the sidebar.
+- **Phones** open in a calm view mode (map, zones, robot, trail) with a
+  single **Edit** button; the sidebar and status panel start folded.
+- **Mower control** moved into the robot status panel, apart from the
+  editing tools.
+- **One Save button** — restarting ROS is a checkbox in the save dialog.
+- Brush settings sit in the top hint bar; zoom moved to the bottom-left
+  control stack; focusing a zone zooms in closer.
+- The push brush stays smooth on large zones (strokes are batched per frame
+  and patch the map in place instead of redrawing everything).
+
+### Removed
+- The multi-select and move-whole-zone tools (use `Ctrl + A` and drag), and
+  rotate / scale / grow / shrink — Simplify remains.
+- The zone dropdown, the Create, Zone details and Mowing panels (replaced by
+  the zone list and its inline editor).
+
 ## v2.7.1 — Svelte 5 runes & dependency refresh
 
 Maintenance release: no user-visible changes. The UI was verified against

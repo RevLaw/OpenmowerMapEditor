@@ -8,6 +8,17 @@ import { mount, unmount, flushSync } from "svelte";
 
 const modules = import.meta.glob("./components/**/*.svelte", { eager: true });
 
+// Unmounting a component mid-transition cancels its animation. Browsers mark
+// the resulting `finished` rejection as handled (Web Animations spec);
+// happy-dom doesn't, which surfaces as a timing-dependent unhandled
+// AbortError. Mirror the browser behaviour.
+const nativeAnimate = Element.prototype.animate;
+Element.prototype.animate = function (...args) {
+  const animation = nativeAnimate.apply(this, args);
+  animation.finished?.catch(() => {});
+  return animation;
+};
+
 const noop = () => {};
 // Required props (no default) and non-default states worth rendering.
 const PROPS = {
@@ -82,11 +93,11 @@ describe("panels follow in-place editor mutations", () => {
     flushSync();
   }
 
-  it("ZonePanel shows a renamed zone", async () => {
+  it("Zone editor shows a renamed zone", async () => {
     await load();
     const { renameCurrentZone } = await import("./lib/actions.js");
-    const ZonePanel = modules["./components/panels/ZonePanel.svelte"].default;
-    const view = mountInto(ZonePanel);
+    const ZoneEditor = modules["./components/ZoneEditor.svelte"].default;
+    const view = mountInto(ZoneEditor);
     const nameInput = () => view.target.querySelector("input.input");
     expect(nameInput().value).toBe("front");
     renameCurrentZone("back");
@@ -95,16 +106,41 @@ describe("panels follow in-place editor mutations", () => {
     view.destroy();
   });
 
-  it("CoveragePanel shows a changed per-zone override", async () => {
+  it("Zone list pencil opens the inline editor", async () => {
+    await load();
+    const ZoneListPanel = modules["./components/panels/ZoneListPanel.svelte"].default;
+    const view = mountInto(ZoneListPanel);
+    expect(view.target.querySelector("input[aria-label='Zone name']")).toBeNull();
+    view.target.querySelector("button[aria-label='Edit zone']").click();
+    flushSync();
+    expect(view.target.querySelector("input[aria-label='Zone name']").value).toBe("front");
+    view.destroy();
+  });
+
+  it("Mowing settings show a changed per-zone override", async () => {
     await load();
     const { setZoneOverride } = await import("./lib/actions.js");
-    const CoveragePanel = modules["./components/panels/CoveragePanel.svelte"].default;
-    const view = mountInto(CoveragePanel);
+    const MowingSettings = modules["./components/MowingSettings.svelte"].default;
+    const view = mountInto(MowingSettings);
     const values = () => [...view.target.querySelectorAll("input[type=number]")].map((i) => i.value);
     expect(values()).not.toContain("7");
     setZoneOverride("outline_count", 7);
     flushSync();
     expect(values()).toContain("7");
+    view.destroy();
+  });
+
+  it("DockPanel follows a dock dragged on the map", async () => {
+    const { loadMap, moveDock } = await import("./lib/stores/editor.js");
+    loadMap(JSON.stringify({ ...JSON.parse(MAP), docking_stations: [{ position: { x: 1, y: 2 }, heading: 0 }] }));
+    flushSync();
+    const DockPanel = modules["./components/panels/DockPanel.svelte"].default;
+    const view = mountInto(DockPanel);
+    const coords = () => [...view.target.querySelectorAll("input[type=number]")].map((i) => i.value);
+    expect(coords().slice(0, 2)).toEqual(["1.000", "2.000"]);
+    moveDock({ x: 4.5, y: -3 }); // mutates the station in place, like a map drag
+    flushSync();
+    expect(coords().slice(0, 2)).toEqual(["4.500", "-3.000"]);
     view.destroy();
   });
 
