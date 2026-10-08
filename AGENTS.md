@@ -11,9 +11,10 @@ OpenMower Map Editor is a browser-based editor for OpenMower's `map.json`
 zone/geometry format. A Svelte 5 SPA (compiled to static assets by Vite) talks
 to a small Express 5 backend that reads/writes the map file on disk and, when
 a Docker socket is mounted, reaches into the mower's ROS container for live
-telemetry, path planning, and control. See the root [README.md](./README.md)
-for the full feature list, deployment instructions, and environment variable
-reference — don't duplicate that here.
+telemetry, path planning, and control. The root [README.md](./README.md) is a
+short newcomer's guide (install, first steps, safety); the full feature list,
+controls and environment variable reference live in
+[docs/reference.md](./docs/reference.md) — don't duplicate them here.
 
 ## Repository walkthrough
 
@@ -153,8 +154,8 @@ so consistency is enforced by convention, not tooling:
   helpers, not raw `console.*`, and keep noisy logs behind
   `OPENMOWER_VERBOSE_LOGS`.
 - New backend config knobs follow the existing `OPENMOWER_*` / `WIFI_MAP_*` /
-  `ROBOT_TRAIL_*` environment-variable naming and must be documented in the README's
-  Environment Variables table (not just in code).
+  `ROBOT_TRAIL_*` environment-variable naming and must be documented in the
+  Environment variables tables of `docs/reference.md` (not just in code).
 - Never hand-edit files under `ros/` or `params/` as part of a code change —
   those are runtime/local data (mower's live `map.json`, backups, params
   YAML), not source.

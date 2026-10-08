@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v2.9.0 — Drive screen, go-to & sensors
+
+Drive the mower from your phone — joystick with sprint, tap-to-go around
+obstacles, record zones by driving — and see what it reports about itself.
+The `map.json` format is unchanged.
 
 ### Added
 - **Drive screen** — *Start drive mode* now turns the app into a drive view:
@@ -38,17 +42,26 @@
 - **Compact status panel** — top right is now the mower controls plus one
   status line; the movement trail (with its calendar) and the WiFi survey moved
   into the Robot tab.
+- **Shorter README** for newcomers (with a vibe-coding warning); the full
+  feature list, controls and environment variables moved to
+  `docs/reference.md`.
+- Docker images install their runtime dependencies on the build machine's own
+  platform and copy them into the ARM image, so building for the mower needs no
+  emulation (the build fails if a native addon ever appears among them).
 
 ### Removed
 - The Robot tab's *Record boundary by driving* panel — recording lives in the
   drive screen now.
 
 ### Fixed
+- **Map dragging on phones** — an invisible strip beside the bottom-left map
+  controls (about 120 × 190 px, right in the thumb zone) swallowed touches, so
+  drags starting there did nothing. Status messages also let touches through to
+  the map now (except their close button).
+- **Robot hover** no longer flickers: it stays above the robot instead of
+  following the pointer, and only redraws when its content changes.
 - Live pose stream: frames from different ROS callbacks could interleave on
   one line and be dropped; each line is now written whole.
-- Docker images install their runtime dependencies on the build machine's own
-  platform and copy them into the ARM image, so building for the mower needs no
-  emulation (the build fails if a native addon ever appears among them).
 
 ## v2.8.1 — Node 26 & dependency refresh
 
