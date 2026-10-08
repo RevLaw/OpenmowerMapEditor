@@ -46,6 +46,20 @@ let timer = null;
 let inFlight = false;
 let lastError = 0;
 
+// Other drive sources (go-to) register here; they're told to stop when the
+// joystick takes over or the page loses focus.
+const interruptHooks = new Set();
+
+/** Register `fn(reason)`, reason "joystick" | "focus". Returns an unregister function. */
+export function onDriveInterrupt(fn) {
+  interruptHooks.add(fn);
+  return () => interruptHooks.delete(fn);
+}
+
+function interrupt(reason) {
+  interruptHooks.forEach((fn) => fn(reason));
+}
+
 async function sendNow() {
   if (inFlight) return;
   const cmd = stickToTwist(stick.x, stick.y, get(driveSpeed));
@@ -73,9 +87,10 @@ export function setStick(x, y) {
   stick = { x, y };
   const moving = x !== 0 || y !== 0;
   if (moving && !timer) {
+    interrupt("joystick");
     sendNow();
     timer = setInterval(sendNow, SEND_MS);
-  } else if (!moving) {
+  } else if (!moving && timer) {
     releaseStick();
   }
 }
@@ -98,6 +113,7 @@ export async function enterDriveMode() {
   const ok = await sendMowerControl("record_mode");
   driveMode.set(ok ? "on" : "off");
   if (ok) notify("Drive mode on — the robot follows the joystick (blade off).", "info");
+  return ok;
 }
 
 /** Stop driving and leave area-recording mode (nothing is saved on the robot). */
@@ -113,6 +129,7 @@ export async function exitDriveMode() {
 export function initTeleopSafety() {
   if (typeof window === "undefined") return () => {};
   const halt = () => {
+    interrupt("focus");
     if (timer || stick.x || stick.y) releaseStick();
   };
   const onVis = () => document.hidden && halt();
