@@ -152,10 +152,10 @@ describe("go-to store", () => {
   });
 
   it("stops when the server rejects a command", async () => {
-    sendTeleop.mockImplementation(() => Promise.resolve({ ok: false, error: "nope" }));
+    sendTeleop.mockImplementation(() => Promise.resolve({ ok: false, error: "nope\n" }));
     await driveTo({ x: 15, y: 5 });
     expect(get(gotoState).phase).toBe("stopped");
-    expect(get(gotoState).reason).toMatch(/nope/);
+    expect(get(gotoState).reason).toBe("server: nope.");
   });
 
   it("stops when the server stops answering, and the next go-to still sends", async () => {

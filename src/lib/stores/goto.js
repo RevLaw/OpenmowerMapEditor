@@ -189,7 +189,7 @@ async function send(lx, az) {
   inFlightSince = Date.now();
   try {
     const res = await pending;
-    if (res && res.ok === false) stopGoto(`server: ${res.error || "command rejected"}.`);
+    if (res && res.ok === false) stopGoto(`server: ${String(res.error || "command rejected").trim()}.`);
   } catch (_e) {
     stopGoto("server unreachable.");
   } finally {

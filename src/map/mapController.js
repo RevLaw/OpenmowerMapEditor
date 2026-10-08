@@ -52,6 +52,7 @@ import {
 import { hiddenZones, lockedZones, zoneKey, toggleZoneHidden, toggleZoneLocked } from "../lib/stores/zoneView.js";
 import { contextMenu, sidebarTab, editMode, followRobot } from "../lib/stores/ui.js";
 import { recording } from "../lib/stores/recorder.js";
+import { gotoState, pickTarget } from "../lib/stores/goto.js";
 import { trailZonePath, trailZoneOutline } from "../lib/stores/trailZone.js";
 import {
   removePoint,
@@ -165,6 +166,7 @@ export function createMapController(container) {
     split: null,
     recording: null,
     trailZone: null,
+    gotoRoute: null,
     simplifyPreview: null,
     multiHandle: null,
     snapGuide: null,
@@ -360,6 +362,7 @@ export function createMapController(container) {
         );
         poly.on("click", (e) => {
           L.DomEvent.stopPropagation(e);
+          if (tryPickGoto(e.latlng)) return;
           if (Date.now() < ignoreClicksUntil) return;
           setAreaIndex(i);
         });
@@ -1417,6 +1420,27 @@ export function createMapController(container) {
     layers.trailZone = group.addTo(map);
   }
 
+  // ---- go-to route preview ------------------------------------------------
+
+  function renderGoto(g) {
+    if (layers.gotoRoute) map.removeLayer(layers.gotoRoute);
+    layers.gotoRoute = null;
+    if (!g?.target || (g.phase !== "planned" && g.phase !== "driving")) return;
+    const group = L.layerGroup();
+    const lls = [g.start, ...g.waypoints].map(toLatLng);
+    L.polyline(lls, { color: "#38bdf8", weight: 3, dashArray: "6,6", opacity: 0.95, interactive: false }).addTo(group);
+    L.circleMarker(toLatLng(g.target), { radius: 7, color: "#fff", weight: 2, fillColor: "#38bdf8", fillOpacity: 1, interactive: false }).addTo(group);
+    layers.gotoRoute = group.addTo(map);
+  }
+
+  /** While go-to waits for a target, a tap anywhere on the map (zones included) picks it. */
+  function tryPickGoto(latlng) {
+    const phase = get(gotoState).phase;
+    if (phase !== "picking" && phase !== "planned") return false;
+    pickTarget(latLngToMeters(latlng, origin()));
+    return true;
+  }
+
   // ---- box select ----------------------------------------------------------
 
   // Shift+drag in the select tool draws a selection box. Listened on the
@@ -1493,6 +1517,7 @@ export function createMapController(container) {
       suppressNextClick = false;
       return;
     }
+    if (tryPickGoto(e.latlng)) return;
     const raw = latLngToMeters(e.latlng, origin());
     if (tool === "poly") {
       if (nearPolyStart(raw)) {
@@ -1967,6 +1992,7 @@ export function createMapController(container) {
   unsubs.push(simplifyPreviewOn.subscribe(() => render()));
   unsubs.push(simplifyTolerance.subscribe(() => renderSimplifyPreview()));
   unsubs.push(recording.subscribe((r) => renderRecording(r)));
+  unsubs.push(gotoState.subscribe((g) => renderGoto(g)));
   unsubs.push(trailZonePath.subscribe((path) => renderTrailZone(path, get(trailZoneOutline))));
   unsubs.push(trailZoneOutline.subscribe((outline) => renderTrailZone(get(trailZonePath), outline)));
   // Midpoint handles depend on on-screen edge length and the view, so rebuild

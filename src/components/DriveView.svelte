@@ -115,8 +115,11 @@
 {#if $driveView}
   <div class="drive pointer-events-none absolute inset-0 z-40 flex flex-col justify-between gap-2">
     <!-- Top: status, follow, STOP, Exit -->
-    <div class="flex items-start justify-between gap-2">
-      <div class="glass pointer-events-auto flex min-w-0 items-center gap-2 rounded-2xl px-3 py-2 text-xs">
+    <!-- On a phone the buttons take the first row and the status gets its own. -->
+    <div class="flex flex-wrap items-start justify-between gap-2">
+      <div
+        class="glass pointer-events-auto order-2 flex w-full min-w-0 items-center gap-2 rounded-2xl px-3 py-2 text-xs sm:order-none sm:w-auto"
+      >
         <span
           class="h-2.5 w-2.5 shrink-0 rounded-full"
           style="background:{ready && accOk ? 'var(--ok)' : 'var(--warn)'}"
@@ -127,7 +130,7 @@
           RTK {acc == null ? "—" : `${Math.round(acc * 100)} cm`}
         </span>
       </div>
-      <div class="pointer-events-auto flex shrink-0 gap-2">
+      <div class="pointer-events-auto ml-auto flex shrink-0 gap-2">
         <button
           class="glass dv-btn"
           class:text-accent={$followRobot}
