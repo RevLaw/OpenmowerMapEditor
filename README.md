@@ -189,7 +189,7 @@ Out-of-range numeric values are clamped, and the server logs a startup warning w
 
 Mounting the Docker socket gives the editor root-equivalent control over the host, and anyone who can reach the editor can move the mower (unless `OPENMOWER_CONTROL_DISABLE=1`). Run it only on a **trusted network** — don't expose port `5080` to the internet without an access layer. Treat map data as sensitive (it describes your property).
 
-The repository's `.gitignore` keeps local maps (`map.json`, `*.local.json`) and editor/IDE artifacts out of git; never commit real coordinates or credentials.
+The repository's `.gitignore` keeps local maps and robot data (`map.json`, `*.local.json`, `ros/`, `params/`) and editor/IDE artifacts out of git; never commit real coordinates or credentials.
 
 ## Notes
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+Maintenance only: no user-visible changes.
+
+### Changed
+- **Node 26** — the Docker image (build and runtime stages) and CI now run on
+  Node 26. Local development still works on Node 22.12+ / 24
+  (`package.json` `engines` unchanged).
+- **Dependencies updated** — Vite 8.3.4, Svelte 5.57.2, js-yaml 5.4.3, plus
+  patch-level updates of transitive packages in the lockfile (`npm audit`
+  clean).
+- **Package metadata** — `package.json` now lists author, homepage,
+  repository and issue tracker.
+
 ## v2.8.0 — Editor redesign
 
 A reworked interface plus the editing, robot and safety features a map
