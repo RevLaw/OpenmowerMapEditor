@@ -165,7 +165,7 @@
   <!-- Right side: the edit tool dock, or just an "Edit" button in view mode
        (the default on phones), coordinated with the robot HUD above it (see
        recomputeLayout) so neither ever overlaps the other. -->
-  <div bind:this={toolDockWrapEl} class="absolute right-3 z-20" class:hidden={$driveView} style="top:{controlStackTop}px">
+  <div bind:this={toolDockWrapEl} class="pointer-events-none absolute right-3 z-20 *:pointer-events-auto" class:hidden={$driveView} style="top:{controlStackTop}px">
     {#if $editMode}
       <ToolDock />
     {:else}
@@ -196,7 +196,7 @@
     style="bottom:{wide ? 12 : 60}px;left:{($sidebarOpen && wide ? sidebarWidth + EDGE_GAP + 4 : 12) +
       (wide ? BASEMAP_BUTTON_ROOM : 0)}px;right:64px"
   >
-    <div class="pointer-events-auto max-w-full">
+    <div class="max-w-full *:pointer-events-auto">
       {#if $editMode}<SelectionBar />{/if}
     </div>
   </div>
@@ -215,9 +215,11 @@
   </div>
 
   <!-- Map view controls (follow robot, trail, zoom) stacked above the
-       base-map switcher, bottom-left — clears the sidebar when open. -->
+       base-map switcher, bottom-left — clears the sidebar when open. Layout
+       wrappers here ignore touches (only their controls take them): the empty
+       part of this one used to swallow map drags in the phone's thumb zone. -->
   <div
-    class="absolute bottom-3 z-30 flex flex-col items-start gap-2 transition-all duration-200"
+    class="pointer-events-none absolute bottom-3 z-30 flex flex-col items-start gap-2 transition-all duration-200 *:pointer-events-auto"
     class:hidden={$driveView}
     style="left:{$sidebarOpen ? `${sidebarWidth + EDGE_GAP + 4}px` : '12px'}"
   >

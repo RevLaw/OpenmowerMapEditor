@@ -279,3 +279,19 @@ describe("Robot tab and status panel", () => {
     sidebarTab.set("zones");
   });
 });
+
+describe("toasts don't block the map", () => {
+  it("let touches through to the map, except on the close button", async () => {
+    const { notify, toasts } = await import("./lib/stores/toast.js");
+    const StatusToasts = modules["./components/StatusToasts.svelte"].default;
+    const view = mountInto(StatusToasts);
+    notify("Live robot on", "info", 60000);
+    flushSync();
+    const toast = view.target.querySelector("[data-toast]");
+    expect(toast).not.toBeNull();
+    expect(toast.classList.contains("pointer-events-none")).toBe(true);
+    expect(toast.querySelector("button").classList.contains("pointer-events-auto")).toBe(true);
+    view.destroy();
+    toasts.set([]);
+  });
+});
