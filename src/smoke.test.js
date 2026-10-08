@@ -160,6 +160,21 @@ describe("panels follow in-place editor mutations", () => {
   });
 });
 
+describe("toasts in the drive screen", () => {
+  it("sit above the joystick instead of on it", async () => {
+    const { driveView } = await import("./lib/stores/ui.js");
+    const StatusToasts = modules["./components/StatusToasts.svelte"].default;
+    const view = mountInto(StatusToasts);
+    const stack = () => view.target.firstElementChild;
+    expect(stack().style.bottom).toBe("");
+    driveView.set(true);
+    flushSync();
+    expect(stack().style.bottom).toBe("256px");
+    driveView.set(false);
+    view.destroy();
+  });
+});
+
 describe("drive screen mounts open", () => {
   it("renders its controls and the go-to sheet", async () => {
     const { driveView } = await import("./lib/stores/ui.js");

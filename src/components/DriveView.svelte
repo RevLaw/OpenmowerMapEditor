@@ -114,44 +114,67 @@
 
 {#if $driveView}
   <div class="drive pointer-events-none absolute inset-0 z-40 flex flex-col justify-between gap-2">
-    <!-- Top: status, follow, STOP, Exit -->
-    <!-- On a phone the buttons take the first row and the status gets its own. -->
-    <div class="flex flex-wrap items-start justify-between gap-2">
-      <div
-        class="glass pointer-events-auto order-2 flex w-full min-w-0 items-center gap-2 rounded-2xl px-3 py-2 text-xs sm:order-none sm:w-auto"
-      >
+    <!-- Top: actions, STOP / Exit, status, then the go-to or recording panel -->
+    <div class="mx-auto flex w-full max-w-md flex-col gap-2">
+      <div class="flex items-center gap-2">
+        <div class="glass pointer-events-auto flex items-center gap-1 rounded-2xl p-1">
+          <button
+            class="tool-btn dv-chip"
+            class:active={gotoActive}
+            aria-pressed={gotoActive}
+            disabled={$driveMode !== "on"}
+            title="Tap the map and the robot drives there"
+            onclick={toggleGoto}
+          >
+            <span class="material-symbols-outlined" style="font-size:18px">flag</span>
+            Go to
+          </button>
+          <button
+            class="tool-btn dv-chip"
+            class:active={$recording.active || typePicker}
+            aria-pressed={$recording.active || typePicker}
+            disabled={!$editor.mapData}
+            title="Record a zone by driving around it"
+            onclick={() => !$recording.active && (typePicker = !typePicker)}
+          >
+            <span class="material-symbols-outlined" style="font-size:18px">radio_button_checked</span>
+            Record
+          </button>
+        </div>
+        <div class="pointer-events-auto ml-auto flex shrink-0 gap-2">
+          <button class="dv-btn dv-stop" title="Emergency stop" onclick={emergencyStop}>STOP</button>
+          <button class="glass dv-btn" disabled={busy} title="Leave drive mode" aria-label="Exit drive mode" onclick={exit}>
+            <span class="material-symbols-outlined">logout</span>
+            <span class="hidden sm:inline">Exit</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="glass pointer-events-auto flex min-w-0 items-center gap-2 rounded-2xl py-1 pl-3 pr-1 text-xs">
         <span
           class="h-2.5 w-2.5 shrink-0 rounded-full"
           style="background:{ready && accOk ? 'var(--ok)' : 'var(--warn)'}"
         ></span>
-        <span class="truncate font-semibold">{status}</span>
+        <span class="min-w-0 flex-1 truncate font-semibold">{status}</span>
         <span class="shrink-0 font-mono text-subtle">{$driveCommand.lx.toFixed(2)} m/s</span>
         <span class="shrink-0 font-mono" class:text-muted={accOk} style={accOk ? "" : "color:var(--warn)"}>
           RTK {acc == null ? "—" : `${Math.round(acc * 100)} cm`}
         </span>
-      </div>
-      <div class="pointer-events-auto ml-auto flex shrink-0 gap-2">
         <button
-          class="glass dv-btn"
+          class="btn-icon shrink-0"
           class:text-accent={$followRobot}
           title={$followRobot ? "Stop following the robot" : "Follow the robot"}
           aria-pressed={$followRobot}
           onclick={() => followRobot.set(!$followRobot)}
         >
-          <span class="material-symbols-outlined">{$followRobot ? "my_location" : "location_searching"}</span>
-        </button>
-        <button class="dv-btn dv-stop" title="Emergency stop" onclick={emergencyStop}>STOP</button>
-        <button class="glass dv-btn" disabled={busy} title="Leave drive mode" onclick={exit}>
-          <span class="material-symbols-outlined">logout</span>
-          Exit
+          <span class="material-symbols-outlined" style="font-size:20px">
+            {$followRobot ? "my_location" : "location_searching"}
+          </span>
         </button>
       </div>
-    </div>
 
-    <!-- Bottom: sheets, then joystick (left) and actions (right) -->
-    <div class="flex flex-col gap-2">
       {#if gotoActive || g.phase === "arrived" || g.phase === "stopped"}
-        <div class="glass pointer-events-auto mx-auto w-full max-w-md rounded-2xl px-3 py-2 text-xs">
+        <div class="glass pointer-events-auto rounded-2xl px-3 py-2 text-xs">
           {#if g.phase === "picking"}
             <div class="flex items-center justify-between gap-2">
               <span>Tap where the robot should go.</span>
@@ -182,7 +205,7 @@
       {/if}
 
       {#if $recording.active}
-        <div class="glass pointer-events-auto mx-auto w-full max-w-md rounded-2xl px-3 py-2 text-xs">
+        <div class="glass pointer-events-auto rounded-2xl px-3 py-2 text-xs">
           <div class="mb-2 flex items-center gap-2">
             <span class="rec-dot" class:paused={$recording.paused}></span>
             <span class="flex-1 font-semibold">
@@ -208,48 +231,32 @@
           </div>
         </div>
       {:else if typePicker}
-        <div class="glass pointer-events-auto mx-auto flex gap-1.5 rounded-2xl p-2 text-xs">
-          <span class="self-center px-1 text-subtle">Record a</span>
+        <div class="glass pointer-events-auto flex items-center gap-1.5 rounded-2xl p-2 text-xs">
+          <span class="px-1 text-subtle">Record a</span>
           {#each ZONE_TYPES as type (type)}
-            <button class="btn dv-sheet-btn" onclick={() => record(type)}>{type}</button>
+            <button class="btn dv-sheet-btn flex-1" onclick={() => record(type)}>{type}</button>
           {/each}
-          <span class="self-center px-1 text-subtle">zone</span>
+          <span class="px-1 text-subtle">zone</span>
         </div>
       {/if}
+    </div>
 
-      <div class="flex items-end justify-between gap-3">
-        <div class="glass pointer-events-auto flex flex-col items-center gap-2 rounded-3xl p-3">
-          <Joystick onChange={setStick} disabled={busy} size={176} />
-          <label class="flex w-full items-center gap-2 text-[11px] text-muted">
-            Max
-            <input
-              class="slider flex-1"
-              type="range"
-              min="0.1"
-              max="1"
-              step="0.05"
-              aria-label="Maximum joystick speed"
-              bind:value={$driveSpeed}
-            />
-            <span class="font-mono text-accent">{($driveSpeed * MAX_LINEAR).toFixed(2)}</span>
-          </label>
-        </div>
-        <div class="pointer-events-auto flex flex-col gap-2">
-          <button class="glass dv-action" class:on={gotoActive} disabled={$driveMode !== "on"} onclick={toggleGoto}>
-            <span class="material-symbols-outlined">flag</span>
-            {gotoActive ? "Cancel" : "Go to"}
-          </button>
-          <button
-            class="glass dv-action"
-            class:on={$recording.active || typePicker}
-            disabled={$recording.active || !$editor.mapData}
-            onclick={() => (typePicker = !typePicker)}
-          >
-            <span class="material-symbols-outlined is-filled" style="color:var(--danger)">radio_button_checked</span>
-            Record
-          </button>
-        </div>
-      </div>
+    <!-- Bottom centre: the joystick, where a thumb reaches it -->
+    <div class="glass pointer-events-auto mx-auto flex flex-col items-center gap-2 rounded-3xl p-3">
+      <Joystick onChange={setStick} disabled={busy} size={176} />
+      <label class="flex w-full items-center gap-2 text-[11px] text-muted">
+        Max
+        <input
+          class="slider flex-1"
+          type="range"
+          min="0.1"
+          max="1"
+          step="0.05"
+          aria-label="Maximum joystick speed"
+          bind:value={$driveSpeed}
+        />
+        <span class="font-mono text-accent">{($driveSpeed * MAX_LINEAR).toFixed(2)}</span>
+      </label>
     </div>
   </div>
 
@@ -291,26 +298,19 @@
     color: #fff;
     letter-spacing: 0.04em;
   }
-  .dv-action {
-    display: flex;
-    min-height: 48px;
-    min-width: 104px;
-    align-items: center;
+  /* Text + icon variant of the tool dock buttons (same look and active state). */
+  .dv-chip {
+    display: inline-flex;
+    width: auto;
     gap: 6px;
-    border-radius: 16px;
-    padding: 0 14px;
-    font-size: 13px;
+    padding: 0 12px;
+    font-size: 12px;
     font-weight: 600;
-  }
-  .dv-action.on {
-    color: var(--accent);
-    box-shadow: inset 0 0 0 2px var(--accent);
   }
   .dv-sheet-btn {
     min-height: 44px;
   }
-  .dv-btn:disabled,
-  .dv-action:disabled {
+  .dv-btn:disabled {
     opacity: 0.45;
   }
   .rec-dot {

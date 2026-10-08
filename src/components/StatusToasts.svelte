@@ -2,6 +2,11 @@
   import { fly, fade } from "svelte/transition";
   import { flip } from "svelte/animate";
   import { toasts, dismiss } from "../lib/stores/toast.js";
+  import { driveView } from "../lib/stores/ui.js";
+
+  // The drive screen's joystick sits bottom-centre; toasts take touches, so
+  // they move up above it instead of landing on the stick.
+  const ABOVE_JOYSTICK = "256px";
 
   const icon = { info: "info", success: "check_circle", warn: "warning", error: "error" };
   const color = {
@@ -14,6 +19,7 @@
 
 <div
   class="pointer-events-none fixed bottom-20 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2"
+  style:bottom={$driveView ? ABOVE_JOYSTICK : null}
 >
   {#each $toasts as t (t.id)}
     <div
