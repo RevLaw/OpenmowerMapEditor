@@ -16,7 +16,8 @@
   import SaveDialog from "./SaveDialog.svelte";
   import DraftBanner from "./DraftBanner.svelte";
   import SelectionBar from "./SelectionBar.svelte";
-  import { backupsOpen, sidebarOpen, editMode } from "../lib/stores/ui.js";
+  import DriveView from "./DriveView.svelte";
+  import { backupsOpen, sidebarOpen, editMode, driveView } from "../lib/stores/ui.js";
   import SidebarRail from "./SidebarRail.svelte";
   import { initTeleopSafety } from "../lib/stores/teleop.js";
   import { get } from "svelte/store";
@@ -141,7 +142,7 @@
   <MapCanvas />
 
   <!-- Sidebar (left). Slides off-canvas when closed (mobile). -->
-  {#if $sidebarOpen}
+  {#if $sidebarOpen && !$driveView}
     <div
       class="absolute bottom-3 left-3 top-3 z-30 w-[360px] max-w-[calc(100vw-1.5rem)]"
       transition:fly={{ x: -380, duration: 220 }}
@@ -155,7 +156,7 @@
 
   <!-- FAB to reopen the sidebar (mobile / after closing) -->
   <!-- Folded sidebar: a slim icon rail (keeps the map free on phones) -->
-  {#if !$sidebarOpen}
+  {#if !$sidebarOpen && !$driveView}
     <div class="absolute left-3 top-3 z-30">
       <SidebarRail />
     </div>
@@ -164,7 +165,7 @@
   <!-- Right side: the edit tool dock, or just an "Edit" button in view mode
        (the default on phones), coordinated with the robot HUD above it (see
        recomputeLayout) so neither ever overlaps the other. -->
-  <div bind:this={toolDockWrapEl} class="absolute right-3 z-20" style="top:{controlStackTop}px">
+  <div bind:this={toolDockWrapEl} class="absolute right-3 z-20" class:hidden={$driveView} style="top:{controlStackTop}px">
     {#if $editMode}
       <ToolDock />
     {:else}
@@ -180,7 +181,7 @@
   </div>
 
   <!-- Draft-restore banner + active-tool hint (top-center) -->
-  <div class="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
+  <div class="pointer-events-none absolute left-1/2 top-3 z-20 flex -translate-x-1/2 flex-col items-center gap-2" class:hidden={$driveView}>
     <div class="pointer-events-auto">
       <DraftBanner />
     </div>
@@ -205,6 +206,7 @@
        internally instead of overlapping it. -->
   <div
     class="absolute right-3 top-3 z-20 overflow-y-auto"
+    class:hidden={$driveView}
     style={robotHudMaxHeight ? `max-height:${robotHudMaxHeight}px` : ""}
   >
     <div bind:this={hudWrapEl}>
@@ -216,12 +218,14 @@
        base-map switcher, bottom-left — clears the sidebar when open. -->
   <div
     class="absolute bottom-3 z-30 flex flex-col items-start gap-2 transition-all duration-200"
+    class:hidden={$driveView}
     style="left:{$sidebarOpen ? `${sidebarWidth + EDGE_GAP + 4}px` : '12px'}"
   >
     <MapControls />
     <BasemapControl />
   </div>
 
+  <DriveView />
   <StatusToasts />
   <CommandPalette bind:open={paletteOpen} onCheat={() => (cheatOpen = true)} />
   <ShortcutCheatSheet bind:open={cheatOpen} />

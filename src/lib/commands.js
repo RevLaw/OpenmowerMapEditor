@@ -4,6 +4,7 @@ import { get } from "svelte/store";
 import { setTool, toggleTool, coverageOn } from "./stores/tools.js";
 import { toggleTheme } from "./stores/theme.js";
 import { toggleRobotLive } from "./stores/robot.js";
+import { openDriveScreen } from "./stores/driveScreen.js";
 import { mapApi } from "./stores/mapApi.js";
 import { basemapId, BASEMAPS } from "./stores/basemap.js";
 import { backupsOpen, sidebarTab, sidebarOpen } from "./stores/ui.js";
@@ -105,6 +106,7 @@ export function getCommands(ctx = {}) {
     { id: "drive", title: "Drive the mower (joystick)…", group: "View", icon: "sports_esports", run: () => { sidebarTab.set("robot"); sidebarOpen.set(true); } },
     { id: "theme", title: "Toggle light / dark theme", group: "View", icon: "contrast", run: toggleTheme },
     { id: "robot", title: "Toggle live robot overlay", group: "View", icon: "radar", run: toggleRobotLive },
+    { id: "drive-screen", title: "Drive the mower (fullscreen drive screen)", group: "View", icon: "sports_esports", run: () => openDriveScreen() },
     { id: "coverage", title: "Toggle mowing coverage preview", group: "View", icon: "grid_on", run: () => coverageOn.update((v) => !v) },
     { id: "shortcuts", title: "Keyboard shortcuts", group: "View", icon: "keyboard", shortcut: "?", run: () => ctx.openCheatSheet?.() },
 
