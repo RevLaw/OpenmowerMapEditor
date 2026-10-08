@@ -159,3 +159,19 @@ describe("panels follow in-place editor mutations", () => {
     view.destroy();
   });
 });
+
+describe("drive screen mounts open", () => {
+  it("renders its controls and the go-to sheet", async () => {
+    const { driveView } = await import("./lib/stores/ui.js");
+    const { armGoto, cancelGoto } = await import("./lib/stores/goto.js");
+    const DriveView = modules["./components/DriveView.svelte"].default;
+    driveView.set(true);
+    armGoto();
+    const view = mountInto(DriveView);
+    expect(view.target.textContent).toContain("STOP");
+    expect(view.target.textContent).toContain("Tap where the robot should go");
+    view.destroy();
+    cancelGoto();
+    driveView.set(false);
+  });
+});

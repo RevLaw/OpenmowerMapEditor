@@ -78,3 +78,6 @@ export const editMode = writable(!isNarrowScreen());
 
 /** Keep the live robot in view (turned off as soon as the user pans the map). */
 export const followRobot = writable(false);
+
+/** The fullscreen drive screen is open (see stores/driveScreen.js). */
+export const driveView = writable(false);
