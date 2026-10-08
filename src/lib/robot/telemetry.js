@@ -108,12 +108,27 @@ export function robotAlert(pose) {
   return null;
 }
 
-/** Hover text for the robot marker: state, battery, RTK. */
-export function robotHoverLines(pose) {
+/**
+ * Hover card for the robot marker: state with a status dot, then battery and
+ * RTK, then the alert if any. Depends only on what it shows, so the caller can
+ * skip re-rendering while the robot merely moves.
+ */
+export function robotHoverHtml(pose) {
   const t = pose?.ros?.telemetry || null;
-  const lines = [robotStateLabel(t) || "Robot"];
-  if (Number.isFinite(t?.batteryPercent)) lines.push(`Battery ${Math.round(t.batteryPercent)}%`);
+  const alert = robotAlert(pose);
+  const level = alert?.level || "ok";
+  const meta = [];
+  if (Number.isFinite(t?.batteryPercent)) {
+    const icon = t.isCharging === true ? "battery_charging_full" : "battery_full";
+    meta.push(`<span class="material-symbols-outlined">${icon}</span>${Math.round(t.batteryPercent)}%`);
+  }
   const rtk = rtkText(pose?.positionAccuracy);
-  if (rtk) lines.push(rtk);
-  return lines;
+  if (rtk) meta.push(`<span class="material-symbols-outlined">satellite_alt</span>${escapeHtml(rtk)}`);
+  return [
+    '<div class="robot-tip">',
+    `<div class="robot-tip__head"><span class="robot-tip__dot robot-tip__dot--${level}"></span><span>${escapeHtml(robotStateLabel(t) || "Robot")}</span></div>`,
+    meta.length ? `<div class="robot-tip__meta">${meta.join("")}</div>` : "",
+    alert ? `<div class="robot-tip__alert robot-tip__alert--${alert.level}">${escapeHtml(alert.text)}</div>` : "",
+    "</div>",
+  ].join("");
 }

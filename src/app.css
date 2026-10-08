@@ -552,16 +552,62 @@ input[type="range"].slider::-moz-range-thumb {
 }
 
 .leaflet-tooltip.robot-tooltip {
-  max-width: min(320px, 92vw);
-  white-space: pre-line;
-  font-size: 12px;
-  line-height: 1.4;
-  padding: 8px 12px;
+  max-width: min(260px, 92vw);
+  white-space: nowrap;
+  padding: 8px 10px;
   background: var(--glass-strong);
+  backdrop-filter: blur(10px);
   color: var(--ink);
   border: 1px solid var(--glass-edge);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+/* Hover card (robotHoverHtml): state, then battery · RTK, then the alert. */
+.robot-tip__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.robot-tip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.robot-tip__dot--warn {
+  background: var(--warn);
+}
+.robot-tip__dot--crit {
+  background: var(--danger);
+}
+.robot-tip__meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.robot-tip__meta .material-symbols-outlined {
+  font-size: 14px;
+}
+.robot-tip__meta .material-symbols-outlined:not(:first-child) {
+  margin-left: 6px;
+}
+.robot-tip__alert {
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1c1305;
+  background: var(--warn);
+}
+.robot-tip__alert--crit {
+  color: #fff;
+  background: var(--danger);
 }
 .leaflet-tooltip.robot-tooltip::before {
   display: none;

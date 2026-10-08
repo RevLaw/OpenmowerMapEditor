@@ -83,7 +83,7 @@ import {
   resolveRobotVisualMode,
   robotVisualToMarkerStyle,
   robotAlert,
-  robotHoverLines,
+  robotHoverHtml,
   escapeHtml,
 } from "../lib/robot/telemetry.js";
 import { poseDist2, stepPose } from "../lib/robot/interpolate.js";
@@ -1642,7 +1642,7 @@ export function createMapController(container) {
   const ROBOT_SNAP_DIST2 = 9; // >3 m jump → teleport instead of gliding across
   const ROBOT_SETTLE_D2 = 1e-4; // ~1 cm: close enough to snap and stop the loop
   const ROBOT_SETTLE_YAW = 0.005; // ~0.3°
-  const robotAnim = { cur: null, target: null, raf: 0, iconKey: "", rotate: false, glyphEl: null };
+  const robotAnim = { cur: null, target: null, raf: 0, iconKey: "", tipHtml: "", rotate: false, glyphEl: null };
 
   function stopRobotAnim() {
     if (robotAnim.raf) {
@@ -1697,6 +1697,7 @@ export function createMapController(container) {
       robotAnim.cur = null;
       robotAnim.target = null;
       robotAnim.iconKey = "";
+      robotAnim.tipHtml = "";
       robotAnim.glyphEl = null;
       return;
     }
@@ -1715,19 +1716,23 @@ export function createMapController(container) {
     // Cheap change key from visual + alert; only rebuild the icon when it changes.
     const alert = robotAlert(pose);
     const key = `${visual}|${alert ? `${alert.level}:${alert.text}` : ""}`;
+    const tipHtml = robotHoverHtml(pose);
     if (!layers.robot) {
       layers.robot = L.marker(metersToLatLng(robotAnim.cur, origin()), {
         icon: makeRobotIcon(visual, alert),
         zIndexOffset: 800,
       })
-        .bindTooltip(robotHoverLines(pose).join("\n"), {
-          sticky: true,
+        // Anchored above the robot (not following the pointer, which flickers
+        // while the robot moves under it) and re-rendered only on change.
+        .bindTooltip(tipHtml, {
           direction: "top",
-          opacity: 0.95,
+          offset: [0, -22],
+          opacity: 1,
           className: "robot-tooltip",
         })
         .addTo(map);
       robotAnim.iconKey = key;
+      robotAnim.tipHtml = tipHtml;
       robotAnim.glyphEl = layers.robot._icon?.querySelector(".robot-glyph") || null;
     } else {
       if (key !== robotAnim.iconKey) {
@@ -1735,9 +1740,9 @@ export function createMapController(container) {
         robotAnim.iconKey = key;
         robotAnim.glyphEl = layers.robot._icon?.querySelector(".robot-glyph") || null;
       }
-      // Only refresh the tooltip text while it's actually open.
-      if (layers.robot.isTooltipOpen()) {
-        layers.robot.setTooltipContent(robotHoverLines(pose).join("\n"));
+      if (tipHtml !== robotAnim.tipHtml) {
+        robotAnim.tipHtml = tipHtml;
+        layers.robot.setTooltipContent(tipHtml);
       }
     }
     applyRobotTransform(); // avoid a one-frame flash after an icon rebuild
