@@ -33,7 +33,9 @@ Read files in roughly this order when getting oriented:
    `geo/tools/snap.js`, magnetic snapping in `geo/tools/magnet.js`), and
    polygon boolean ops (`geo/boolean.js` — merge/cut/clip/split on top of
    `polygon-clipping`, reduced to hole-free outer rings because `map.json`
-   outlines can't have holes). GeoJSON/KML exchange lives in
+   outlines can't have holes); `geo/route.js` plans go-to routes
+   (visibility graph + A* over mow + nav zones minus obstacles, holes kept).
+   GeoJSON/KML exchange lives in
    `format/exchange.js`. No DOM or Leaflet imports here by design — this is
    what `npm test` covers most heavily.
 4. **`src/map/mapController.js`** — the Leaflet integration layer. Subscribes
@@ -47,7 +49,8 @@ Read files in roughly this order when getting oriented:
    `Sidebar.svelte` (foldable into `SidebarRail.svelte`). `ToolDock.svelte`,
    `MapControls.svelte` (follow robot / trail / zoom), `CommandPalette.svelte`
    and `RobotHud.svelte` (status + mower control) are the other major
-   surfaces. `ContextMenu.svelte`, `SaveDialog.svelte` and `DraftBanner.svelte`
+   surfaces. `DriveView.svelte` is the fullscreen drive screen (joystick,
+   Go to, Record), opened and closed by `stores/driveScreen.js`. `ContextMenu.svelte`, `SaveDialog.svelte` and `DraftBanner.svelte`
    are driven by stores (`stores/ui.js`, `stores/draft.js`). `ui.js` also
    holds `editMode` — off is the calm view mode (no tool dock, handles or
    edit menus), the default on phones. Editor-only view state (hidden /
@@ -105,6 +108,16 @@ features:
   commands stop, speeds are clamped on both sides, the browser stops on
   release / blur / hidden tab, and stale helpers are killed before a new
   one starts (plus a 30 s self-exit).
+- **Go to position**: OpenMower's own planner can't be commanded from
+  outside — in IDLE and AREA_RECORDING `mower_logic` publishes on
+  `logic_vel`, which outranks `move_base_flex`'s `nav_vel` in `twist_mux` —
+  so go-to is automated joystick input. `src/lib/geo/route.js` plans the
+  route, `src/lib/stores/goto.js` steers along it ~10×/s with
+  `src/lib/robot/follow.js` and sends each command through the same
+  `POST /api/teleop/drive` as the stick. It only runs in drive mode and
+  stops on any doubt (stale or inaccurate pose, off-route, joystick, focus
+  loss, server error); `teleop.js`'s `onDriveInterrupt` hook is how the
+  joystick and focus-loss safety reach it.
 
 A third mower-side persisted/shared-state feature should build on the two
 factories this pattern was refactored into rather than re-copying it:
@@ -187,4 +200,5 @@ modifying these paths:
   `OPENMOWER_CONTROL_DISABLE` (control and joystick driving both honour it).
 - Anything that can move the robot must fail safe: keep the teleop helper's
   deadman, the server- and helper-side speed clamps, and the
-  kill-before-start cleanup intact when touching that code.
+  kill-before-start cleanup intact when touching that code, and go-to's
+  auto-stop rules in `stores/goto.js`.

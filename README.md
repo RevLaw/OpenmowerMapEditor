@@ -65,8 +65,9 @@ To update: open the stack in Dockge, **Pull**, then **Recreate**. Maps, backups 
 **Robot**
 - **Live robot** with smooth motion, status and RTK, plus **find & follow**.
 - **Mower control** — Start / Home / Reset need a two-tap confirm; Stop is one tap.
-- **Drive with an on-screen joystick** (touch, mouse or `W A S D`). This switches OpenMower into its area-recording mode, the only mode in which it accepts joystick commands; the blade stays off. The robot stops when you let go, when the tab loses focus, or when commands stop arriving for 0.4 s, and speed is capped at 0.5 m/s.
-- **Record a zone by driving** around it, or turn a stretch of the movement trail into a zone.
+- **Drive screen** — *Start drive mode* opens a fullscreen map that follows the robot, with an on-screen joystick (touch, mouse or `W A S D`), **Go to** and **Record**. Drive mode switches OpenMower into its area-recording mode, the only mode in which it accepts joystick commands; the blade stays off. The robot stops when you let go, when the tab loses focus, or when commands stop arriving for 0.4 s, and speed is capped at 0.5 m/s.
+- **Go to** — tap a spot and the robot drives there by itself (0.3 m/s), routing around obstacle zones and keeping 35 cm from zone edges. It stops on STOP, when you touch the joystick, if its position gets stale or RTK accuracy is worse than 20 cm, or if it strays 0.5 m off the route.
+- **Record a zone by driving** around it (drive screen or Robot tab), or turn a stretch of the movement trail into a zone.
 - **Movement trail** with a calendar (days with data are marked) and a **WiFi signal heatmap**. Both are recorded on the mower itself, with no browser needed.
 
 **Safety net & files**
@@ -93,6 +94,7 @@ To update: open the stack in Dockge, **Pull**, then **Recreate**. Maps, backups 
 | Lock / hide zone · cycle zones | `L` / `H` · `[` `]` |
 | Delete point · undo · redo | `Del` · `Ctrl + Z` · `Ctrl + Shift + Z` |
 | Fit zone · fit map · save | `F` · `Shift + F` · `Ctrl + S` |
+| Go to (drive screen) | **Go to** → tap the target → **Go** · `Esc` cancels |
 | Context menu | Right-click / long-press a zone, point, the dock or the map |
 
 ## Usage notes
@@ -100,7 +102,7 @@ To update: open the stack in Dockge, **Pull**, then **Recreate**. Maps, backups 
 - On start the editor loads `/data/ros/map.json` and takes the projection origin from `mower_params.yaml` (`datum_lat` / `datum_long`).
 - OpenMower only reads `map.json` on start-up — tick **Restart ROS after saving** in the save dialog to apply changes right away.
 - To roll back, open **Map → File → Backups…**, load a version (nothing is overwritten) and save it.
-- Typical robot-assisted mapping: **Robot** tab → *Start drive mode* → *Start recording* → drive around the area → *Finish & create zone* → *Leave drive mode* → save.
+- Typical robot-assisted mapping: **Robot** tab → *Start drive mode* → **Record** → drive around the area (joystick, or **Go to** corner by corner) → **Finish** → **Exit** → save.
 
 ## Docker & OpenMower integration
 
