@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.8.1 — Node 26 & dependency refresh
 
 Maintenance only: no user-visible changes.
 
