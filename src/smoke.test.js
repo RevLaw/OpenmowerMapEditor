@@ -219,3 +219,63 @@ describe("drive screen mounts open", () => {
     driveView.set(false);
   });
 });
+
+describe("Robot tab and status panel", () => {
+  const TELEMETRY = { stateName: "MOWING", batteryPercent: 84, emergency: false, isCharging: false };
+
+  it("Sensors panel groups the mower's sensors and marks critical values", async () => {
+    const { robotSensors } = await import("./lib/stores/sensors.js");
+    const { robotLive, robotPose } = await import("./lib/stores/robot.js");
+    robotLive.set(true);
+    robotPose.set({ ok: true, x: 0, y: 0, yaw: 0, positionAccuracy: 0.02, ros: { telemetry: TELEMETRY } });
+    robotSensors.set([
+      { id: "om_v_battery", name: "V Battery", unit: "V", kind: "voltage", value: 28.882, min: 24, max: 27, critLow: 23, critHigh: 29 },
+      { id: "om_v_charge", name: "V Charge", unit: "V", kind: "voltage", value: 30.4, min: null, max: null, critLow: null, critHigh: 30 },
+    ]);
+    const SensorsPanel = modules["./components/panels/SensorsPanel.svelte"].default;
+    const view = mountInto(SensorsPanel);
+    const text = view.target.textContent;
+    expect(text).toContain("Power");
+    expect(text).toContain("28.88 V");
+    expect(text).toContain("84%");
+    expect(view.target.querySelectorAll("[data-level='crit']").length).toBe(1);
+    view.destroy();
+    robotSensors.set([]);
+    robotPose.set(null);
+    robotLive.set(false);
+  });
+
+  it("status panel: one line of state, or a button to show the live robot", async () => {
+    const { robotLive, robotPose } = await import("./lib/stores/robot.js");
+    const RobotHud = modules["./components/RobotHud.svelte"].default;
+    robotLive.set(false);
+    let view = mountInto(RobotHud);
+    expect(view.target.textContent).toContain("Show live robot");
+    view.destroy();
+    robotLive.set(true);
+    robotPose.set({ ok: true, x: 0, y: 0, yaw: 0, positionAccuracy: 0.02, ros: { telemetry: TELEMETRY } });
+    view = mountInto(RobotHud);
+    const text = view.target.textContent.replace(/\s+/g, " ");
+    expect(text).toContain("Mowing");
+    expect(text).toContain("84%");
+    expect(text).toContain("RTK 2 cm");
+    expect(text).not.toContain("WiFi signal map");
+    view.destroy();
+    robotLive.set(false);
+    robotPose.set(null);
+  });
+
+  it("Robot tab has sensors, trail, WiFi and diagnostics — and no Record boundary panel", async () => {
+    const { sidebarTab } = await import("./lib/stores/ui.js");
+    sidebarTab.set("robot");
+    const Sidebar = modules["./components/Sidebar.svelte"].default;
+    const view = mountInto(Sidebar);
+    const text = view.target.textContent;
+    for (const title of ["Drive the mower", "Sensors", "Movement trail", "WiFi survey", "Diagnostics"]) {
+      expect(text).toContain(title);
+    }
+    expect(text).not.toContain("Record boundary");
+    view.destroy();
+    sidebarTab.set("zones");
+  });
+});

@@ -59,86 +59,61 @@ export function robotVisualToMarkerStyle(visualMode) {
   }
 }
 
-/** Multiline HUD label: power/GPS, mode, extras (mow, temps, emergency). */
-export function buildRobotHudLines(telemetry) {
-  if (!telemetry || typeof telemetry !== "object") return [];
-  const lines = [];
-  const power = [];
-  if (Number.isFinite(telemetry.batteryPercent)) {
-    power.push(`Batt ${Math.round(telemetry.batteryPercent)}%`);
-  }
-  if (Number.isFinite(telemetry.gpsQualityPercent)) {
-    power.push(`GPS ${Math.round(telemetry.gpsQualityPercent)}%`);
-  }
-  if (telemetry.isCharging === true) power.push("charging");
-  if (power.length) lines.push(power.join(" · "));
+const STATE_LABELS = {
+  IDLE: "Idle",
+  MOWING: "Mowing",
+  DOCKING: "Docking",
+  UNDOCKING: "Undocking",
+  AREA_RECORDING: "Area recording",
+};
+const LOW_BATTERY_PERCENT = 20;
+const RTK_OK_M = 0.2;
+const NO_RTK_FIX_M = 1; // worse than this (incl. the 999 m "no fix" value) reads as no fix
 
-  const mode = [];
-  if (typeof telemetry.stateName === "string" && telemetry.stateName.trim()) {
-    mode.push(telemetry.stateName.replace(/_/g, " "));
-  }
-  if (typeof telemetry.subStateName === "string" && telemetry.subStateName.trim()) {
-    mode.push(telemetry.subStateName.replace(/_/g, " "));
-  }
-  if (mode.length) lines.push(mode.join(" · "));
+/** The robot's state in plain words ("Mowing", "Docked · charging", ...), or "". */
+export function robotStateLabel(telemetry) {
+  if (!telemetry || typeof telemetry !== "object") return "";
+  if (telemetry.emergency === true) return "Emergency stop";
+  const name = String(telemetry.stateName || "").toUpperCase();
+  if (name === "IDLE" && telemetry.isCharging === true) return "Docked · charging";
+  if (STATE_LABELS[name]) return STATE_LABELS[name];
+  if (!name) return telemetry.isCharging === true ? "Charging" : "";
+  const words = name.replace(/_/g, " ").toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
-  const extra = [];
-  if (telemetry.mowEnabled === true) extra.push("mow on");
-  else if (telemetry.mowEnabled === false) extra.push("mow off");
-  if (telemetry.rainDetected === true) extra.push("rain");
-  if (Number.isFinite(telemetry.escTempC)) extra.push(`ESC ${Math.round(telemetry.escTempC)}°C`);
-  if (Number.isFinite(telemetry.mowerMotorRpm)) {
-    extra.push(`${Math.round(telemetry.mowerMotorRpm)} RPM`);
-  }
-  if (telemetry.emergency === true) extra.push("emergency");
-  if (telemetry.activeEmergency === true) extra.push("estop active");
-  if (telemetry.latchedEmergency === true) extra.push("latched");
-  if (typeof telemetry.emergencyReason === "string" && telemetry.emergencyReason.trim()) {
-    extra.push(telemetry.emergencyReason.trim().slice(0, 40));
-  }
-  if (extra.length) lines.push(extra.join(" · "));
+/** Position accuracy as "RTK 2 cm" / "no RTK fix", or "" when unknown. */
+export function rtkText(positionAccuracy) {
+  if (!Number.isFinite(positionAccuracy)) return "";
+  if (positionAccuracy > NO_RTK_FIX_M) return "no RTK fix";
+  return `RTK ${Math.round(positionAccuracy * 100)} cm`;
+}
 
+/**
+ * The one thing worth a pill under the robot marker, or null: emergency,
+ * low battery, rain, or a missing RTK fix away from the dock.
+ */
+export function robotAlert(pose) {
+  const t = pose?.ros?.telemetry || {};
+  if (t.emergency === true) {
+    const reason = typeof t.emergencyReason === "string" ? t.emergencyReason.trim().slice(0, 40) : "";
+    return { level: "crit", text: reason ? `Emergency stop · ${reason}` : "Emergency stop" };
+  }
+  if (Number.isFinite(t.batteryPercent) && t.batteryPercent < LOW_BATTERY_PERCENT) {
+    return { level: "warn", text: `Battery ${Math.round(t.batteryPercent)}%` };
+  }
+  if (t.rainDetected === true) return { level: "warn", text: "Rain" };
+  const acc = pose?.positionAccuracy;
+  if (t.isCharging !== true && Number.isFinite(acc) && acc > RTK_OK_M) return { level: "warn", text: "No RTK fix" };
+  return null;
+}
+
+/** Hover text for the robot marker: state, battery, RTK. */
+export function robotHoverLines(pose) {
+  const t = pose?.ros?.telemetry || null;
+  const lines = [robotStateLabel(t) || "Robot"];
+  if (Number.isFinite(t?.batteryPercent)) lines.push(`Battery ${Math.round(t.batteryPercent)}%`);
+  const rtk = rtkText(pose?.positionAccuracy);
+  if (rtk) lines.push(rtk);
   return lines;
-}
-
-function appendRobotTelemetryTooltipBrief(lines, telemetry) {
-  if (!telemetry || typeof telemetry !== "object") return;
-  if (Number.isFinite(telemetry.batteryPercent)) {
-    lines.push(`Battery ${Math.round(telemetry.batteryPercent)}%`);
-  }
-  if (Number.isFinite(telemetry.gpsQualityPercent)) {
-    lines.push(`GPS ${Math.round(telemetry.gpsQualityPercent)}%`);
-  }
-  if (telemetry.isCharging === true) lines.push("Power: charging");
-  if (telemetry.stateName) lines.push(`Mode: ${telemetry.stateName}`);
-}
-
-export function buildRobotPoseTooltip(data) {
-  const lines = [
-    `Robot (${data.frameParent}→${data.frameChild})  x=${data.x.toFixed(2)}m y=${data.y.toFixed(2)}m`,
-  ];
-  const c = data.container;
-  if (c && typeof c === "object") {
-    if (c.exists === false) {
-      lines.push("Container: not found");
-    } else if (c.exists == null) {
-      lines.push(`Container: unavailable (${c.status || "?"})`);
-    } else if (!c.running || (Number.isFinite(c.restartCount) && c.restartCount > 0)) {
-      lines.push(`Container: ${c.running ? "running" : "stopped"} (${c.status || "?"})`);
-      if (Number.isFinite(c.restartCount) && c.restartCount > 0) {
-        lines.push(`Restarts: ${c.restartCount}`);
-      }
-    }
-  }
-  if (data.ros && data.ros.telemetry) {
-    appendRobotTelemetryTooltipBrief(lines, data.ros.telemetry);
-  }
-  if (data.ros) {
-    if (data.ros.summary) lines.push(`Status: ${data.ros.summary}`);
-    if (data.ros.topic) lines.push(`ROS sample: ${data.ros.topic}`);
-  }
-  if (Number.isFinite(data.wifi?.signalDbm)) {
-    lines.push(`WiFi: ${Math.round(data.wifi.signalDbm)} dBm (${data.wifi.interface || "radio"})`);
-  }
-  return lines.join("\n");
 }

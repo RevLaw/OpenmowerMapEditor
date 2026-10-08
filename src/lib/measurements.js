@@ -54,3 +54,10 @@ export function formatLength(meters) {
   if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`;
   return `${meters.toFixed(meters < 100 ? 2 : 1)} m`;
 }
+
+/** File size for status lines ("12.3 KB"), or "not flushed yet" before the first write. */
+export function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "not flushed yet";
+  if (bytes < 1024) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(1)} KB`;
+}

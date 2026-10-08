@@ -459,31 +459,25 @@ input[type="range"].slider::-moz-range-thumb {
   justify-content: center;
   width: 100%;
 }
-.robot-marker-stack__hud {
+/* Only shown when something needs attention (see robotAlert). */
+.robot-marker-alert {
   margin-top: 4px;
-  min-width: 120px;
-  max-width: 220px;
-  padding: 6px 10px;
-  border-radius: 10px;
+  max-width: 200px;
+  padding: 2px 8px;
+  border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1.35;
-  color: var(--ink);
-  background: var(--glass-strong);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--glass-edge);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  white-space: normal;
-  text-align: center;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #1c1305;
+  background: var(--warn);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
 }
-.robot-marker-hud__line {
-  overflow-wrap: anywhere;
-}
-.robot-marker-hud__line + .robot-marker-hud__line {
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: 1px solid var(--glass-edge);
+.robot-marker-alert--crit {
+  color: #fff;
+  background: var(--danger);
 }
 
 .map-marker--robot {

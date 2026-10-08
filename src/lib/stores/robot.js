@@ -1,8 +1,8 @@
-import { writable, derived, get } from "svelte/store";
+import { writable, get } from "svelte/store";
 import { fetchRobotPose } from "../api.js";
-import { buildRobotHudLines } from "../robot/telemetry.js";
 import { notify, setStatus } from "./toast.js";
 import { ingestWifiPose } from "./wifi.js";
+import { ingestRobotSensors, clearRobotSensors } from "./sensors.js";
 import { clearRobotTrail, ingestRobotTrailPose } from "./robotTrail.js";
 
 const STORAGE_KEY = "openmower-map-editor-robot-live";
@@ -24,16 +24,6 @@ robotLive.subscribe((v) => {
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(STORAGE_KEY, v ? "1" : "0");
   }
-});
-
-/** Sidebar readout text derived from the latest pose. */
-export const robotReadout = derived([robotLive, robotPose], ([$live, $pose]) => {
-  if (!$live || !$pose || !$pose.ok) return null;
-  const lines = buildRobotHudLines($pose.ros?.telemetry || null);
-  if ($pose.gpsRtk) lines.push($pose.gpsRtk);
-  if (lines.length) return lines.join("\n");
-  if ($pose.ros?.summary) return $pose.ros.summary;
-  return "Map position only — ROS status not received yet.";
 });
 
 let source = null; // EventSource
@@ -65,6 +55,7 @@ function handlePayload(data) {
   }
   failCount = 0;
   robotPose.set(data);
+  ingestRobotSensors(data);
   ingestWifiPose(data);
   ingestRobotTrailPose(data);
 }
@@ -165,6 +156,7 @@ export function setRobotLive(on) {
   } else {
     stop();
     robotPose.set(null);
+    clearRobotSensors();
     clearRobotTrail();
     notify("Live robot off.", "info");
   }

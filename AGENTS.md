@@ -45,7 +45,7 @@ Read files in roughly this order when getting oriented:
 5. **`src/components/`** — Svelte UI: `AppShell.svelte` is the root layout;
    `components/panels/` holds sidebar panels (the zone list with its inline
    `ZoneEditor` / `MowingSettings`, Vertex, Simplify, Combine zones, Dock,
-   Drive, Record, …), grouped into Zones / Map / Robot tabs by
+   Drive, Sensors, Movement trail, WiFi survey, Diagnostics, …), grouped into Zones / Map / Robot tabs by
    `Sidebar.svelte` (foldable into `SidebarRail.svelte`). `ToolDock.svelte`,
    `MapControls.svelte` (follow robot / trail / zoom), `CommandPalette.svelte`
    and `RobotHud.svelte` (status + mower control) are the other major

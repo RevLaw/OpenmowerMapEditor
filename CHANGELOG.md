@@ -20,9 +20,32 @@
   joystick input, focus loss, a stale or inaccurate position, drifting off the
   route, or a server error.
 
+- **Sensors** — the Robot tab shows the mower's own sensor list
+  (xbot_monitoring: battery / charge voltage, ESC and motor temperatures, mow
+  motor current and rpm, GPS accuracy) plus emergency and rain, grouped; values
+  beyond the robot's critical limits turn red. They arrive with the live pose
+  (each at most once a second), no extra requests.
+- **Diagnostics** panel (Robot tab) with the raw pose, position source, ROS
+  container and WiFi at the mower.
+
 ### Changed
 - The Robot tab's Drive panel opens the drive screen instead of showing an
   inline joystick.
+- **Calmer map** — the robot marker is just the robot; a small pill appears
+  only when something needs attention (emergency stop, battery under 20 %,
+  rain, no RTK fix away from the dock). Hovering it shows state, battery and
+  RTK instead of technical details.
+- **Compact status panel** — top right is now the mower controls plus one
+  status line; the movement trail (with its calendar) and the WiFi survey moved
+  into the Robot tab.
+
+### Removed
+- The Robot tab's *Record boundary by driving* panel — recording lives in the
+  drive screen now.
+
+### Fixed
+- Live pose stream: frames from different ROS callbacks could interleave on
+  one line and be dropped; each line is now written whole.
 - Docker images install their runtime dependencies on the build machine's own
   platform and copy them into the ARM image, so building for the mower needs no
   emulation (the build fails if a native addon ever appears among them).

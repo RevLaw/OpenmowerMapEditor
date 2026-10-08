@@ -82,8 +82,8 @@ import { wifiSignalColor } from "../lib/wifi/signal.js";
 import {
   resolveRobotVisualMode,
   robotVisualToMarkerStyle,
-  buildRobotHudLines,
-  buildRobotPoseTooltip,
+  robotAlert,
+  robotHoverLines,
   escapeHtml,
 } from "../lib/robot/telemetry.js";
 import { poseDist2, stepPose } from "../lib/robot/interpolate.js";
@@ -1712,15 +1712,15 @@ export function createMapController(container) {
       robotAnim.cur = { ...target };
     }
 
-    // Cheap change key from visual + HUD text; only rebuild the icon when it moves.
-    const lines = buildRobotHudLines(pose.ros?.telemetry || null);
-    const key = `${visual}|${lines.join("")}`;
+    // Cheap change key from visual + alert; only rebuild the icon when it changes.
+    const alert = robotAlert(pose);
+    const key = `${visual}|${alert ? `${alert.level}:${alert.text}` : ""}`;
     if (!layers.robot) {
       layers.robot = L.marker(metersToLatLng(robotAnim.cur, origin()), {
-        icon: makeRobotIcon(visual, lines),
+        icon: makeRobotIcon(visual, alert),
         zIndexOffset: 800,
       })
-        .bindTooltip(buildRobotPoseTooltip(pose), {
+        .bindTooltip(robotHoverLines(pose).join("\n"), {
           sticky: true,
           direction: "top",
           opacity: 0.95,
@@ -1731,27 +1731,26 @@ export function createMapController(container) {
       robotAnim.glyphEl = layers.robot._icon?.querySelector(".robot-glyph") || null;
     } else {
       if (key !== robotAnim.iconKey) {
-        layers.robot.setIcon(makeRobotIcon(visual, lines));
+        layers.robot.setIcon(makeRobotIcon(visual, alert));
         robotAnim.iconKey = key;
         robotAnim.glyphEl = layers.robot._icon?.querySelector(".robot-glyph") || null;
       }
       // Only refresh the tooltip text while it's actually open.
       if (layers.robot.isTooltipOpen()) {
-        layers.robot.setTooltipContent(buildRobotPoseTooltip(pose));
+        layers.robot.setTooltipContent(robotHoverLines(pose).join("\n"));
       }
     }
     applyRobotTransform(); // avoid a one-frame flash after an icon rebuild
     if (!robotAnim.raf) robotAnim.raf = requestAnimationFrame(stepRobot);
   }
 
-  function makeRobotIcon(visual, lines) {
+  // The marker is just the robot; a small pill below it appears only when
+  // something needs attention (see robotAlert). Details live in the Robot tab.
+  function makeRobotIcon(visual, alert) {
     const { modifier, glyph } = robotVisualToMarkerStyle(visual);
     // Rotation is applied per-frame via applyRobotTransform(), not baked here.
     const inner = robotGlyphInner(visual, glyph);
-    const hud = lines.length
-      ? lines.map((l) => `<div class="robot-marker-hud__line">${escapeHtml(l)}</div>`).join("")
-      : "";
-    if (!hud) {
+    if (!alert) {
       return L.divIcon({
         className: "map-marker-leaflet",
         html: `<div class="map-marker--robot ${modifier}">${inner}</div>`,
@@ -1760,10 +1759,10 @@ export function createMapController(container) {
       });
     }
     const stackW = 200;
-    const stackH = 40 + 4 + 6 + lines.length * 15;
+    const stackH = 40 + 4 + 24;
     return L.divIcon({
       className: "map-marker-leaflet robot-marker-stack-wrap",
-      html: `<div class="robot-marker-stack" style="width:${stackW}px"><div class="robot-marker-stack__pin"><div class="map-marker--robot ${modifier}">${inner}</div></div><div class="robot-marker-stack__hud">${hud}</div></div>`,
+      html: `<div class="robot-marker-stack" style="width:${stackW}px"><div class="robot-marker-stack__pin"><div class="map-marker--robot ${modifier}">${inner}</div></div><div class="robot-marker-alert robot-marker-alert--${alert.level}">${escapeHtml(alert.text)}</div></div>`,
       iconSize: [stackW, stackH],
       iconAnchor: [stackW / 2, 20],
     });
