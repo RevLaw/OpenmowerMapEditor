@@ -17,6 +17,9 @@
 ### Changed
 - The Robot tab's Drive panel opens the drive screen instead of showing an
   inline joystick.
+- Docker images install their runtime dependencies on the build machine's own
+  platform and copy them into the ARM image, so building for the mower needs no
+  emulation (the build fails if a native addon ever appears among them).
 
 ## v2.8.1 — Node 26 & dependency refresh
 
