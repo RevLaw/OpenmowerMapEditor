@@ -4,7 +4,9 @@
 import { distance, pointToSegmentDistance } from "../geo/geometry.js";
 import { MAX_LINEAR, MAX_ANGULAR } from "./teleop.js";
 
-export const ARRIVE_M = 0.25; // a waypoint this close counts as reached
+export const ARRIVE_M = 0.25; // the target counts as reached this close
+export const CORNER_M = 0.1; // route corners: tight, so the robot doesn't cut them
+const LOOKAHEAD_M = 0.3; // steer at a point this far ahead along the segment
 export const TURN_IN_PLACE_RAD = (35 * Math.PI) / 180;
 const TURN_GAIN = 1.8; // rad/s of turn per rad of heading error
 const SLOW_DOWN_M = 1; // ease off over the last metre
@@ -27,21 +29,40 @@ export function remainingDistance(pose, waypoints, index) {
   return total;
 }
 
+function reached(pose, waypoints, i) {
+  return distance(pose, waypoints[i]) <= (i === waypoints.length - 1 ? ARRIVE_M : CORNER_M);
+}
+
+// Pure pursuit: a point LOOKAHEAD_M past the pose's projection onto from→to,
+// so the robot rejoins the planned line instead of cutting across to `to`.
+function aimPoint(pose, from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return to;
+  const along = ((pose.x - from.x) * dx + (pose.y - from.y) * dy) / len;
+  const t = Math.min(len, Math.max(0, along) + LOOKAHEAD_M);
+  return { x: from.x + (dx / len) * t, y: from.y + (dy / len) * t };
+}
+
 /**
- * One control step toward waypoints[index]. Reached waypoints are skipped; a
+ * One control step along the route, toward waypoints[index] (`start` is where
+ * the route began, for the first segment). Reached waypoints are skipped; a
  * large heading error turns on the spot so the robot doesn't swing wide past
  * an obstacle corner. Returns { lx, az, index, done }.
  */
-export function followStep(pose, waypoints, index, { maxSpeed = 0.3 } = {}) {
+export function followStep(pose, waypoints, index, { maxSpeed = 0.3, start = null } = {}) {
   let i = index;
-  while (i < waypoints.length && distance(pose, waypoints[i]) <= ARRIVE_M) i += 1;
+  while (i < waypoints.length && reached(pose, waypoints, i)) i += 1;
   if (i >= waypoints.length) return { lx: 0, az: 0, index: waypoints.length, done: true };
-  const wp = waypoints[i];
-  const error = wrapAngle(Math.atan2(wp.y - pose.y, wp.x - pose.x) - pose.yaw);
+  const from = i === 0 ? start : waypoints[i - 1];
+  const aim = from ? aimPoint(pose, from, waypoints[i]) : waypoints[i];
+  const error = wrapAngle(Math.atan2(aim.y - pose.y, aim.x - pose.x) - pose.yaw);
   const az = clamp(TURN_GAIN * error, -MAX_ANGULAR, MAX_ANGULAR);
   if (Math.abs(error) > TURN_IN_PLACE_RAD) return { lx: 0, az, index: i, done: false };
   const cap = clamp(Number(maxSpeed) || 0, 0, MAX_LINEAR);
-  const ease = Math.min(1, remainingDistance(pose, waypoints, i) / SLOW_DOWN_M);
+  // Ease off before the target and before every corner (the robot turns on the spot there).
+  const ease = Math.min(1, distance(pose, waypoints[i]) / SLOW_DOWN_M);
   const lx = Math.max(Math.min(MIN_FORWARD, cap), cap * ease) * Math.cos(error);
   return { lx, az, index: i, done: false };
 }

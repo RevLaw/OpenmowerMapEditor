@@ -150,7 +150,7 @@ with `phase` one of `idle | picking | planned | driving | arrived | stopped`.
     wins;
   - no new pose for 1 s (arrival stamp), pose source no longer `"stream"`, or
     `positionAccuracy` missing / worse than 0.2 m;
-  - more than 0.5 m off the current route segment;
+  - more than 0.25 m off the current route segment (below the 0.35 m clearance — changed from 0.5 m after the final review);
   - window blur / tab hidden / pagehide (hooked into `initTeleopSafety`);
   - drive mode left or robot no longer in `AREA_RECORDING`;
   - `sendTeleop` rejected (`ok: false`) or unreachable.

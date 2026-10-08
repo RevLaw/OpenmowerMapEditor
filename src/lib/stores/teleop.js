@@ -60,6 +60,11 @@ function interrupt(reason) {
   interruptHooks.forEach((fn) => fn(reason));
 }
 
+/** True while the stick is held and its send loop is running. */
+export function stickActive() {
+  return timer != null;
+}
+
 async function sendNow() {
   if (inFlight) return;
   const cmd = stickToTwist(stick.x, stick.y, get(driveSpeed));
@@ -86,8 +91,9 @@ export function setStick(x, y) {
   if (get(driveMode) !== "on") return;
   stick = { x, y };
   const moving = x !== 0 || y !== 0;
+  // Any stick input takes over from go-to (the hook is a no-op when it isn't driving).
+  if (moving) interrupt("joystick");
   if (moving && !timer) {
-    interrupt("joystick");
     sendNow();
     timer = setInterval(sendNow, SEND_MS);
   } else if (!moving && timer) {

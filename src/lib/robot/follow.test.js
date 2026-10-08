@@ -30,7 +30,7 @@ describe("followStep", () => {
   });
 
   it("skips reached waypoints", () => {
-    const s = followStep(at(4.9, 0), [{ x: 5, y: 0 }, { x: 5, y: 5 }], 0);
+    const s = followStep(at(4.95, 0), [{ x: 5, y: 0 }, { x: 5, y: 5 }], 0);
     expect(s.index).toBe(1);
   });
 
@@ -55,6 +55,35 @@ describe("followStep", () => {
     const s = followStep(at(0, 0, 3.1), [{ x: -5, y: -0.2 }], 0);
     expect(s.lx).toBeGreaterThan(0);
     expect(Math.abs(s.az)).toBeLessThan(0.5);
+  });
+});
+
+// Drive a simple unicycle model with followStep at 10 Hz; returns the poses visited.
+function simulate(start, waypoints, steps = 600) {
+  const p = { ...start };
+  const trace = [{ ...p }];
+  let index = 0;
+  for (let k = 0; k < steps; k += 1) {
+    const s = followStep(p, waypoints, index, { start });
+    index = s.index;
+    if (s.done) break;
+    p.yaw += s.az * 0.1;
+    p.x += s.lx * Math.cos(p.yaw) * 0.1;
+    p.y += s.lx * Math.sin(p.yaw) * 0.1;
+    trace.push({ ...p });
+  }
+  return { trace, index };
+}
+
+describe("driving a route", () => {
+  it("doesn't cut corners: the driven path stays close to the planned one", () => {
+    const start = at(0, 0);
+    const waypoints = [{ x: 5, y: 0 }, { x: 5, y: 5 }];
+    const { trace, index } = simulate(start, waypoints);
+    expect(index).toBe(2);
+    const offRoute = (p) =>
+      Math.min(offRouteDistance(p, waypoints, 0, start), offRouteDistance(p, waypoints, 1, start));
+    expect(Math.max(...trace.map(offRoute))).toBeLessThan(0.12);
   });
 });
 

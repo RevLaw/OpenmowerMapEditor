@@ -129,11 +129,32 @@ describe("go-to store", () => {
     expect(get(gotoState).reason).toMatch(/route/i);
   });
 
+  it("stops before drifting as far as the clearance margin", async () => {
+    await driveTo({ x: 15, y: 5 });
+    pose(5, 5.3);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(get(gotoState).phase).toBe("stopped");
+  });
+
   it("gives way to the joystick", async () => {
     await driveTo({ x: 15, y: 5 });
     setStick(0, 0.8);
     expect(get(gotoState).phase).toBe("stopped");
     expect(get(gotoState).reason).toMatch(/joystick/i);
+    setStick(0, 0);
+  });
+
+  it("won't start while the joystick is held", async () => {
+    armGoto();
+    pickTarget({ x: 15, y: 5 });
+    setStick(0, 0.8);
+    sendTeleop.mockClear();
+    startGoto();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(get(gotoState).phase).toBe("planned");
+    expect(get(gotoState).reason).toMatch(/joystick/i);
+    // Only the stick's own loop sent commands (forward, no turn from a go-to).
+    expect(sendTeleop.mock.calls.every(([, az]) => az === 0)).toBe(true);
     setStick(0, 0);
   });
 

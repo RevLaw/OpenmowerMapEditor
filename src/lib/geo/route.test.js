@@ -96,6 +96,14 @@ describe("planRoute", () => {
     expect(r.ok).toBe(true);
   });
 
+  it("never takes a robot near an obstacle closer than it already is", () => {
+    const rock = rect(0, 0, 5, 1);
+    const start = { x: 0.05, y: -0.25 }; // 0.25 m below the rock, inside the clearance
+    const r = planRoute([zone("mow", rect(-10, -10, 20, 20)), zone("obstacle", rock)], start, { x: -0.6, y: 1.5 });
+    expect(r.ok).toBe(true);
+    expect(routeClearance(start, r.waypoints, rock)).toBeGreaterThanOrEqual(0.25 - 1e-6);
+  });
+
   it("needs a mow or nav zone and ignores degenerate zones", () => {
     expect(planRoute([zone("obstacle", rect(0, 0, 5, 5))], { x: 1, y: 1 }, { x: 2, y: 2 })).toEqual({
       ok: false,

@@ -78,8 +78,9 @@ function segmentDistance(a, b, c, d) {
   );
 }
 
-// Borders closer than `clearance` to `exempt` (the robot) are only checked for
-// crossing, so a robot parked near an edge can still drive away from it.
+// Borders already closer than `clearance` to `exempt` (the robot) only have to
+// keep their current distance, so a robot parked near an edge can still drive
+// away from it — but never closer to it.
 function segmentFree(a, b, region, clearance, exempt) {
   const minX = Math.min(a.x, b.x) - clearance;
   const maxX = Math.max(a.x, b.x) + clearance;
@@ -87,11 +88,8 @@ function segmentFree(a, b, region, clearance, exempt) {
   const maxY = Math.max(a.y, b.y) + clearance;
   for (const e of region.edges) {
     if (e.maxX < minX || e.minX > maxX || e.maxY < minY || e.minY > maxY) continue;
-    if (exempt && pointToSegmentDistance(exempt, e.a, e.b) < clearance) {
-      if (segmentsIntersect(a, b, e.a, e.b)) return false;
-      continue;
-    }
-    if (segmentDistance(a, b, e.a, e.b) < clearance - EPS) return false;
+    const needed = exempt ? Math.min(clearance, pointToSegmentDistance(exempt, e.a, e.b)) : clearance;
+    if (segmentDistance(a, b, e.a, e.b) < needed - EPS) return false;
   }
   return true;
 }

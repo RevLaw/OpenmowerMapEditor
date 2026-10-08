@@ -2,7 +2,7 @@ import { writable, get } from "svelte/store";
 import { sendTeleop } from "../api.js";
 import { editor } from "./editor.js";
 import { robotPose } from "./robot.js";
-import { driveMode, robotInRecordingMode, onDriveInterrupt } from "./teleop.js";
+import { driveMode, robotInRecordingMode, onDriveInterrupt, stickActive } from "./teleop.js";
 import { notify } from "./toast.js";
 import { getAreaType } from "../format/mapFormat.js";
 import { getEditablePoints } from "../format/outline.js";
@@ -18,7 +18,7 @@ import { followStep, offRouteDistance, remainingDistance } from "../robot/follow
 const TICK_MS = 100;
 const POSE_STALE_MS = 1000;
 const MAX_ACCURACY_M = 0.2;
-const OFF_ROUTE_M = 0.5;
+const OFF_ROUTE_M = 0.25; // below the route's 0.35 m clearance, so a drift stops before it reaches an edge
 const NO_RESPONSE_MS = 1000;
 const DISMISS_MS = { arrived: 4000, stopped: 8000 };
 export const GOTO_SPEED = 0.3; // m/s
@@ -133,6 +133,11 @@ export function startGoto() {
     setState({ ...s, reason: blocker });
     return;
   }
+  // Two command sources must never drive at once.
+  if (stickActive()) {
+    setState({ ...s, reason: "Let go of the joystick first." });
+    return;
+  }
   // Re-plan from where the robot is now; it may have moved since the tap.
   const r = plan(s.target);
   if (r.error) {
@@ -163,6 +168,10 @@ function tick() {
     stopGoto(blocker);
     return;
   }
+  if (stickActive()) {
+    stopGoto(INTERRUPTS.joystick);
+    return;
+  }
   if (inFlight && now - inFlightSince > NO_RESPONSE_MS) {
     stopGoto("the server stopped responding.");
     return;
@@ -171,7 +180,7 @@ function tick() {
     stopGoto("the robot left the route.");
     return;
   }
-  const step = followStep(lastPose, s.waypoints, s.index, { maxSpeed: GOTO_SPEED });
+  const step = followStep(lastPose, s.waypoints, s.index, { maxSpeed: GOTO_SPEED, start: s.start });
   if (step.done) {
     halt();
     setState({ ...s, phase: "arrived", index: step.index, remaining: 0 });
