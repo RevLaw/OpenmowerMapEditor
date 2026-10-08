@@ -32,6 +32,14 @@ describe("drive screen", () => {
     expect(get(followRobot)).toBe(true);
   });
 
+  it("fills the window but doesn't force the browser into fullscreen", async () => {
+    const requestFullscreen = vi.fn(() => Promise.resolve());
+    document.documentElement.requestFullscreen = requestFullscreen;
+    await openDriveScreen();
+    expect(get(driveView)).toBe(true);
+    expect(requestFullscreen).not.toHaveBeenCalled();
+  });
+
   it("closes, leaves drive mode and restores edit mode", async () => {
     await openDriveScreen();
     await closeDriveScreen();

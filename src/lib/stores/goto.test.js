@@ -79,6 +79,26 @@ describe("go-to store", () => {
     expect(gotoBlocker()).toMatch(/accept/i);
   });
 
+  it("refuses while the robot is in the docking station", () => {
+    pose(2, 5, 0, { ros: { telemetry: { stateName: "AREA_RECORDING", isCharging: true } } });
+    expect(gotoBlocker()).toMatch(/docking station/i);
+    armGoto();
+    pickTarget({ x: 15, y: 5 });
+    expect(get(gotoState).phase).toBe("picking");
+    expect(get(gotoState).reason).toMatch(/docking station/i);
+  });
+
+  it("does nothing without a map", async () => {
+    loadMap(JSON.stringify({ areas: [] }));
+    armGoto();
+    pickTarget({ x: 15, y: 5 });
+    startGoto();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(get(gotoState).phase).toBe("picking");
+    expect(get(gotoState).reason).toMatch(/no mow or nav zones/i);
+    expect(sendTeleop).not.toHaveBeenCalled();
+  });
+
   it("shows a reason when the target can't be reached", () => {
     armGoto();
     pickTarget({ x: 40, y: 5 });

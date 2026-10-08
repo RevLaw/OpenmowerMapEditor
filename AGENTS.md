@@ -49,7 +49,7 @@ Read files in roughly this order when getting oriented:
    `Sidebar.svelte` (foldable into `SidebarRail.svelte`). `ToolDock.svelte`,
    `MapControls.svelte` (follow robot / trail / zoom), `CommandPalette.svelte`
    and `RobotHud.svelte` (status + mower control) are the other major
-   surfaces. `DriveView.svelte` is the fullscreen drive screen (joystick,
+   surfaces. `DriveView.svelte` is the full-window drive screen (joystick,
    Go to, Record), opened and closed by `stores/driveScreen.js`. `ContextMenu.svelte`, `SaveDialog.svelte` and `DraftBanner.svelte`
    are driven by stores (`stores/ui.js`, `stores/draft.js`). `ui.js` also
    holds `editMode` — off is the calm view mode (no tool dock, handles or

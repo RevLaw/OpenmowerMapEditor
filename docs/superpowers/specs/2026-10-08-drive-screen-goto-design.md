@@ -140,7 +140,9 @@ with `phase` one of `idle | picking | planned | driving | arrived | stopped`.
   `sendTeleop()`; `remaining` is updated each tick.
 - Arrival → explicit zero command, `arrived` (toast "Arrived").
 - **Preconditions** for `pickTarget` and `startGoto`: `driveMode === "on"`,
-  `robotInRecordingMode`, a live pose with `source === "stream"` (the ~1 Hz
+  `robotInRecordingMode`, the robot not charging (`isCharging` — in the dock the
+  follower's first move, a turn on the spot, would hit the station; back out with
+  the joystick first), a live pose with `source === "stream"` (the ~1 Hz
   fallback probe is too slow to steer by), `positionAccuracy` non-null and
   ≤ 0.2 m.
 - **Auto-stop** → explicit zero command (as `releaseStick()`), `stopped` with a
@@ -166,16 +168,15 @@ driving, and go-to's loop and the stick loop never run at the same time.
 
 **Entering / leaving**
 - **Start drive mode** (Robot tab, command palette) → `enterDriveMode()` and
-  `driveView = true`; requests the Fullscreen API on `document.documentElement`
-  where supported (Android Chrome, desktop), else a full-viewport layout (iOS).
+  `driveView = true`; the drive screen fills the app's window. The browser is
+  *not* put into fullscreen (changed after the first on-robot try — it was
+  intrusive; the full-window layout is enough).
 - While open: sidebar, rail, tool dock, selection bar and tool hint are hidden;
   `editMode` is off for the duration; `followRobot` is turned on (panning turns
   it off as today; the follow button stays available).
 - **Exit** (top right) → stops go-to and the stick, `exitDriveMode()`
-  (`record_exit`), closes the screen, leaves browser fullscreen. If a recording
+  (`record_exit`), closes the screen. If a recording
   is active it asks first: **Finish & create zone / Discard / Stay**.
-- Leaving browser fullscreen (Esc / back gesture) keeps the drive screen open
-  in its full-viewport layout; it does not leave drive mode.
 - **Sidebar panels**: `DrivePanel` keeps its intro, safety note and **Start
   drive mode**; its inline joystick is replaced by **Open drive screen** /
   **Leave drive mode** while drive mode is on (one joystick, one place).

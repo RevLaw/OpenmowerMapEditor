@@ -3,32 +3,13 @@ import { driveView, editMode, followRobot } from "./ui.js";
 import { driveMode, enterDriveMode, exitDriveMode } from "./teleop.js";
 import { cancelGoto } from "./goto.js";
 
-// Opening / closing the fullscreen drive screen: drive mode on, editing chrome
-// off, map following the robot, and the browser's Fullscreen API where it
-// exists (not on iPhone — the layout fills the viewport there instead).
+// Opening / closing the drive screen: drive mode on, editing chrome off and
+// the map following the robot. It fills the app's window; the browser itself
+// is never forced into fullscreen.
 let editModeBefore = null;
-
-function enterFullscreen() {
-  try {
-    const el = document.documentElement;
-    if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen().catch(() => {});
-  } catch (_e) {
-    /* not supported */
-  }
-}
-
-function leaveFullscreen() {
-  try {
-    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
-  } catch (_e) {
-    /* not supported */
-  }
-}
 
 /** Show the drive screen and enter drive mode. Resolves false if drive mode couldn't start. */
 export async function openDriveScreen() {
-  // First, while the click still counts as a user gesture for the Fullscreen API.
-  enterFullscreen();
   if (!get(driveView)) {
     editModeBefore = get(editMode);
     editMode.set(false);
@@ -51,6 +32,5 @@ export async function closeDriveScreen({ leaveDriveMode = true } = {}) {
   driveView.set(false);
   if (editModeBefore != null) editMode.set(editModeBefore);
   editModeBefore = null;
-  leaveFullscreen();
   if (leaveDriveMode && get(driveMode) === "on") await exitDriveMode();
 }

@@ -56,6 +56,11 @@ export function gotoBlocker(now = Date.now()) {
   if (get(driveMode) !== "on") return "Start drive mode first.";
   if (!lastPose || now - lastPoseAt > POSE_STALE_MS) return "Waiting for live position.";
   if (!get(robotInRecordingMode)) return "Waiting for the robot to accept commands.";
+  // The follower never reverses and turns on the spot first — inside the dock
+  // that would hit the station, so the robot has to be backed out by hand.
+  if (lastPose.ros?.telemetry?.isCharging === true) {
+    return "The robot is in the docking station — back it out with the joystick first.";
+  }
   if (lastPose.source !== "stream") return "Needs the live position stream.";
   const acc = lastPose.positionAccuracy;
   if (acc == null || !(acc <= MAX_ACCURACY_M)) return "Position not accurate enough (RTK).";

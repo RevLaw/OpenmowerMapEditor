@@ -3,14 +3,16 @@
 ## Unreleased
 
 ### Added
-- **Drive screen** — *Start drive mode* now opens a fullscreen map that
+- **Drive screen** — *Start drive mode* now turns the app into a drive view:
+  the map fills the window (the browser itself isn't forced into fullscreen) and
   follows the robot, with the joystick, a speed slider, STOP, and recording
   controls (Record → mow / obstacle / nav → Pause / Back / Discard / Finish)
   on top.
 - **Go to** — tap the map and the robot drives there by itself, on a route
   that avoids obstacle zones and keeps 35 cm from zone edges (planned in the
   editor; OpenMower's own planner can't be commanded from outside). Runs only
-  in drive mode with live RTK position, at 0.3 m/s, and stops on STOP,
+  in drive mode with live RTK position and never from inside the docking
+  station (back out with the joystick first), at 0.3 m/s, and stops on STOP,
   joystick input, focus loss, a stale or inaccurate position, drifting off the
   route, or a server error.
 
