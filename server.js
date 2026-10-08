@@ -1255,7 +1255,7 @@ const CONTROL_COMMANDS = new Set(["start", "stop", "home", "reset_emergency", "r
  * (browser stopped / server idle timeout) stops the robot and ends the helper.
  * Disabled together with the other motion commands (OPENMOWER_CONTROL_DISABLE).
  */
-const TELEOP_MAX_LINEAR = 0.5; // m/s — teleop_twist_joy's scale_linear in OpenMower
+const TELEOP_MAX_LINEAR = 1.0; // m/s — teleop_twist_joy's scale_linear_turbo in OpenMower (the drive screen's sprint)
 const TELEOP_MAX_ANGULAR = 1.5; // rad/s — teleop_twist_joy's scale_angular
 const TELEOP_DEADMAN_SEC = 0.4;
 const TELEOP_IDLE_CLOSE_MS = 20000;

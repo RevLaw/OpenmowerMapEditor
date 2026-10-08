@@ -65,7 +65,7 @@ To update: open the stack in Dockge, **Pull**, then **Recreate**. Maps, backups 
 **Robot**
 - **Live robot** with smooth motion, status and RTK, plus **find & follow**.
 - **Mower control** — Start / Home / Reset need a two-tap confirm; Stop is one tap.
-- **Drive screen** — *Start drive mode* turns the app into a drive view (the map fills the window and follows the robot), with an on-screen joystick (touch, mouse or `W A S D`), **Go to** and **Record**. Drive mode switches OpenMower into its area-recording mode, the only mode in which it accepts joystick commands; the blade stays off. The robot stops when you let go, when the tab loses focus, or when commands stop arriving for 0.4 s, and speed is capped at 0.5 m/s.
+- **Drive screen** — *Start drive mode* turns the app into a drive view (the map fills the window and follows the robot), with an on-screen joystick (touch, mouse or `W A S D`), **Go to** and **Record**. Drive mode switches OpenMower into its area-recording mode, the only mode in which it accepts joystick commands; the blade stays off. The robot stops when you let go, when the tab loses focus, or when commands stop arriving for 0.4 s. The speed slider sets the stick's top speed (up to 0.5 m/s); slide your thumb up past the ring into the **sprint bubble** (or hold `Shift` + `W`) to drive forward at OpenMower's turbo speed of 1 m/s with gentle steering.
 - **Go to** — tap a spot and the robot drives there by itself (0.3 m/s), routing around obstacle zones and keeping 35 cm from zone edges. It won't start while the robot is in the docking station (back it out with the joystick first), and it stops on STOP, when you touch the joystick, if its position gets stale or RTK accuracy is worse than 20 cm, or if it strays 25 cm off the route.
 - **Record a zone by driving** around it (drive screen or Robot tab), or turn a stretch of the movement trail into a zone.
 - **Movement trail** with a calendar (days with data are marked) and a **WiFi signal heatmap**. Both are recorded on the mower itself, with no browser needed.
@@ -94,6 +94,7 @@ To update: open the stack in Dockge, **Pull**, then **Recreate**. Maps, backups 
 | Lock / hide zone · cycle zones | `L` / `H` · `[` `]` |
 | Delete point · undo · redo | `Del` · `Ctrl + Z` · `Ctrl + Shift + Z` |
 | Fit zone · fit map · save | `F` · `Shift + F` · `Ctrl + S` |
+| Sprint (drive screen) | Slide the stick up into the bubble above it · `Shift` + `W` |
 | Go to (drive screen) | **Go to** → tap the target → **Go** · `Esc` cancels |
 | Context menu | Right-click / long-press a zone, point, the dock or the map |
 

@@ -160,6 +160,35 @@ describe("panels follow in-place editor mutations", () => {
   });
 });
 
+describe("joystick sprint", () => {
+  it("reports turbo for Shift + W, and not for plain W", () => {
+    const Joystick = modules["./components/Joystick.svelte"].default;
+    const calls = [];
+    const view = mountInto(Joystick, { turbo: true, onChange: (...args) => calls.push(args) });
+    const pad = view.target.querySelector("[role='slider']");
+    pad.dispatchEvent(new KeyboardEvent("keydown", { key: "w", bubbles: true }));
+    expect(calls.at(-1)).toEqual([0, 1, false]);
+    pad.dispatchEvent(new KeyboardEvent("keydown", { key: "W", shiftKey: true, bubbles: true }));
+    expect(calls.at(-1)).toEqual([0, 1, true]);
+    flushSync();
+    expect(view.target.querySelector(".turbo-bubble.on")).not.toBeNull();
+    pad.dispatchEvent(new KeyboardEvent("keyup", { key: "Shift", bubbles: true }));
+    expect(calls.at(-1)).toEqual([0, 1, false]);
+    view.destroy();
+  });
+
+  it("lets go of the stick when it disappears while held", () => {
+    const Joystick = modules["./components/Joystick.svelte"].default;
+    const calls = [];
+    const view = mountInto(Joystick, { turbo: true, onChange: (...args) => calls.push(args) });
+    const pad = view.target.querySelector("[role='slider']");
+    pad.dispatchEvent(new KeyboardEvent("keydown", { key: "W", shiftKey: true, bubbles: true }));
+    expect(calls.at(-1)).toEqual([0, 1, true]);
+    view.destroy();
+    expect(calls.at(-1)).toEqual([0, 0, false]);
+  });
+});
+
 describe("toasts in the drive screen", () => {
   it("sit above the joystick instead of on it", async () => {
     const { driveView } = await import("./lib/stores/ui.js");
@@ -169,7 +198,7 @@ describe("toasts in the drive screen", () => {
     expect(stack().style.bottom).toBe("");
     driveView.set(true);
     flushSync();
-    expect(stack().style.bottom).toBe("256px");
+    expect(stack().style.bottom).toBe("320px");
     driveView.set(false);
     view.destroy();
   });

@@ -156,6 +156,7 @@
           style="background:{ready && accOk ? 'var(--ok)' : 'var(--warn)'}"
         ></span>
         <span class="min-w-0 flex-1 truncate font-semibold">{status}</span>
+        {#if $driveCommand.turbo}<span class="chip shrink-0 font-semibold" style="color:var(--warn)">TURBO</span>{/if}
         <span class="shrink-0 font-mono text-subtle">{$driveCommand.lx.toFixed(2)} m/s</span>
         <span class="shrink-0 font-mono" class:text-muted={accOk} style={accOk ? "" : "color:var(--warn)"}>
           RTK {acc == null ? "—" : `${Math.round(acc * 100)} cm`}
@@ -243,7 +244,7 @@
 
     <!-- Bottom centre: the joystick, where a thumb reaches it -->
     <div class="glass pointer-events-auto mx-auto flex flex-col items-center gap-2 rounded-3xl p-3">
-      <Joystick onChange={setStick} disabled={busy} size={176} />
+      <Joystick onChange={setStick} disabled={busy} size={176} turbo />
       <label class="flex w-full items-center gap-2 text-[11px] text-muted">
         Max
         <input

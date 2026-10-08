@@ -8,6 +8,10 @@
   follows the robot, with the joystick, a speed slider, STOP, and recording
   controls (Record → mow / obstacle / nav → Pause / Back / Discard / Finish)
   on top.
+- **Sprint** — slide the joystick up past its ring into the bubble above it
+  (or `Shift` + `W`) to drive forward at OpenMower's turbo speed, 1 m/s, with
+  gentle steering; back in the ring the speed slider's limit (≤ 0.5 m/s)
+  applies again. The server's forward cap is now 1 m/s to allow it.
 - **Go to** — tap the map and the robot drives there by itself, on a route
   that avoids obstacle zones and keeps 35 cm from zone edges (planned in the
   editor; OpenMower's own planner can't be commanded from outside). Runs only

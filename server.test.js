@@ -199,7 +199,9 @@ describe("clampTeleopCommand", () => {
   });
 
   it("clamps to the max linear / angular speed", () => {
-    expect(clampTeleopCommand({ lx: 5, az: -9 })).toEqual({ lx: 0.5, az: -1.5 });
+    // Forward cap = OpenMower's turbo speed (the drive screen's sprint bubble).
+    expect(clampTeleopCommand({ lx: 5, az: -9 })).toEqual({ lx: 1, az: -1.5 });
+    expect(clampTeleopCommand({ lx: 0.9, az: 0 })).toEqual({ lx: 0.9, az: 0 });
   });
 
   it("rejects missing or non-numeric values", () => {

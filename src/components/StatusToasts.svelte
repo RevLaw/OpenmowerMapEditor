@@ -6,7 +6,7 @@
 
   // The drive screen's joystick sits bottom-centre; toasts take touches, so
   // they move up above it instead of landing on the stick.
-  const ABOVE_JOYSTICK = "256px";
+  const ABOVE_JOYSTICK = "320px";
 
   const icon = { info: "info", success: "check_circle", warn: "warning", error: "error" };
   const color = {
