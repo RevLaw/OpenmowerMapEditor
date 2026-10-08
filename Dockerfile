@@ -12,6 +12,21 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
+# ---- Runtime dependencies, also installed on BUILDPLATFORM ----
+# They're pure JavaScript (express, js-yaml and friends), so the same files run
+# on any architecture and the ARM image needs no emulated npm. The check below
+# fails the build if a native addon ever sneaks in — then this must move back
+# into the runtime stage.
+FROM --platform=$BUILDPLATFORM node:26-alpine AS deps
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev \
+  && if find node_modules \( -name '*.node' -o -name binding.gyp \) | grep -q .; then \
+       echo "native addon in runtime dependencies — install them in the runtime stage" >&2; exit 1; \
+     fi
+
 # ---- Runtime stage: lean Express server serving the built dist/ ----
 FROM node:26-alpine
 
@@ -19,7 +34,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+COPY --from=deps /app/node_modules ./node_modules
 
 COPY server.js ./
 COPY --from=build /app/dist ./dist
@@ -27,4 +42,3 @@ COPY --from=build /app/dist ./dist
 EXPOSE 80
 
 CMD ["npm", "start"]
-

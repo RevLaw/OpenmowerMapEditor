@@ -18,6 +18,7 @@ process.env.ROBOT_TRAIL_MIN_DISTANCE_M = "1";
 
 const {
   clampTeleopCommand,
+  sensorFrameToSensor,
   isDifferentLocalDay,
   classifyTrailPhase,
   normalizeWifiSample,
@@ -193,13 +194,63 @@ describe("appendRobotTrailPoint", () => {
   });
 });
 
+describe("sensorFrameToSensor", () => {
+  const frame = {
+    t: "N",
+    id: "om_v_battery",
+    name: "V Battery",
+    unit: "V",
+    desc: 4,
+    v: 28.87,
+    lo: 24,
+    hi: 27,
+    clo: 23,
+    chi: 29,
+  };
+
+  it("turns a streamed xbot_monitoring sensor into the UI shape", () => {
+    expect(sensorFrameToSensor(frame)).toEqual({
+      id: "om_v_battery",
+      name: "V Battery",
+      unit: "V",
+      kind: "voltage",
+      value: 28.87,
+      min: 24,
+      max: 27,
+      critLow: 23,
+      critHigh: 29,
+    });
+  });
+
+  it("keeps text values and leaves missing limits empty", () => {
+    const s = sensorFrameToSensor({ t: "N", id: "om_charge_state", name: "Charge State", unit: "", desc: 0, v: "N/A" });
+    expect(s).toMatchObject({ id: "om_charge_state", value: "N/A", kind: null, min: null, max: null });
+  });
+
+  it("rejects malformed frames", () => {
+    expect(sensorFrameToSensor({ ...frame, id: "" })).toBeNull();
+    expect(sensorFrameToSensor({ ...frame, id: "bad id;rm" })).toBeNull();
+    expect(sensorFrameToSensor({ ...frame, v: Number.NaN })).toBeNull();
+    expect(sensorFrameToSensor({ ...frame, v: { x: 1 } })).toBeNull();
+    expect(sensorFrameToSensor(null)).toBeNull();
+  });
+
+  it("caps long text", () => {
+    const s = sensorFrameToSensor({ ...frame, name: "x".repeat(500), v: "y".repeat(500) });
+    expect(s.name.length).toBeLessThanOrEqual(60);
+    expect(s.value.length).toBeLessThanOrEqual(60);
+  });
+});
+
 describe("clampTeleopCommand", () => {
   it("passes valid commands through", () => {
     expect(clampTeleopCommand({ lx: 0.2, az: -0.5 })).toEqual({ lx: 0.2, az: -0.5 });
   });
 
   it("clamps to the max linear / angular speed", () => {
-    expect(clampTeleopCommand({ lx: 5, az: -9 })).toEqual({ lx: 0.5, az: -1.5 });
+    // Forward cap = OpenMower's turbo speed (the drive screen's sprint bubble).
+    expect(clampTeleopCommand({ lx: 5, az: -9 })).toEqual({ lx: 1, az: -1.5 });
+    expect(clampTeleopCommand({ lx: 0.9, az: 0 })).toEqual({ lx: 0.9, az: 0 });
   });
 
   it("rejects missing or non-numeric values", () => {

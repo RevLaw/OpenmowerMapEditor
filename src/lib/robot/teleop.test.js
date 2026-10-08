@@ -1,5 +1,50 @@
 import { describe, it, expect } from "vitest";
-import { stickToTwist, clampStick, keysToStick, MAX_LINEAR, MAX_ANGULAR } from "./teleop.js";
+import {
+  stickToTwist,
+  clampStick,
+  keysToStick,
+  turboBubble,
+  MAX_LINEAR,
+  MAX_ANGULAR,
+  TURBO_LINEAR,
+  TURBO_ANGULAR,
+} from "./teleop.js";
+
+describe("turbo sprint", () => {
+  it("drives at the turbo speed whatever the speed setting", () => {
+    expect(TURBO_LINEAR).toBe(1);
+    expect(stickToTwist(0, 1, 0.1, { turbo: true })).toEqual({ lx: TURBO_LINEAR, az: 0 });
+  });
+
+  it("steers gently while sprinting", () => {
+    expect(TURBO_ANGULAR).toBeLessThan(MAX_ANGULAR);
+    expect(stickToTwist(1, 1, 1, { turbo: true }).az).toBeCloseTo(-TURBO_ANGULAR);
+    expect(stickToTwist(-1, 1, 0.1, { turbo: true }).az).toBeCloseTo(TURBO_ANGULAR);
+  });
+
+  it("keeps the normal cap without turbo", () => {
+    expect(MAX_LINEAR).toBe(0.5);
+    expect(stickToTwist(0, 1, 1).lx).toBe(MAX_LINEAR);
+  });
+});
+
+describe("turboBubble", () => {
+  it("is reached by sliding the thumb up past the ring", () => {
+    expect(turboBubble(0, 1.45)).toEqual({ turbo: true, x: 0 });
+    expect(turboBubble(0, 3).turbo).toBe(true);
+  });
+
+  it("isn't reached inside the ring, off to the side or downwards", () => {
+    expect(turboBubble(0, 0.95).turbo).toBe(false);
+    expect(turboBubble(0.9, 1.45).turbo).toBe(false);
+    expect(turboBubble(0, -1.45).turbo).toBe(false);
+  });
+
+  it("turns sideways thumb movement in the bubble into steering", () => {
+    expect(turboBubble(0.2, 1.45).x).toBeCloseTo(0.4);
+    expect(turboBubble(-0.49, 1.45).x).toBeCloseTo(-0.98);
+  });
+});
 
 describe("stickToTwist", () => {
   it("is zero at rest and inside the deadzone", () => {

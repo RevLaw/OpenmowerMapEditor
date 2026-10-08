@@ -8,7 +8,10 @@
   import MeasurementsPanel from "./panels/MeasurementsPanel.svelte";
   import ValidationPanel from "./panels/ValidationPanel.svelte";
   import DockPanel from "./panels/DockPanel.svelte";
-  import RecordPanel from "./panels/RecordPanel.svelte";
+  import SensorsPanel from "./panels/SensorsPanel.svelte";
+  import TrailPanel from "./panels/TrailPanel.svelte";
+  import WifiPanel from "./panels/WifiPanel.svelte";
+  import DiagnosticsPanel from "./panels/DiagnosticsPanel.svelte";
   import TrailZonePanel from "./panels/TrailZonePanel.svelte";
   import DrivePanel from "./panels/DrivePanel.svelte";
   import ThemeToggle from "./ThemeToggle.svelte";
@@ -98,8 +101,11 @@
       <ProjectionPanel />
     {:else}
       <DrivePanel />
-      <RecordPanel />
+      <SensorsPanel />
+      <TrailPanel />
       <TrailZonePanel />
+      <WifiPanel />
+      <DiagnosticsPanel />
     {/if}
   </div>
 

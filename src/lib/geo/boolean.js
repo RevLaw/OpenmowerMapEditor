@@ -7,13 +7,13 @@ import { polygonArea, boundingBox } from "./geometry.js";
 
 const MIN_RESULT_AREA = 0.01; // m² — drop slivers left over by the clipper
 
-function toRing(points) {
+export function toRing(points) {
   const ring = points.map((p) => [p.x, p.y]);
   if (ring.length) ring.push([points[0].x, points[0].y]);
   return ring;
 }
 
-function fromRing(ring) {
+export function fromRing(ring) {
   const pts = ring.map(([x, y]) => ({ x, y }));
   const first = pts[0];
   const last = pts[pts.length - 1];

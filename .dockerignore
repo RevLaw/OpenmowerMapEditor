@@ -13,6 +13,7 @@ coverage
 # Local agent / IDE artifacts
 .cursor
 .claude
+.superpowers
 .vscode
 .idea
 terminals

@@ -26,8 +26,8 @@ function initialSpeed() {
 export const driveMode = writable("off");
 /** 0..1 fraction of the max speed. */
 export const driveSpeed = writable(initialSpeed());
-/** Current command being sent: { lx, az }. */
-export const driveCommand = writable({ lx: 0, az: 0 });
+/** Current command being sent: { lx, az, turbo }. */
+export const driveCommand = writable({ lx: 0, az: 0, turbo: false });
 
 driveSpeed.subscribe((v) => {
   try {
@@ -41,15 +41,34 @@ driveSpeed.subscribe((v) => {
 export const robotStateName = derived(robotPose, ($p) => String($p?.ros?.telemetry?.stateName || ""));
 export const robotInRecordingMode = derived(robotStateName, ($s) => /AREA_RECORDING/i.test($s));
 
-let stick = { x: 0, y: 0 };
+let stick = { x: 0, y: 0, turbo: false };
 let timer = null;
 let inFlight = false;
 let lastError = 0;
 
+// Other drive sources (go-to) register here; they're told to stop when the
+// joystick takes over or the page loses focus.
+const interruptHooks = new Set();
+
+/** Register `fn(reason)`, reason "joystick" | "focus". Returns an unregister function. */
+export function onDriveInterrupt(fn) {
+  interruptHooks.add(fn);
+  return () => interruptHooks.delete(fn);
+}
+
+function interrupt(reason) {
+  interruptHooks.forEach((fn) => fn(reason));
+}
+
+/** True while the stick is held and its send loop is running. */
+export function stickActive() {
+  return timer != null;
+}
+
 async function sendNow() {
   if (inFlight) return;
-  const cmd = stickToTwist(stick.x, stick.y, get(driveSpeed));
-  driveCommand.set(cmd);
+  const cmd = stickToTwist(stick.x, stick.y, get(driveSpeed), { turbo: stick.turbo });
+  driveCommand.set({ ...cmd, turbo: stick.turbo });
   inFlight = true;
   try {
     const res = await sendTeleop(cmd.lx, cmd.az);
@@ -67,27 +86,36 @@ async function sendNow() {
   }
 }
 
-/** Update the stick (x right, y up, -1..1). Starts / stops the send loop. */
-export function setStick(x, y) {
+/**
+ * Update the stick (x right, y up, -1..1; `turbo` while the thumb is in the
+ * sprint bubble). Starts / stops the send loop.
+ */
+export function setStick(x, y, turbo = false) {
   if (get(driveMode) !== "on") return;
-  stick = { x, y };
-  const moving = x !== 0 || y !== 0;
+  const turboChanged = turbo !== stick.turbo;
+  stick = { x, y, turbo };
+  const moving = turbo || x !== 0 || y !== 0;
+  // Any stick input takes over from go-to (the hook is a no-op when it isn't driving).
+  if (moving) interrupt("joystick");
   if (moving && !timer) {
     sendNow();
     timer = setInterval(sendNow, SEND_MS);
-  } else if (!moving) {
+  } else if (moving && turboChanged) {
+    // Sprint starts / ends right away, not on the next tick.
+    sendNow();
+  } else if (!moving && timer) {
     releaseStick();
   }
 }
 
 /** Stick released: stop the loop and send an explicit zero. */
 export function releaseStick() {
-  stick = { x: 0, y: 0 };
+  stick = { x: 0, y: 0, turbo: false };
   if (timer) {
     clearInterval(timer);
     timer = null;
   }
-  driveCommand.set({ lx: 0, az: 0 });
+  driveCommand.set({ lx: 0, az: 0, turbo: false });
   sendTeleop(0, 0).catch(() => {});
 }
 
@@ -98,6 +126,7 @@ export async function enterDriveMode() {
   const ok = await sendMowerControl("record_mode");
   driveMode.set(ok ? "on" : "off");
   if (ok) notify("Drive mode on — the robot follows the joystick (blade off).", "info");
+  return ok;
 }
 
 /** Stop driving and leave area-recording mode (nothing is saved on the robot). */
@@ -113,6 +142,7 @@ export async function exitDriveMode() {
 export function initTeleopSafety() {
   if (typeof window === "undefined") return () => {};
   const halt = () => {
+    interrupt("focus");
     if (timer || stick.x || stick.y) releaseStick();
   };
   const onVis = () => document.hidden && halt();

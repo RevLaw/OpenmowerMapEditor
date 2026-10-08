@@ -33,3 +33,14 @@ export function dismiss(id) {
 export function setStatus(text) {
   status.set(text);
 }
+
+/** Ask first, run `action`, then toast how it went (used by the "clear" buttons). */
+export async function confirmAndNotify(question, action, successMessage, failureMessage) {
+  if (!window.confirm(question)) return;
+  try {
+    await action();
+    notify(successMessage, "success");
+  } catch (_error) {
+    notify(failureMessage, "warn");
+  }
+}

@@ -1,5 +1,82 @@
 # Changelog
 
+## v2.9.0 — Drive screen, go-to & sensors
+
+Drive the mower from your phone — joystick with sprint, tap-to-go around
+obstacles, record zones by driving — and see what it reports about itself.
+The `map.json` format is unchanged.
+
+### Added
+- **Drive screen** — *Start drive mode* now turns the app into a drive view:
+  the map fills the window (the browser itself isn't forced into fullscreen) and
+  follows the robot, with the joystick, a speed slider, STOP, and recording
+  controls (Record → mow / obstacle / nav → Pause / Back / Discard / Finish)
+  on top.
+- **Sprint** — slide the joystick up past its ring into the bubble above it
+  (or `Shift` + `W`) to drive forward at OpenMower's turbo speed, 1 m/s, with
+  gentle steering; back in the ring the speed slider's limit (≤ 0.5 m/s)
+  applies again. The server's forward cap is now 1 m/s to allow it.
+- **Go to** — tap the map and the robot drives there by itself, on a route
+  that avoids obstacle zones and keeps 35 cm from zone edges (planned in the
+  editor; OpenMower's own planner can't be commanded from outside). Runs only
+  in drive mode with live RTK position and never from inside the docking
+  station (back out with the joystick first), at 0.3 m/s, and stops on STOP,
+  joystick input, focus loss, a stale or inaccurate position, drifting off the
+  route, or a server error.
+
+- **Sensors** — the Robot tab shows the mower's own sensor list
+  (xbot_monitoring: battery / charge voltage, ESC and motor temperatures, mow
+  motor current and rpm, GPS accuracy) plus emergency and rain, grouped; values
+  beyond the robot's critical limits turn red. They arrive with the live pose
+  (each at most once a second), no extra requests.
+- **Diagnostics** panel (Robot tab) with the raw pose, position source, ROS
+  container and WiFi at the mower.
+
+### Changed
+- The Robot tab's Drive panel opens the drive screen instead of showing an
+  inline joystick.
+- **Calmer map** — the robot marker is just the robot; a small pill appears
+  only when something needs attention (emergency stop, battery under 20 %,
+  rain, no RTK fix away from the dock). Hovering it shows state, battery and
+  RTK instead of technical details.
+- **Compact status panel** — top right is now the mower controls plus one
+  status line; the movement trail (with its calendar) and the WiFi survey moved
+  into the Robot tab.
+- **Shorter README** for newcomers (with a vibe-coding warning); the full
+  feature list, controls and environment variables moved to
+  `docs/reference.md`.
+- Docker images install their runtime dependencies on the build machine's own
+  platform and copy them into the ARM image, so building for the mower needs no
+  emulation (the build fails if a native addon ever appears among them).
+
+### Removed
+- The Robot tab's *Record boundary by driving* panel — recording lives in the
+  drive screen now.
+
+### Fixed
+- **Map dragging on phones** — an invisible strip beside the bottom-left map
+  controls (about 120 × 190 px, right in the thumb zone) swallowed touches, so
+  drags starting there did nothing. Status messages also let touches through to
+  the map now (except their close button).
+- **Robot hover** no longer flickers: it stays above the robot instead of
+  following the pointer, and only redraws when its content changes.
+- Live pose stream: frames from different ROS callbacks could interleave on
+  one line and be dropped; each line is now written whole.
+
+## v2.8.1 — Node 26 & dependency refresh
+
+Maintenance only: no user-visible changes.
+
+### Changed
+- **Node 26** — the Docker image (build and runtime stages) and CI now run on
+  Node 26. Local development still works on Node 22.12+ / 24
+  (`package.json` `engines` unchanged).
+- **Dependencies updated** — Vite 8.3.4, Svelte 5.57.2, js-yaml 5.4.3, plus
+  patch-level updates of transitive packages in the lockfile (`npm audit`
+  clean).
+- **Package metadata** — `package.json` now lists author, homepage,
+  repository and issue tracker.
+
 ## v2.8.0 — Editor redesign
 
 A reworked interface plus the editing, robot and safety features a map

@@ -52,6 +52,7 @@ import {
 import { hiddenZones, lockedZones, zoneKey, toggleZoneHidden, toggleZoneLocked } from "../lib/stores/zoneView.js";
 import { contextMenu, sidebarTab, editMode, followRobot } from "../lib/stores/ui.js";
 import { recording } from "../lib/stores/recorder.js";
+import { gotoState, pickTarget } from "../lib/stores/goto.js";
 import { trailZonePath, trailZoneOutline } from "../lib/stores/trailZone.js";
 import {
   removePoint,
@@ -81,8 +82,8 @@ import { wifiSignalColor } from "../lib/wifi/signal.js";
 import {
   resolveRobotVisualMode,
   robotVisualToMarkerStyle,
-  buildRobotHudLines,
-  buildRobotPoseTooltip,
+  robotAlert,
+  robotHoverHtml,
   escapeHtml,
 } from "../lib/robot/telemetry.js";
 import { poseDist2, stepPose } from "../lib/robot/interpolate.js";
@@ -165,6 +166,7 @@ export function createMapController(container) {
     split: null,
     recording: null,
     trailZone: null,
+    gotoRoute: null,
     simplifyPreview: null,
     multiHandle: null,
     snapGuide: null,
@@ -360,6 +362,7 @@ export function createMapController(container) {
         );
         poly.on("click", (e) => {
           L.DomEvent.stopPropagation(e);
+          if (tryPickGoto(e.latlng)) return;
           if (Date.now() < ignoreClicksUntil) return;
           setAreaIndex(i);
         });
@@ -1417,6 +1420,27 @@ export function createMapController(container) {
     layers.trailZone = group.addTo(map);
   }
 
+  // ---- go-to route preview ------------------------------------------------
+
+  function renderGoto(g) {
+    if (layers.gotoRoute) map.removeLayer(layers.gotoRoute);
+    layers.gotoRoute = null;
+    if (!g?.target || (g.phase !== "planned" && g.phase !== "driving")) return;
+    const group = L.layerGroup();
+    const lls = [g.start, ...g.waypoints].map(toLatLng);
+    L.polyline(lls, { color: "#38bdf8", weight: 3, dashArray: "6,6", opacity: 0.95, interactive: false }).addTo(group);
+    L.circleMarker(toLatLng(g.target), { radius: 7, color: "#fff", weight: 2, fillColor: "#38bdf8", fillOpacity: 1, interactive: false }).addTo(group);
+    layers.gotoRoute = group.addTo(map);
+  }
+
+  /** While go-to waits for a target, a tap anywhere on the map (zones included) picks it. */
+  function tryPickGoto(latlng) {
+    const phase = get(gotoState).phase;
+    if (phase !== "picking" && phase !== "planned") return false;
+    pickTarget(latLngToMeters(latlng, origin()));
+    return true;
+  }
+
   // ---- box select ----------------------------------------------------------
 
   // Shift+drag in the select tool draws a selection box. Listened on the
@@ -1493,6 +1517,7 @@ export function createMapController(container) {
       suppressNextClick = false;
       return;
     }
+    if (tryPickGoto(e.latlng)) return;
     const raw = latLngToMeters(e.latlng, origin());
     if (tool === "poly") {
       if (nearPolyStart(raw)) {
@@ -1617,7 +1642,7 @@ export function createMapController(container) {
   const ROBOT_SNAP_DIST2 = 9; // >3 m jump → teleport instead of gliding across
   const ROBOT_SETTLE_D2 = 1e-4; // ~1 cm: close enough to snap and stop the loop
   const ROBOT_SETTLE_YAW = 0.005; // ~0.3°
-  const robotAnim = { cur: null, target: null, raf: 0, iconKey: "", rotate: false, glyphEl: null };
+  const robotAnim = { cur: null, target: null, raf: 0, iconKey: "", tipHtml: "", rotate: false, glyphEl: null };
 
   function stopRobotAnim() {
     if (robotAnim.raf) {
@@ -1672,6 +1697,7 @@ export function createMapController(container) {
       robotAnim.cur = null;
       robotAnim.target = null;
       robotAnim.iconKey = "";
+      robotAnim.tipHtml = "";
       robotAnim.glyphEl = null;
       return;
     }
@@ -1687,46 +1713,49 @@ export function createMapController(container) {
       robotAnim.cur = { ...target };
     }
 
-    // Cheap change key from visual + HUD text; only rebuild the icon when it moves.
-    const lines = buildRobotHudLines(pose.ros?.telemetry || null);
-    const key = `${visual}|${lines.join("")}`;
+    // Cheap change key from visual + alert; only rebuild the icon when it changes.
+    const alert = robotAlert(pose);
+    const key = `${visual}|${alert ? `${alert.level}:${alert.text}` : ""}`;
+    const tipHtml = robotHoverHtml(pose);
     if (!layers.robot) {
       layers.robot = L.marker(metersToLatLng(robotAnim.cur, origin()), {
-        icon: makeRobotIcon(visual, lines),
+        icon: makeRobotIcon(visual, alert),
         zIndexOffset: 800,
       })
-        .bindTooltip(buildRobotPoseTooltip(pose), {
-          sticky: true,
+        // Anchored above the robot (not following the pointer, which flickers
+        // while the robot moves under it) and re-rendered only on change.
+        .bindTooltip(tipHtml, {
           direction: "top",
-          opacity: 0.95,
+          offset: [0, -22],
+          opacity: 1,
           className: "robot-tooltip",
         })
         .addTo(map);
       robotAnim.iconKey = key;
+      robotAnim.tipHtml = tipHtml;
       robotAnim.glyphEl = layers.robot._icon?.querySelector(".robot-glyph") || null;
     } else {
       if (key !== robotAnim.iconKey) {
-        layers.robot.setIcon(makeRobotIcon(visual, lines));
+        layers.robot.setIcon(makeRobotIcon(visual, alert));
         robotAnim.iconKey = key;
         robotAnim.glyphEl = layers.robot._icon?.querySelector(".robot-glyph") || null;
       }
-      // Only refresh the tooltip text while it's actually open.
-      if (layers.robot.isTooltipOpen()) {
-        layers.robot.setTooltipContent(buildRobotPoseTooltip(pose));
+      if (tipHtml !== robotAnim.tipHtml) {
+        robotAnim.tipHtml = tipHtml;
+        layers.robot.setTooltipContent(tipHtml);
       }
     }
     applyRobotTransform(); // avoid a one-frame flash after an icon rebuild
     if (!robotAnim.raf) robotAnim.raf = requestAnimationFrame(stepRobot);
   }
 
-  function makeRobotIcon(visual, lines) {
+  // The marker is just the robot; a small pill below it appears only when
+  // something needs attention (see robotAlert). Details live in the Robot tab.
+  function makeRobotIcon(visual, alert) {
     const { modifier, glyph } = robotVisualToMarkerStyle(visual);
     // Rotation is applied per-frame via applyRobotTransform(), not baked here.
     const inner = robotGlyphInner(visual, glyph);
-    const hud = lines.length
-      ? lines.map((l) => `<div class="robot-marker-hud__line">${escapeHtml(l)}</div>`).join("")
-      : "";
-    if (!hud) {
+    if (!alert) {
       return L.divIcon({
         className: "map-marker-leaflet",
         html: `<div class="map-marker--robot ${modifier}">${inner}</div>`,
@@ -1735,10 +1764,10 @@ export function createMapController(container) {
       });
     }
     const stackW = 200;
-    const stackH = 40 + 4 + 6 + lines.length * 15;
+    const stackH = 40 + 4 + 24;
     return L.divIcon({
       className: "map-marker-leaflet robot-marker-stack-wrap",
-      html: `<div class="robot-marker-stack" style="width:${stackW}px"><div class="robot-marker-stack__pin"><div class="map-marker--robot ${modifier}">${inner}</div></div><div class="robot-marker-stack__hud">${hud}</div></div>`,
+      html: `<div class="robot-marker-stack" style="width:${stackW}px"><div class="robot-marker-stack__pin"><div class="map-marker--robot ${modifier}">${inner}</div></div><div class="robot-marker-alert robot-marker-alert--${alert.level}">${escapeHtml(alert.text)}</div></div>`,
       iconSize: [stackW, stackH],
       iconAnchor: [stackW / 2, 20],
     });
@@ -1967,6 +1996,7 @@ export function createMapController(container) {
   unsubs.push(simplifyPreviewOn.subscribe(() => render()));
   unsubs.push(simplifyTolerance.subscribe(() => renderSimplifyPreview()));
   unsubs.push(recording.subscribe((r) => renderRecording(r)));
+  unsubs.push(gotoState.subscribe((g) => renderGoto(g)));
   unsubs.push(trailZonePath.subscribe((path) => renderTrailZone(path, get(trailZoneOutline))));
   unsubs.push(trailZoneOutline.subscribe((outline) => renderTrailZone(get(trailZonePath), outline)));
   // Midpoint handles depend on on-screen edge length and the view, so rebuild
