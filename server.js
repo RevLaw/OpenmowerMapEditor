@@ -1033,12 +1033,26 @@ let robotPosePromise = null;
  * overlay only moved every few seconds. Falls back to nothing on ROS2/other
  * setups (no xbot_msgs) — the SSE endpoint then serves the tf_echo probe.
  */
-const ROBOT_STREAM_PY = `import json, math
+const ROBOT_STREAM_PY = `import json, math, sys, threading
 import rospy
 from xbot_msgs.msg import AbsolutePose, RobotState
+try:
+    from xbot_msgs.msg import SensorInfo, SensorDataDouble, SensorDataString
+except ImportError:  # older xbot_msgs: no sensor list, keep streaming the pose
+    SensorInfo = None
 
 MIN_DT = 0.05
 _last = [0.0]
+_out = threading.Lock()
+
+
+def emit(obj):
+    # Subscriber callbacks run on separate threads: write each line whole under
+    # a lock, or two frames can interleave into one unparseable line.
+    line = json.dumps(obj) + "\\n"
+    with _out:
+        sys.stdout.write(line)
+        sys.stdout.flush()
 
 
 def _yaw(q):
@@ -1052,26 +1066,80 @@ def on_pose(m):
     _last[0] = now
     p = m.pose.pose.position
     yaw = _yaw(m.pose.pose.orientation)
-    print(json.dumps({"t": "P", "x": round(p.x, 3), "y": round(p.y, 3),
+    emit({"t": "P", "x": round(p.x, 3), "y": round(p.y, 3),
                       "yaw": round(yaw, 4), "acc": round(float(m.position_accuracy), 3),
-                      "flags": int(m.flags)}), flush=True)
+                      "flags": int(m.flags)})
 
 
 def on_state(m):
-    print(json.dumps({"t": "S",
+    emit({"t": "S",
                       "state": str(getattr(m, "current_state", "") or ""),
                       "sub": str(getattr(m, "current_sub_state", "") or ""),
                       "batt": float(getattr(m, "battery_percentage", 0.0) or 0.0),
                       "gps": float(getattr(m, "gps_percentage", 0.0) or 0.0),
                       "charging": bool(getattr(m, "is_charging", False)),
                       "emergency": bool(getattr(m, "emergency", False)),
-                      "rain": bool(getattr(m, "rain_detected", False))}), flush=True)
+                      "rain": bool(getattr(m, "rain_detected", False))})
+
+
+# xbot_monitoring's sensor list (/xbot_monitoring/sensors/<id>/info + /data):
+# battery / charge voltage, ESC + motor temperatures, mow motor current / rpm,
+# GPS accuracy ... Each sensor is sent at most once per SENSOR_DT seconds.
+SENSOR_DT = 1.0
+_sensors = {}
+_info_topics = set()
+
+
+def _limit(has, value):
+    return round(float(value), 3) if has else None
+
+
+def on_sensor_data(sid, d):
+    s = _sensors.get(sid)
+    if not s or "info" not in s:
+        return
+    now = rospy.get_time()
+    if now - s["last"] < SENSOR_DT:
+        return
+    s["last"] = now
+    v = d.data if isinstance(d.data, str) else round(float(d.data), 3)
+    out = {"t": "N", "id": sid, "v": v}
+    out.update(s["info"])
+    emit(out)
+
+
+def on_sensor_info(m):
+    sid = str(m.sensor_id)
+    first = sid not in _sensors
+    entry = _sensors.setdefault(sid, {"last": 0.0})
+    entry["info"] = {"name": str(m.sensor_name), "unit": str(m.unit), "desc": int(m.value_description),
+                     "lo": _limit(m.has_min_max, m.min_value), "hi": _limit(m.has_min_max, m.max_value),
+                     "clo": _limit(m.has_critical_low, m.lower_critical_value),
+                     "chi": _limit(m.has_critical_high, m.upper_critical_value)}
+    if first:
+        typ = SensorDataString if m.value_type == SensorInfo.TYPE_STRING else SensorDataDouble
+        rospy.Subscriber("/xbot_monitoring/sensors/%s/data" % sid, typ,
+                         lambda d, sid=sid: on_sensor_data(sid, d), queue_size=1)
+
+
+def scan_sensors(_evt=None):
+    try:
+        topics = rospy.get_published_topics("/xbot_monitoring/sensors")
+    except Exception:
+        return
+    for name, _typ in topics:
+        if name.endswith("/info") and name not in _info_topics:
+            _info_topics.add(name)
+            rospy.Subscriber(name, SensorInfo, on_sensor_info, queue_size=1)
 
 
 rospy.init_node("om_editor_pose_stream", anonymous=True, disable_signals=True)
 rospy.Subscriber("/xbot_positioning/xb_pose", AbsolutePose, on_pose, queue_size=1)
 rospy.Subscriber("/xbot_monitoring/robot_state", RobotState, on_state, queue_size=1)
-print(json.dumps({"t": "R"}), flush=True)
+if SensorInfo is not None:
+    scan_sensors()
+    rospy.Timer(rospy.Duration(10), scan_sensors)
+emit({"t": "R"})
 rospy.spin()
 `;
 
@@ -2517,6 +2585,9 @@ const robotStream = {
   pose: null, // { x, y, yaw, acc, flags }
   poseAt: 0,
   telemetry: null,
+  sensors: new Map(), // id → sensor (see sensorFrameToSensor)
+  sensorsRev: 0,
+  sensorsSentRev: 0,
   lineBuf: "",
   clients: new Set(), // Set<http.ServerResponse>
   lastPollAt: 0, // last /api/robot_pose hit (keeps stream warm for pollers)
@@ -2546,6 +2617,35 @@ function stateFrameToTelemetry(s) {
   return t;
 }
 
+const SENSOR_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
+const SENSOR_KINDS = { 1: "temperature", 2: "velocity", 3: "acceleration", 4: "voltage", 5: "current", 6: "percent", 7: "distance", 8: "rpm" };
+const SENSOR_TEXT_MAX = 60;
+
+/**
+ * Validate a streamed `N` frame (one xbot_monitoring sensor) into the shape the
+ * UI reads, or null. Limits are null when the robot doesn't define them.
+ */
+function sensorFrameToSensor(frame) {
+  if (!frame || typeof frame.id !== "string" || !SENSOR_ID_RE.test(frame.id)) return null;
+  const text = (v) => String(v ?? "").slice(0, SENSOR_TEXT_MAX);
+  const limit = (v) => (Number.isFinite(v) ? v : null);
+  let value;
+  if (typeof frame.v === "string") value = text(frame.v);
+  else if (Number.isFinite(frame.v)) value = frame.v;
+  else return null;
+  return {
+    id: frame.id,
+    name: text(frame.name) || frame.id,
+    unit: text(frame.unit),
+    kind: SENSOR_KINDS[frame.desc] || null,
+    value,
+    min: limit(frame.lo),
+    max: limit(frame.hi),
+    critLow: limit(frame.clo),
+    critHigh: limit(frame.chi),
+  };
+}
+
 /** RTK label from AbsolutePose flags (FIXED=2, FLOAT=4, DEAD_RECKONING=8). */
 function rtkLabel(flags) {
   if (!Number.isFinite(flags)) return null;
@@ -2555,8 +2655,12 @@ function rtkLabel(flags) {
   return null;
 }
 
-/** Merge the latest streamed pose + telemetry into the /api/robot_pose payload shape. */
-function liveSampleToPayload() {
+/**
+ * Merge the latest streamed pose + telemetry into the /api/robot_pose payload
+ * shape. Sensors ride along unless `withSensors` is false (the 20 Hz broadcast
+ * only includes them when they changed).
+ */
+function liveSampleToPayload({ withSensors = true } = {}) {
   if (!robotStream.pose) return null;
   const p = robotStream.pose;
   const telemetry = robotStream.telemetry;
@@ -2583,6 +2687,7 @@ function liveSampleToPayload() {
     ros,
     liveRobotFatal: false,
     source: "stream",
+    ...(withSensors && robotStream.sensors.size ? { sensors: [...robotStream.sensors.values()] } : {}),
   };
 }
 
@@ -2601,8 +2706,10 @@ function writeSse(res, payload) {
 /** Push the current best sample to every connected SSE client. */
 function broadcastLivePose() {
   if (robotStream.clients.size === 0) return;
-  const payload = liveSampleToPayload();
+  const withSensors = robotStream.sensorsRev !== robotStream.sensorsSentRev;
+  const payload = liveSampleToPayload({ withSensors });
   if (!payload) return;
+  if (withSensors) robotStream.sensorsSentRev = robotStream.sensorsRev;
   // Serialize once, then write the shared frame to every client.
   const frame = `data: ${JSON.stringify({ container: poseContainerName, ...payload })}\n\n`;
   for (const res of robotStream.clients) {
@@ -2640,6 +2747,14 @@ function handleStreamLine(line) {
   if (msg.t === "S") {
     robotStream.telemetry = stateFrameToTelemetry(msg);
     broadcastLivePose();
+    return;
+  }
+  if (msg.t === "N") {
+    const sensor = sensorFrameToSensor(msg);
+    if (sensor) {
+      robotStream.sensors.set(sensor.id, sensor);
+      robotStream.sensorsRev += 1;
+    }
   }
 }
 
@@ -3534,6 +3649,7 @@ if (require.main === module) {
 // server.test.js can unit-test them directly without booting a server.
 module.exports = {
   clampTeleopCommand,
+  sensorFrameToSensor,
   isDifferentLocalDay,
   classifyTrailPhase,
   normalizeWifiSample,
