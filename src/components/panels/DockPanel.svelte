@@ -2,8 +2,7 @@
   import Collapsible from "../Collapsible.svelte";
   import { editor } from "../../lib/stores/editor.js";
   import { activeTool, toggleTool } from "../../lib/stores/tools.js";
-  import { robotLive } from "../../lib/stores/robot.js";
-  import { setDockExact, setDockFromRobot, removeDockAction } from "../../lib/actions.js";
+  import { setDockExact, removeDockAction } from "../../lib/actions.js";
   import { mapApi } from "../../lib/stores/mapApi.js";
 
   // Derive plain numbers, not the station object: dragging the dock mutates
@@ -80,20 +79,9 @@
     {:else}
       <p class="mb-2 text-[11px] text-subtle">This map has no docking station yet.</p>
     {/if}
-    <div class="grid grid-cols-2 gap-2">
-      <button class="btn !px-2 text-xs" class:btn-accent={$activeTool === "dock"} onclick={() => toggleTool("dock")}>
-        <span class="material-symbols-outlined" style="font-size:17px">ads_click</span>
-        {has ? "Move by click" : "Place by click"}
-      </button>
-      <button
-        class="btn !px-2 text-xs"
-        disabled={!$robotLive}
-        title={$robotLive ? "Use the robot's live position and heading (while it sits in the dock)" : "Turn on Live robot first"}
-        onclick={setDockFromRobot}
-      >
-        <span class="material-symbols-outlined" style="font-size:17px">my_location</span>
-        From robot
-      </button>
-    </div>
+    <button class="btn w-full !px-2 text-xs" class:btn-accent={$activeTool === "dock"} onclick={() => toggleTool("dock")}>
+      <span class="material-symbols-outlined" style="font-size:17px">ads_click</span>
+      {has ? "Move by click" : "Place by click"}
+    </button>
   {/if}
 </Collapsible>

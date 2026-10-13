@@ -399,7 +399,10 @@ export function createMapController(container) {
       bubblingMouseEvents: false,
     }).addTo(map);
     if (ZONE_PICK_TOOLS.includes(tool)) {
-      layers.areaLine.on("click", (e) => L.DomEvent.stopPropagation(e));
+      layers.areaLine.on("click", (e) => {
+        L.DomEvent.stopPropagation(e);
+        tryPickGoto(e.latlng);
+      });
       layers.areaLine.on("contextmenu", (e) => openZoneMenu(e, s.areaIndex));
     }
 
@@ -980,7 +983,10 @@ export function createMapController(container) {
       }),
       title: "Dock / charging station (drag to move, right-click for options)",
     }).addTo(map);
-    dock.on("click", (e) => L.DomEvent.stopPropagation(e));
+    dock.on("click", (e) => {
+      L.DomEvent.stopPropagation(e);
+      tryPickGoto(e.latlng);
+    });
     dock.on("contextmenu", (e) => {
       const deg = Number.isFinite(station.heading) ? (station.heading * 180) / Math.PI : 0;
       openMenu(e, "Docking station", [
@@ -1428,8 +1434,10 @@ export function createMapController(container) {
     if (!g?.target || (g.phase !== "planned" && g.phase !== "driving")) return;
     const group = L.layerGroup();
     const lls = [g.start, ...g.waypoints].map(toLatLng);
-    L.polyline(lls, { color: "#38bdf8", weight: 3, dashArray: "6,6", opacity: 0.95, interactive: false }).addTo(group);
-    L.circleMarker(toLatLng(g.target), { radius: 7, color: "#fff", weight: 2, fillColor: "#38bdf8", fillOpacity: 1, interactive: false }).addTo(group);
+    // Amber for a straight line that ignores the zones (no map coverage there).
+    const color = g.straight ? "#f59e0b" : "#38bdf8";
+    L.polyline(lls, { color, weight: 3, dashArray: "6,6", opacity: 0.95, interactive: false }).addTo(group);
+    L.circleMarker(toLatLng(g.target), { radius: 7, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1, interactive: false }).addTo(group);
     layers.gotoRoute = group.addTo(map);
   }
 

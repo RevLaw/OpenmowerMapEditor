@@ -2,15 +2,17 @@ import { writable, get } from "svelte/store";
 import { sendTeleop } from "../api.js";
 import { editor } from "./editor.js";
 import { robotPose } from "./robot.js";
-import { driveMode, robotInRecordingMode, onDriveInterrupt, stickActive } from "./teleop.js";
+import { driveMode, driveSpeed, robotInRecordingMode, onDriveInterrupt, stickActive } from "./teleop.js";
 import { notify } from "./toast.js";
 import { getAreaType } from "../format/mapFormat.js";
 import { getEditablePoints } from "../format/outline.js";
-import { planRoute } from "../geo/route.js";
+import { planGoto } from "../geo/route.js";
 import { followStep, offRouteDistance, remainingDistance } from "../robot/follow.js";
+import { MAX_LINEAR } from "../robot/teleop.js";
 
 // Go to position: tap a target in the drive screen, the editor plans a route
-// around obstacle zones (geo/route.js) and steers the robot along it by
+// around obstacle zones (geo/route.js) — or, with no zones or a target outside
+// them, a straight line the user has to watch — and steers the robot along it by
 // sending joystick commands through the normal teleop channel — OpenMower
 // ignores outside navigation goals while idle or recording, so this only works
 // in drive mode. Any doubt (stale or inaccurate pose, off the route, joystick
@@ -21,18 +23,15 @@ const MAX_ACCURACY_M = 0.2;
 const OFF_ROUTE_M = 0.25; // below the route's 0.35 m clearance, so a drift stops before it reaches an edge
 const NO_RESPONSE_MS = 1000;
 const DISMISS_MS = { arrived: 4000, stopped: 8000 };
-export const GOTO_SPEED = 0.3; // m/s
 
 const ROUTE_REASONS = {
-  "no-drivable-area": "The map has no mow or nav zones.",
-  "start-outside": "The robot is outside the mow/nav zones (or inside an obstacle).",
-  "target-outside": "That spot is outside the mow/nav zones.",
   "target-blocked": "That spot is inside an obstacle or too close to an edge.",
   "no-route": "No route there — blocked by obstacles.",
+  "straight-blocked": "A straight line there would hit an obstacle.",
 };
 const INTERRUPTS = { joystick: "joystick used.", focus: "the app lost focus." };
 
-const IDLE = { phase: "idle", target: null, start: null, waypoints: [], index: 0, length: 0, remaining: 0, reason: "" };
+const IDLE = { phase: "idle", target: null, start: null, waypoints: [], index: 0, length: 0, remaining: 0, straight: false, reason: "" };
 
 /** phase: idle | picking | planned | driving | arrived | stopped */
 export const gotoState = writable(IDLE);
@@ -86,7 +85,7 @@ function setState(next) {
 
 function plan(target) {
   const start = { x: lastPose.x, y: lastPose.y };
-  const res = planRoute(currentZones(), start, target);
+  const res = planGoto(currentZones(), start, target);
   return res.ok ? { start, ...res } : { start, error: ROUTE_REASONS[res.reason] || "No route." };
 }
 
@@ -127,7 +126,7 @@ export function pickTarget(target) {
     setState({ ...IDLE, phase: "picking", reason: r.error });
     return;
   }
-  setState({ ...IDLE, phase: "planned", target, start: r.start, waypoints: r.waypoints, length: r.length, remaining: r.length });
+  setState({ ...IDLE, phase: "planned", target, start: r.start, waypoints: r.waypoints, length: r.length, remaining: r.length, straight: r.straight });
 }
 
 export function startGoto() {
@@ -149,7 +148,7 @@ export function startGoto() {
     setState({ ...IDLE, phase: "picking", reason: r.error });
     return;
   }
-  setState({ ...s, phase: "driving", start: r.start, waypoints: r.waypoints, length: r.length, remaining: r.length, index: 0, reason: "" });
+  setState({ ...s, phase: "driving", start: r.start, waypoints: r.waypoints, length: r.length, remaining: r.length, straight: r.straight, index: 0, reason: "" });
   timer = setInterval(tick, TICK_MS);
   tick();
 }
@@ -185,7 +184,9 @@ function tick() {
     stopGoto("the robot left the route.");
     return;
   }
-  const step = followStep(lastPose, s.waypoints, s.index, { maxSpeed: GOTO_SPEED, start: s.start });
+  // Same top speed as the joystick's slider, read every tick so a change applies on the way.
+  const maxSpeed = get(driveSpeed) * MAX_LINEAR;
+  const step = followStep(lastPose, s.waypoints, s.index, { maxSpeed, start: s.start });
   if (step.done) {
     halt();
     setState({ ...s, phase: "arrived", index: step.index, remaining: 0 });

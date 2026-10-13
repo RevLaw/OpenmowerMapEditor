@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planRoute } from "./route.js";
+import { planRoute, planGoto } from "./route.js";
 import { pointToSegmentDistance } from "./geometry.js";
 
 const rect = (x, y, w, h) => [
@@ -124,5 +124,44 @@ describe("planRoute", () => {
     const r = planRoute(zones, { x: 10, y: 10 }, { x: 40, y: 40 });
     expect(r.ok).toBe(true);
     expect(performance.now() - t0).toBeLessThan(1000);
+  });
+});
+
+describe("planGoto", () => {
+  const lawn = zone("mow", rect(0, 0, 20, 10));
+
+  it("uses the zone-aware route when there is one", () => {
+    const r = planGoto([lawn, zone("obstacle", rect(8, 0, 4, 7))], { x: 2, y: 3 }, { x: 18, y: 3 });
+    expect(r.ok).toBe(true);
+    expect(r.straight).toBe(false);
+    expect(r.waypoints.length).toBeGreaterThan(1);
+  });
+
+  it("goes in a straight line when the map has no zones", () => {
+    const r = planGoto([], { x: 0, y: 0 }, { x: 3, y: 4 });
+    expect(r).toEqual({ ok: true, straight: true, waypoints: [{ x: 3, y: 4 }], length: 5 });
+  });
+
+  it("goes in a straight line to a target outside the zones", () => {
+    const r = planGoto([lawn], { x: 2, y: 5 }, { x: 25, y: 5 });
+    expect(r).toMatchObject({ ok: true, straight: true, length: 23 });
+  });
+
+  it("goes in a straight line from a robot outside the zones", () => {
+    const r = planGoto([lawn], { x: 5, y: -2 }, { x: 5, y: 5 });
+    expect(r).toMatchObject({ ok: true, straight: true, length: 7 });
+  });
+
+  it("won't draw a straight line through a known obstacle", () => {
+    const shed = zone("obstacle", rect(22, 3, 2, 4));
+    expect(planGoto([lawn, shed], { x: 2, y: 5 }, { x: 30, y: 5 })).toEqual({ ok: false, reason: "straight-blocked" });
+    // ...nor brush past one closer than the clearance.
+    expect(planGoto([shed], { x: 20, y: 2.8 }, { x: 26, y: 2.8 })).toEqual({ ok: false, reason: "straight-blocked" });
+    expect(planGoto([shed], { x: 20, y: 2 }, { x: 26, y: 2 }).ok).toBe(true);
+  });
+
+  it("still refuses a target inside an obstacle within the zones", () => {
+    const r = planGoto([lawn, zone("obstacle", rect(8, 3, 4, 4))], { x: 2, y: 5 }, { x: 10, y: 5 });
+    expect(r).toEqual({ ok: false, reason: "target-blocked" });
   });
 });

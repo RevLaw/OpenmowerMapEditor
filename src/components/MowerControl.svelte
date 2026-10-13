@@ -3,7 +3,8 @@
 
   // Robot motion commands live in the status HUD, apart from the map-editing
   // tools, so "edit the map" and "move a real robot with blades" never share
-  // a button cluster. Start/Home/Reset need a 2-step confirm; Stop is one tap.
+  // a button cluster. Start/Home/Reset need a 2-step confirm; Stop is one tap
+  // and stays usable while another command (e.g. a long Home) is running.
   const BUTTONS = [
     { cmd: "start", icon: "play_arrow", label: "Start", color: "var(--ok)", confirm: true },
     { cmd: "home", icon: "home", label: "Home", color: "var(--accent)", confirm: true },
@@ -41,7 +42,7 @@
       class:armed={armed === b.cmd}
       class:stop={b.stop}
       style="--c:{b.color}"
-      disabled={$controlSending}
+      disabled={$controlSending && !b.stop}
       title={b.confirm ? `${b.title || b.label} (tap twice to confirm)` : b.title || b.label}
       aria-label={b.title || b.label}
       onclick={() => click(b)}

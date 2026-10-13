@@ -218,6 +218,33 @@ describe("drive screen mounts open", () => {
     cancelGoto();
     driveView.set(false);
   });
+
+  it("offers Set home in the Record picker", async () => {
+    const { driveView } = await import("./lib/stores/ui.js");
+    const DriveView = modules["./components/DriveView.svelte"].default;
+    driveView.set(true);
+    const view = mountInto(DriveView);
+    expect(view.target.textContent).not.toContain("Set home point");
+    [...view.target.querySelectorAll("button")].find((b) => b.textContent.includes("Record")).click();
+    flushSync();
+    expect(view.target.textContent).toContain("Set home point from robot position");
+    view.destroy();
+    driveView.set(false);
+  });
+
+  it("warns that a straight-line plan ignores the zones", async () => {
+    const { driveView } = await import("./lib/stores/ui.js");
+    const { gotoState, cancelGoto } = await import("./lib/stores/goto.js");
+    const DriveView = modules["./components/DriveView.svelte"].default;
+    driveView.set(true);
+    const target = { x: 5, y: 0 };
+    gotoState.set({ phase: "planned", target, start: { x: 0, y: 0 }, waypoints: [target], index: 0, length: 5, remaining: 5, straight: true, reason: "" });
+    const view = mountInto(DriveView);
+    expect(view.target.textContent).toContain("Straight line");
+    view.destroy();
+    cancelGoto();
+    driveView.set(false);
+  });
 });
 
 describe("Robot tab and status panel", () => {

@@ -12,7 +12,7 @@ vi.mock("../api.js", async (importOriginal) => ({
 const { sendTeleop } = await import("../api.js");
 const { loadMap } = await import("./editor.js");
 const { robotPose } = await import("./robot.js");
-const { driveMode, setStick, initTeleopSafety } = await import("./teleop.js");
+const { driveMode, driveSpeed, setStick, initTeleopSafety } = await import("./teleop.js");
 const { gotoState, armGoto, cancelGoto, pickTarget, startGoto, gotoBlocker } = await import("./goto.js");
 
 const rect = (x, y, w, h) => [
@@ -49,6 +49,7 @@ describe("go-to store", () => {
     vi.useFakeTimers();
     loadMap(JSON.stringify({ areas: [{ id: "a1", properties: { type: "mow" }, outline: rect(0, 0, 20, 10) }] }));
     driveMode.set("on");
+    driveSpeed.set(0.6); // 0.3 m/s
     pose(2, 5);
     sendTeleop.mockClear();
     sendTeleop.mockImplementation(() => Promise.resolve({ ok: true }));
@@ -88,22 +89,42 @@ describe("go-to store", () => {
     expect(get(gotoState).reason).toMatch(/docking station/i);
   });
 
-  it("does nothing without a map", async () => {
+  it("goes in a straight line without a map", async () => {
     loadMap(JSON.stringify({ areas: [] }));
     armGoto();
-    pickTarget({ x: 15, y: 5 });
+    pickTarget({ x: 6, y: 5 });
+    expect(get(gotoState)).toMatchObject({ phase: "planned", straight: true, waypoints: [{ x: 6, y: 5 }], length: 4 });
     startGoto();
-    await vi.advanceTimersByTimeAsync(300);
-    expect(get(gotoState).phase).toBe("picking");
-    expect(get(gotoState).reason).toMatch(/no mow or nav zones/i);
-    expect(sendTeleop).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(get(gotoState).phase).toBe("driving");
+    expect(sendTeleop).toHaveBeenCalled();
+  });
+
+  it("goes in a straight line to a target outside the zones", () => {
+    armGoto();
+    pickTarget({ x: 40, y: 5 });
+    expect(get(gotoState)).toMatchObject({ phase: "planned", straight: true });
+  });
+
+  it("follows the zones when it can", () => {
+    armGoto();
+    pickTarget({ x: 15, y: 5 });
+    expect(get(gotoState)).toMatchObject({ phase: "planned", straight: false });
   });
 
   it("shows a reason when the target can't be reached", () => {
+    loadMap(
+      JSON.stringify({
+        areas: [
+          { id: "a1", properties: { type: "mow" }, outline: rect(0, 0, 20, 10) },
+          { id: "o1", properties: { type: "obstacle" }, outline: rect(8, 3, 4, 4) },
+        ],
+      })
+    );
     armGoto();
-    pickTarget({ x: 40, y: 5 });
+    pickTarget({ x: 10, y: 5 });
     expect(get(gotoState).phase).toBe("picking");
-    expect(get(gotoState).reason).toMatch(/outside/i);
+    expect(get(gotoState).reason).toMatch(/obstacle/i);
   });
 
   it("drives to the target and sends zero on arrival", async () => {
@@ -116,6 +137,15 @@ describe("go-to store", () => {
     expect(lastCall()).toEqual([0, 0]);
     await vi.advanceTimersByTimeAsync(5000);
     expect(get(gotoState).phase).toBe("idle");
+  });
+
+  it("drives at the speed set on the joystick's slider, also when it changes on the way", async () => {
+    driveSpeed.set(0.4); // 0.4 × 0.5 m/s
+    await driveTo({ x: 18, y: 5 });
+    expect(lastCall()[0]).toBeCloseTo(0.2, 5);
+    driveSpeed.set(1);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(lastCall()[0]).toBeCloseTo(0.5, 5);
   });
 
   it("re-plans from the current position when Go is pressed", () => {
