@@ -166,3 +166,33 @@ export function planRoute(zones, start, target, { clearance = DEFAULT_CLEARANCE 
   const found = shortestPath(nodes, region, clearance);
   return found ? { ok: true, ...found } : { ok: false, reason: "no-route" };
 }
+
+// planRoute refusals that only mean "the zones don't cover this trip" — go-to
+// then drives a straight line (the user watches it; edges aren't checked).
+const STRAIGHT_FALLBACK = new Set(["no-drivable-area", "start-outside", "target-outside"]);
+
+/** True when the line start→target keeps `clearance` from every obstacle zone. */
+function straightLineFree(zones, start, target, clearance) {
+  return zones
+    .filter((z) => usable(z) && z.type === "obstacle")
+    .every(
+      (z) =>
+        !isPointInsidePolygon(start, z.points) &&
+        !isPointInsidePolygon(target, z.points) &&
+        z.points.every((p, i) => segmentDistance(start, target, p, z.points[(i + 1) % z.points.length]) >= clearance - EPS)
+    );
+}
+
+/**
+ * Go-to plan: the zone-aware route when the zones allow one, otherwise — no
+ * zones, or the robot or target outside them — a straight line, as long as it
+ * stays clear of known obstacles. Returns planRoute's shape plus `straight`.
+ */
+export function planGoto(zones, start, target, { clearance = DEFAULT_CLEARANCE } = {}) {
+  const list = zones || [];
+  const routed = planRoute(list, start, target, { clearance });
+  if (routed.ok) return { ...routed, straight: false };
+  if (!STRAIGHT_FALLBACK.has(routed.reason)) return routed;
+  if (!straightLineFree(list, start, target, clearance)) return { ok: false, reason: "straight-blocked" };
+  return { ok: true, straight: true, waypoints: [{ x: target.x, y: target.y }], length: distance(start, target) };
+}

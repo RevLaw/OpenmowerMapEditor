@@ -1,5 +1,30 @@
 # Changelog
 
+## v2.9.1 — Home from the lawn, go-to fixes
+
+Bugfix release for the drive screen: Home brings the robot back from anywhere,
+go-to reacts to every tap and also works without zones. The `map.json` format
+is unchanged.
+
+### Fixed
+- **Home** now brings the robot back when it's idle out on the lawn. OpenMower
+  ignores Home while idle, so the editor sends Start and then Home as soon as
+  OpenMower is mowing (the blade never gets to spin); if Home isn't taken, the
+  robot is emergency-stopped instead of left mowing. Docked: "Already docked."
+- **Go to** taps on the selected zone (on a one-zone map: the whole lawn) and
+  on the dock were silently ignored.
+- **Stop** stays usable while another mower command is still running.
+
+### Changed
+- **Go to** drives at the speed set on the joystick's slider (was a fixed
+  0.3 m/s); moving the slider on the way changes it right away.
+- **Go to without zones** — with no zones, or when the robot or the target is
+  outside them, go-to drives a straight line (drawn amber, with a warning)
+  instead of refusing. It still won't cross a known obstacle zone.
+- **Set home point** moved to the drive screen's Record menu — drive the robot
+  into the dock and tap it twice: the dock is set from the robot's RTK position
+  and heading (save the map to apply it). Replaces *From robot* in the Map tab.
+
 ## v2.9.0 — Drive screen, go-to & sensors
 
 Drive the mower from your phone — joystick with sprint, tap-to-go around

@@ -433,7 +433,11 @@ export function setDockFromRobot() {
   if (!pose) return;
   pushHistory();
   setDock({ x: pose.x, y: pose.y }, Number.isFinite(pose.yaw) ? pose.yaw : undefined);
-  notify("Docking station set from the robot's position and heading.", "success");
+  if (pose.ros?.telemetry?.isCharging === false) {
+    notify("Home point set — but the robot isn't charging, so it may not be in the dock. Save the map to apply it.", "warn", 6000);
+  } else {
+    notify("Home point set from the robot's position and heading. Save the map to apply it.", "success", 6000);
+  }
 }
 
 /** Insert the robot's current position into the selected zone, on its nearest edge. */

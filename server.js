@@ -1252,11 +1252,20 @@ const PLAN_PATH_CACHE_MS = 60000;
  * go through /mower_service/high_level_control; Stop is an immediate emergency
  * stop via /ll/_service/emergency. Command name comes in via $OM_CMD.
  *
+ * Home needs more than the bare command: OpenMower ignores it while IDLE (its
+ * IdleBehavior assumes "idle == docked") and only drives to the dock from
+ * MOWING. So when the robot sits idle off the dock, Home sends Start, waits for
+ * MOWING and sends Home right away — the blade only spins once the robot has
+ * reached the first mowing path, which it never gets to. If OpenMower doesn't
+ * take Home within a few tries, the robot is emergency-stopped rather than left
+ * mowing.
+ *
  * SAFETY: these commands move a robot with spinning blades. Disable entirely
  * with OPENMOWER_CONTROL_DISABLE=1.
  */
 const CONTROL_PY = `import json, os, time
 import rospy
+from mower_msgs.msg import HighLevelStatus
 from mower_msgs.srv import (
     HighLevelControlSrv, HighLevelControlSrvRequest,
     EmergencyStopSrv, EmergencyStopSrvRequest,
@@ -1267,31 +1276,114 @@ from mower_msgs.srv import (
 HIGH_LEVEL = {"start": 1, "home": 2, "record_mode": 3, "reset_emergency": 254}
 # Leave area recording WITHOUT saving anything into OpenMower's own map.
 EXIT_RECORDING_ACTION = "mower_logic:area_recording/exit_recording_mode"
+STATUS_TOPIC = "/mower_logic/current_state"
+START_TIMEOUT_S = 10.0
+HOME_ATTEMPTS = 4
+HOME_ATTEMPT_S = 5.0
+
+
+def high_level(command):
+    rospy.wait_for_service("/mower_service/high_level_control", timeout=8.0)
+    proxy = rospy.ServiceProxy("/mower_service/high_level_control", HighLevelControlSrv)
+    req = HighLevelControlSrvRequest()
+    req.command = command
+    proxy(req)
+
+
+def emergency_stop():
+    rospy.wait_for_service("/ll/_service/emergency", timeout=8.0)
+    proxy = rospy.ServiceProxy("/ll/_service/emergency", EmergencyStopSrv)
+    req = EmergencyStopSrvRequest()
+    req.emergency = 1
+    proxy(req)
+
+
+def exit_recording():
+    from std_msgs.msg import String
+    pub = rospy.Publisher("/xbot/action", String, queue_size=1, latch=True)
+    deadline = time.time() + 5.0
+    while pub.get_num_connections() == 0 and time.time() < deadline:
+        time.sleep(0.05)
+    pub.publish(String(data=EXIT_RECORDING_ACTION))
+    time.sleep(0.5)
+
+
+def read_status(timeout=3.0):
+    try:
+        return rospy.wait_for_message(STATUS_TOPIC, HighLevelStatus, timeout=timeout)
+    except rospy.ROSException:
+        return None
+
+
+def wait_status(pred, timeout):
+    """First status within timeout that matches pred (or shows an emergency), or None."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        s = read_status(min(2.0, max(0.1, deadline - time.time())))
+        if s is not None and (s.emergency or pred(s)):
+            return s
+    return None
+
+
+EMERGENCY = {"ok": False, "error": "Emergency stop is active — reset it first."}
+
+
+def go_home():
+    s = read_status()
+    if s is None:
+        return {"ok": False, "error": "no status from mower_logic"}
+    if s.emergency:
+        return EMERGENCY
+    if s.state_name == "AREA_RECORDING":
+        exit_recording()
+        s = wait_status(lambda st: st.state_name == "IDLE", 8.0)
+        if s is None:
+            return {"ok": False, "error": "Could not leave drive mode."}
+        if s.emergency:
+            return EMERGENCY
+    if s.state_name != "IDLE":
+        # Mowing (or already on the way): OpenMower handles Home itself.
+        high_level(HIGH_LEVEL["home"])
+        return {"ok": True, "command": "home"}
+    if s.is_charging:
+        return {"ok": True, "command": "home", "note": "Already docked."}
+
+    high_level(HIGH_LEVEL["start"])
+    s = wait_status(lambda st: st.state_name != "IDLE", START_TIMEOUT_S)
+    if s is None:
+        # The start request may still be pending in mower_logic — never leave it armed.
+        emergency_stop()
+        return {"ok": False, "error": "The mower didn't react to Start — emergency stop triggered to be safe."}
+    # Stop pressed meanwhile (the buttons stay live during the sequence): done.
+    if s.emergency:
+        return EMERGENCY
+    if s.state_name == "MOWING":
+        s = None
+        for _attempt in range(HOME_ATTEMPTS):
+            high_level(HIGH_LEVEL["home"])
+            s = wait_status(lambda st: st.state_name != "MOWING", HOME_ATTEMPT_S)
+            if s is not None:
+                break
+        if s is None:
+            emergency_stop()
+            return {"ok": False, "error": "The mower didn't take Home — emergency stop triggered to be safe."}
+        if s.emergency:
+            return EMERGENCY
+    return {"ok": True, "command": "home", "via": "start", "state": s.state_name}
 
 
 def main():
     cmd = os.environ.get("OM_CMD", "")
     rospy.init_node("om_editor_control", anonymous=True, disable_signals=True)
     if cmd == "stop":
-        rospy.wait_for_service("/ll/_service/emergency", timeout=8.0)
-        proxy = rospy.ServiceProxy("/ll/_service/emergency", EmergencyStopSrv)
-        req = EmergencyStopSrvRequest()
-        req.emergency = 1
-        proxy(req)
+        emergency_stop()
     elif cmd == "record_exit":
-        from std_msgs.msg import String
-        pub = rospy.Publisher("/xbot/action", String, queue_size=1, latch=True)
-        deadline = time.time() + 5.0
-        while pub.get_num_connections() == 0 and time.time() < deadline:
-            time.sleep(0.05)
-        pub.publish(String(data=EXIT_RECORDING_ACTION))
-        time.sleep(0.5)
+        exit_recording()
+    elif cmd == "home":
+        print(json.dumps(go_home()))
+        return
     elif cmd in HIGH_LEVEL:
-        rospy.wait_for_service("/mower_service/high_level_control", timeout=8.0)
-        proxy = rospy.ServiceProxy("/mower_service/high_level_control", HighLevelControlSrv)
-        req = HighLevelControlSrvRequest()
-        req.command = HIGH_LEVEL[cmd]
-        proxy(req)
+        high_level(HIGH_LEVEL[cmd])
     else:
         print(json.dumps({"ok": False, "error": "unknown command"}))
         return
@@ -1305,7 +1397,8 @@ except Exception as e:
 `;
 
 function buildControlBash() {
-  return buildRosPythonBash(CONTROL_PY, { tmpName: "om_control.py", exec: "timeout 15 python3" });
+  // Home can take a while: Start, wait for MOWING, then up to a few Home tries.
+  return buildRosPythonBash(CONTROL_PY, { tmpName: "om_control.py", exec: "timeout 50 python3" });
 }
 
 const controlDisabled = String(process.env.OPENMOWER_CONTROL_DISABLE || "").trim() === "1";
@@ -3648,6 +3741,7 @@ if (require.main === module) {
 // Pure/stateless helpers plus the two in-memory stores, exposed so
 // server.test.js can unit-test them directly without booting a server.
 module.exports = {
+  CONTROL_PY,
   clampTeleopCommand,
   sensorFrameToSensor,
   isDifferentLocalDay,

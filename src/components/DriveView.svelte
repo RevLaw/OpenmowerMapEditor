@@ -17,7 +17,7 @@
     trimRecording,
     stopRecording,
   } from "../lib/stores/recorder.js";
-  import { finishRecording } from "../lib/actions.js";
+  import { finishRecording, setDockFromRobot } from "../lib/actions.js";
   import { sendMowerControl } from "../lib/stores/control.js";
   import { robotPose } from "../lib/stores/robot.js";
   import { editor } from "../lib/stores/editor.js";
@@ -37,6 +37,8 @@
 
   let typePicker = $state(false);
   let confirmExit = $state(false);
+  let dockArmed = $state(false);
+  let dockTimer = null;
 
   let ready = $derived($driveMode === "on" && $robotInRecordingMode);
   let busy = $derived($driveMode === "entering" || $driveMode === "exiting");
@@ -64,6 +66,19 @@
     stopGoto("STOP pressed.");
     releaseStick();
     sendMowerControl("stop");
+  }
+
+  // Overwrites the dock, so it takes a second tap (like Start/Home).
+  function setHomeHere() {
+    clearTimeout(dockTimer);
+    if (!dockArmed) {
+      dockArmed = true;
+      dockTimer = setTimeout(() => (dockArmed = false), 3000);
+      return;
+    }
+    dockArmed = false;
+    typePicker = false;
+    setDockFromRobot();
   }
 
   function toggleGoto() {
@@ -134,7 +149,7 @@
             class:active={$recording.active || typePicker}
             aria-pressed={$recording.active || typePicker}
             disabled={!$editor.mapData}
-            title="Record a zone by driving around it"
+            title="Record a zone by driving around it, or set the home point"
             onclick={() => !$recording.active && (typePicker = !typePicker)}
           >
             <span class="material-symbols-outlined" style="font-size:18px">radio_button_checked</span>
@@ -191,10 +206,13 @@
               <button class="btn dv-sheet-btn" onclick={cancelGoto}>Cancel</button>
             </div>
             {#if blocker || g.reason}<p class="mt-1" style="color:var(--warn)">{blocker || g.reason}</p>{/if}
+            {#if g.straight}<p class="mt-1" style="color:var(--warn)">Straight line — zone edges aren't checked. Keep watching the robot.</p>{/if}
             {#if $isDirty}<p class="mt-1 text-subtle">Route uses unsaved map edits.</p>{/if}
           {:else if g.phase === "driving"}
             <div class="flex items-center gap-2">
-              <span class="flex-1">Driving to the target · {formatLength(g.remaining)} left</span>
+              <span class="flex-1">
+                Driving {g.straight ? "straight " : ""}to the target · {formatLength(g.remaining)} left
+              </span>
               <button class="dv-btn dv-stop" onclick={() => stopGoto("Stop pressed.")}>Stop</button>
             </div>
           {:else if g.phase === "arrived"}
@@ -232,12 +250,24 @@
           </div>
         </div>
       {:else if typePicker}
-        <div class="glass pointer-events-auto flex items-center gap-1.5 rounded-2xl p-2 text-xs">
-          <span class="px-1 text-subtle">Record a</span>
-          {#each ZONE_TYPES as type (type)}
-            <button class="btn dv-sheet-btn flex-1" onclick={() => record(type)}>{type}</button>
-          {/each}
-          <span class="px-1 text-subtle">zone</span>
+        <div class="glass pointer-events-auto flex flex-col gap-1.5 rounded-2xl p-2 text-xs">
+          <div class="flex items-center gap-1.5">
+            <span class="px-1 text-subtle">Record a</span>
+            {#each ZONE_TYPES as type (type)}
+              <button class="btn dv-sheet-btn flex-1" onclick={() => record(type)}>{type}</button>
+            {/each}
+            <span class="px-1 text-subtle">zone</span>
+          </div>
+          <button
+            class="btn dv-sheet-btn w-full"
+            class:btn-accent={dockArmed}
+            disabled={!ready || !accOk}
+            title="Drive the robot into the dock first, then tap twice"
+            onclick={setHomeHere}
+          >
+            <span class="material-symbols-outlined" style="font-size:18px">{dockArmed ? "check" : "ev_station"}</span>
+            {dockArmed ? "Tap again to set home here" : "Set home point from robot position"}
+          </button>
         </div>
       {/if}
     </div>
@@ -253,7 +283,7 @@
           min="0.1"
           max="1"
           step="0.05"
-          aria-label="Maximum joystick speed"
+          aria-label="Maximum speed (joystick and go-to)"
           bind:value={$driveSpeed}
         />
         <span class="font-mono text-accent">{($driveSpeed * MAX_LINEAR).toFixed(2)}</span>
@@ -303,6 +333,7 @@
   .dv-chip {
     display: inline-flex;
     width: auto;
+    white-space: nowrap;
     gap: 6px;
     padding: 0 12px;
     font-size: 12px;
